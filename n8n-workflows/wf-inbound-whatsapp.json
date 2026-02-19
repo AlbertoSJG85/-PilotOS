@@ -1,0 +1,144 @@
+{
+    "name": "WF-Inbound-WhatsApp",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "whatsapp-webhook",
+                "responseMode": "lastNode",
+                "options": {}
+            },
+            "id": "webhook-1",
+            "name": "Webhook WhatsApp",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                250,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Extraer datos del mensaje de WhatsApp\nconst entry = $input.first().json.body.entry;\n\nif (!entry || !entry[0]?.changes?.[0]?.value?.messages) {\n  return [{ json: { skip: true } }];\n}\n\nconst value = entry[0].changes[0].value;\nconst mensaje = value.messages[0];\n\nreturn [{\n  json: {\n    telefono: mensaje.from,\n    mensaje: mensaje.text?.body || '',\n    tipo: mensaje.type,\n    timestamp: mensaje.timestamp,\n    messageId: mensaje.id\n  }\n}];"
+            },
+            "id": "code-1",
+            "name": "Extraer Mensaje",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 1,
+            "position": [
+                450,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "={{$env.BACKEND_URL}}/api/webhook/gloria",
+                "method": "POST",
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "telefono",
+                            "value": "={{ $json.telefono }}"
+                        },
+                        {
+                            "name": "mensaje",
+                            "value": "={{ $json.mensaje }}"
+                        }
+                    ]
+                }
+            },
+            "id": "http-1",
+            "name": "Enviar a GlorIA",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                650,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "https://graph.facebook.com/v18.0/{{$env.WHATSAPP_PHONE_ID}}/messages",
+                "method": "POST",
+                "authentication": "predefinedCredentialType",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "Bearer {{$env.WHATSAPP_TOKEN}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "messaging_product",
+                            "value": "whatsapp"
+                        },
+                        {
+                            "name": "to",
+                            "value": "={{ $json.telefono }}"
+                        },
+                        {
+                            "name": "type",
+                            "value": "text"
+                        },
+                        {
+                            "name": "text",
+                            "value": "={{ JSON.stringify({ body: $json.respuesta }) }}"
+                        }
+                    ]
+                }
+            },
+            "id": "http-2",
+            "name": "Enviar Respuesta WhatsApp",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                850,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook WhatsApp": {
+            "main": [
+                [
+                    {
+                        "node": "Extraer Mensaje",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extraer Mensaje": {
+            "main": [
+                [
+                    {
+                        "node": "Enviar a GlorIA",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Enviar a GlorIA": {
+            "main": [
+                [
+                    {
+                        "node": "Enviar Respuesta WhatsApp",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1"
+    }
+}

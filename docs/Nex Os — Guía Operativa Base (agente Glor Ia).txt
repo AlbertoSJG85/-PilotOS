@@ -1,0 +1,129 @@
+
+
+NexOS — Guía Operativa Base (Agente GlorIA)
+Documento de referencia operativa para diseñar, construir y escalar NexOS sin perder
+coherencia. Esta guía sirve como mapa fijo mientras el chat se usa para ejecutar.
+1. Identidad del sistema
+Agente único visible:GlorIA
+Rol:    Agente principal NexOS (orquesta y deriva)
+Los subagentes no son visibles para el usuario
+El usuario siempre habla con GlorIA
+Firma estándar:
+— GlorIA · NexOS
+2. Canales y teléfonos
+Se puede operar todo NexOS con 1 solo número (fase inicial)
+WhatsApp es canal, nunca lógica
+El sistema queda preparado desde el inicio para multi-número
+Añadir números = cambio de canal, no rediseño
+El cliente solo percibe cambio de número emisor
+3. Arquitectura de agentes
+GlorIA = Orquestador
+Productos (RentOS, IngresOS, etc.) = lógica interna / planetas
+GlorIA decide:
+active_planet
+phase
+intent
+GlorIA guarda estado, no conversaciones
+4. Memoria (SSOT)
+Memoria centralizada (Airtable / DB)
+Campos mínimos:
+active_planet
+phase (lead | onboarding | ops | support)
+status
+flags
+El sistema recuerda decisiones tomadas
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+1
+
+5. Event-driven + Idempotencia
+Todo funciona por eventos reales
+Cada evento tiene event_id
+Eventos repetidos no duplican acciones
+Cada acción tiene idempotency_key
+6. Router (decisión)
+Mantiene active_planet salvo cambio explícito
+Usa phase para no mezclar comercial y operativa
+Solo pregunta si hay duda real
+Umbral de confianza configurable
+7. Workflows NexOS (n8n)
+Total: 4 workflows para TODO el ecosistema
+WF-IA-Inbound
+WhatsApp → GlorIA → respuesta
+WF-IA-Scheduler
+Eventos de tiempo (recordatorios, seguimientos)
+WF-IA-Docs/Media
+Audios, OCR, PDFs, Drive
+WF-IA-Observability
+Errores, reintentos, escalado
+No existen workflows por producto.
+8. Escalabilidad
+Nuevo producto → nueva lógica, mismos workflows
+Nuevo número → nuevo canal, misma arquitectura
+Siempre aplicar fix mínimo
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+1. 
+2. 
+3. 
+4. 
+5. 
+6. 
+7. 
+8. 
+• 
+• 
+• 
+2
+
+9. Resultado buscado
+Un cerebro
+Muchos planetas
+Una sola voz
+Cero fricción
+10. Uso de esta guía
+Esta guía no se modifica sin control de cambios
+El chat se usa para:
+diseñar
+construir
+ajustar
+La guía es el punto de referencia estable
+Estado del documento: BASE CANÓNICA
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+3

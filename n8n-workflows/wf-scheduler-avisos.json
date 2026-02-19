@@ -1,0 +1,171 @@
+{
+    "name": "WF-Scheduler-Avisos",
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "hours",
+                            "hoursInterval": 1
+                        }
+                    ]
+                }
+            },
+            "id": "schedule-1",
+            "name": "Cada Hora",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1,
+            "position": [
+                250,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "={{$env.BACKEND_URL}}/api/mantenimientos/pendientes",
+                "method": "GET"
+            },
+            "id": "http-1",
+            "name": "Obtener Mantenimientos Pendientes",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                450,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "url": "={{$env.BACKEND_URL}}/api/anomalias/pendientes-aviso",
+                "method": "GET"
+            },
+            "id": "http-2",
+            "name": "Obtener Anomalías Pendientes",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                450,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Generar mensajes de aviso para mantenimientos\nconst mantenimientos = $input.first().json.data || [];\n\nconst avisos = mantenimientos\n  .filter(m => m.estado === 'VENCIDO' || m.diasRestantes <= 7)\n  .map(m => ({\n    telefono: m.conductor.telefono,\n    mensaje: `⚠️ Recordatorio de mantenimiento:\\n\\n🔧 ${m.catalogo.nombre}\\n📅 ${m.estado === 'VENCIDO' ? 'VENCIDO' : `Faltan ${m.diasRestantes} días`}\\n\\nNo olvides hacerlo y enviarme la factura.\\n\\n— GlorIA · NexOS`\n  }));\n\nreturn avisos.map(a => ({ json: a }));"
+            },
+            "id": "code-1",
+            "name": "Generar Avisos Mantenimiento",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 1,
+            "position": [
+                650,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Generar mensajes de aviso para anomalías (cada 3)\nconst anomalias = $input.first().json.data || [];\n\nconst avisos = anomalias\n  .filter(a => a.total % 3 === 0 && !a.notificada)\n  .map(a => ({\n    telefonoPatron: a.conductor.patron.telefono,\n    mensaje: `⚠️ Aviso de anomalías:\\n\\n${a.conductor.nombre} ha acumulado ${a.total} anomalías.\\n\\nÚltima: ${a.descripcion}\\n\\n— GlorIA · NexOS`,\n    anomaliaId: a.id\n  }));\n\nreturn avisos.map(a => ({ json: a }));"
+            },
+            "id": "code-2",
+            "name": "Generar Avisos Anomalías",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 1,
+            "position": [
+                650,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "url": "https://graph.facebook.com/v18.0/{{$env.WHATSAPP_PHONE_ID}}/messages",
+                "method": "POST",
+                "authentication": "predefinedCredentialType",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "Bearer {{$env.WHATSAPP_TOKEN}}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $json.telefono }}\",\n  \"type\": \"text\",\n  \"text\": { \"body\": \"{{ $json.mensaje }}\" }\n}"
+            },
+            "id": "http-3",
+            "name": "Enviar WhatsApp",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                850,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Cada Hora": {
+            "main": [
+                [
+                    {
+                        "node": "Obtener Mantenimientos Pendientes",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Obtener Anomalías Pendientes",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Obtener Mantenimientos Pendientes": {
+            "main": [
+                [
+                    {
+                        "node": "Generar Avisos Mantenimiento",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Obtener Anomalías Pendientes": {
+            "main": [
+                [
+                    {
+                        "node": "Generar Avisos Anomalías",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Generar Avisos Mantenimiento": {
+            "main": [
+                [
+                    {
+                        "node": "Enviar WhatsApp",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Generar Avisos Anomalías": {
+            "main": [
+                [
+                    {
+                        "node": "Enviar WhatsApp",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1"
+    }
+}

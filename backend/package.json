@@ -1,0 +1,50 @@
+{
+  "name": "pilotos-backend",
+  "version": "1.0.0",
+  "description": "PilotOS - Sistema de gestión integral de taxi",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "nodemon src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "ts-node prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "prod:setup": "prisma db push && ts-node prisma/seed.ts"
+  },
+  "keywords": [
+    "taxi",
+    "gestion",
+    "pilotos"
+  ],
+  "author": "NexOS",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "@types/multer": "^2.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
+    "sharp": "^0.34.5",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20.14.0",
+    "@types/node-cron": "^3.0.11",
+    "nodemon": "^3.1.11",
+    "prisma": "^5.22.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  }
+}

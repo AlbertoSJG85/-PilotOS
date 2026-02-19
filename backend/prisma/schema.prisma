@@ -1,0 +1,327 @@
+// Prisma Schema for PilotOS
+// Sistema de gestión integral de taxi
+// Configurado para SQLite (desarrollo local)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USUARIOS Y ROLES
+// ============================================
+
+model Usuario {
+  id          String   @id @default(uuid())
+  telefono    String   @unique
+  email       String?  @unique
+  nombre      String
+  rol         String   // PATRON, CONDUCTOR
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relaciones
+  patronId    String?
+  patron      Usuario?  @relation("PatronConductores", fields: [patronId], references: [id])
+  conductores Usuario[] @relation("PatronConductores")
+
+  // Vehículos que puede usar (conductor)
+  vehiculosAsignados VehiculoConductor[]
+  
+  // Partes diarios creados
+  partesDiarios ParteDiario[]
+  
+  // Incidencias autorizadas (como patrón)
+  incidenciasAutorizadas Incidencia[]
+  
+  // Anomalías del conductor
+  anomalias Anomalia[]
+
+  @@map("usuarios")
+}
+
+// ============================================
+// VEHÍCULOS
+// ============================================
+
+model Vehiculo {
+  id                 String   @id @default(uuid())
+  matricula          String   @unique
+  marca              String
+  modelo             String
+  fechaMatriculacion DateTime
+  tipoCombustible    String   // GASOLINA, DIESEL, HIBRIDO, ELECTRICO, GLP
+  tipoTransmision    String   // MANUAL, AUTOMATICA
+  kmActuales         Int
+  activo             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // Relaciones
+  conductores      VehiculoConductor[]
+  partesDiarios    ParteDiario[]
+  mantenimientos   MantenimientoVehiculo[]
+  gastosFijos      GastoFijo[]
+
+  @@map("vehiculos")
+}
+
+model VehiculoConductor {
+  id          String   @id @default(uuid())
+  vehiculoId  String
+  conductorId String
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  vehiculo  Vehiculo @relation(fields: [vehiculoId], references: [id])
+  conductor Usuario  @relation(fields: [conductorId], references: [id])
+
+  @@unique([vehiculoId, conductorId])
+  @@map("vehiculo_conductores")
+}
+
+// ============================================
+// PARTE DIARIO (NÚCLEO DEL SISTEMA)
+// ============================================
+
+model ParteDiario {
+  id               String   @id @default(uuid())
+  fechaTrabajada   DateTime
+  fechaCreacion    DateTime @default(now())
+  vehiculoId       String
+  conductorId      String
+  kmInicio         Int
+  kmFin            Int
+  ingresoTotal     Float
+  ingresoDatafono  Float
+  combustible      Float?
+  estado           String   @default("ENVIADO") // BORRADOR, ENVIADO, FOTO_SUSTITUIDA
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relaciones
+  vehiculo    Vehiculo      @relation(fields: [vehiculoId], references: [id])
+  conductor   Usuario       @relation(fields: [conductorId], references: [id])
+  fotos       FotoTicket[]
+  incidencias Incidencia[]
+
+  // Constraint: solo 1 parte por vehículo y día
+  @@unique([vehiculoId, fechaTrabajada])
+  @@map("partes_diarios")
+}
+
+// ============================================
+// FOTOS Y BLOQUEOS
+// ============================================
+
+model FotoTicket {
+  id              String   @id @default(uuid())
+  parteDiarioId   String
+  tipo            String   // TAXIMETRO, GASOIL
+  url             String
+  estado          String   @default("VALIDA") // VALIDA, ILEGIBLE, REEMPLAZADA, BLOQUEADA
+  ocrTexto        String?
+  ocrConfianza    Float?
+  intentosReemplazo Int    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relaciones
+  parteDiario ParteDiario    @relation(fields: [parteDiarioId], references: [id])
+  historial   FotoHistorial[]
+
+  @@map("fotos_tickets")
+}
+
+model FotoHistorial {
+  id          String   @id @default(uuid())
+  fotoId      String
+  urlAnterior String
+  motivo      String
+  createdAt   DateTime @default(now())
+
+  foto FotoTicket @relation(fields: [fotoId], references: [id])
+
+  @@map("fotos_historial")
+}
+
+model TareaPendiente {
+  id          String    @id @default(uuid())
+  tipo        String
+  entidadId   String
+  conductorId String
+  resuelta    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  resolvedAt  DateTime?
+
+  @@map("tareas_pendientes")
+}
+
+// ============================================
+// ANOMALÍAS
+// ============================================
+
+model Anomalia {
+  id           String   @id @default(uuid())
+  conductorId  String
+  tipo         String   // NORMAL, CRITICA
+  descripcion  String
+  notificada   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  conductor Usuario @relation(fields: [conductorId], references: [id])
+
+  @@map("anomalias")
+}
+
+// ============================================
+// INCIDENCIAS
+// ============================================
+
+model Incidencia {
+  id              String    @id @default(uuid())
+  parteDiarioId   String
+  queOcurrio      String
+  decisionTomada  String
+  justificacion   String
+  autorizadorId   String
+  estado          String    @default("CREADA") // CREADA, CERRADA
+  createdAt       DateTime  @default(now())
+  closedAt        DateTime?
+
+  parteDiario ParteDiario @relation(fields: [parteDiarioId], references: [id])
+  autorizador Usuario     @relation(fields: [autorizadorId], references: [id])
+
+  @@map("incidencias")
+}
+
+// ============================================
+// GASTOS Y FACTURAS
+// ============================================
+
+model Gasto {
+  id          String   @id @default(uuid())
+  vehiculoId  String?
+  tipo        String   // COMBUSTIBLE, MANTENIMIENTO, SEGURO, etc.
+  descripcion String
+  importe     Float
+  fecha       DateTime
+  urlFactura  String?
+  estado      String   @default("REGISTRADO")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("gastos")
+}
+
+model GastoFijo {
+  id           String   @id @default(uuid())
+  vehiculoId   String?
+  tipo         String
+  descripcion  String
+  importe      Float
+  periodicidad String
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  vehiculo Vehiculo? @relation(fields: [vehiculoId], references: [id])
+
+  @@map("gastos_fijos")
+}
+
+// ============================================
+// MANTENIMIENTOS
+// ============================================
+
+model MantenimientoCatalogo {
+  id              String   @id @default(uuid())
+  nombre          String   @unique
+  tipo            String   // POR_KILOMETRAJE, SEGUN_USO, POR_FECHA
+  frecuenciaKm    Int?
+  frecuenciaMeses Int?
+  activo          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  vehiculos MantenimientoVehiculo[]
+
+  @@map("mantenimiento_catalogo")
+}
+
+model MantenimientoVehiculo {
+  id                   String    @id @default(uuid())
+  vehiculoId           String
+  catalogoId           String
+  ultimaEjecucionKm    Int?
+  ultimaEjecucionFecha DateTime?
+  proximoKm            Int?
+  proximaFecha         DateTime?
+  estado               String    @default("PENDIENTE")
+  frecuenciaAprendida  Int?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  vehiculo Vehiculo              @relation(fields: [vehiculoId], references: [id])
+  catalogo MantenimientoCatalogo @relation(fields: [catalogoId], references: [id])
+
+  @@unique([vehiculoId, catalogoId])
+  @@map("mantenimientos_vehiculos")
+}
+
+// ============================================
+// ONBOARDING
+// ============================================
+
+model Onboarding {
+  id                 String    @id @default(uuid())
+  telefono           String    @unique
+  completado         Boolean   @default(false)
+  
+  nombrePatron       String?
+  emailPatron        String?
+  
+  tieneAsalariado    Boolean   @default(false)
+  nombreAsalariado   String?
+  telefonoAsalariado String?
+  
+  matricula          String?
+  marcaModelo        String?
+  fechaMatriculacion DateTime?
+  tipoCombustible    String?
+  tipoTransmision    String?
+  kmActuales         Int?
+  
+  seguroVigencia     DateTime?
+  
+  importeAutonomo    Float?
+  
+  tieneEmisora       Boolean   @default(false)
+  importeEmisora     Float?
+  
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@map("onboarding")
+}
+
+// ============================================
+// CONVERSACIÓN (CONTEXTO DE GLORIA)
+// ============================================
+
+model ConversacionContexto {
+  id              String    @id @default(uuid())
+  telefono        String    @unique
+  productoActivo  String?   // PILOTOS, RENTOS
+  fase            String?   // LEAD, ONBOARDING, OPS, SUPPORT
+  ultimoContacto  DateTime?
+  datosTemporales String?   // JSON string for conversation flow state
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("conversacion_contexto")
+}
