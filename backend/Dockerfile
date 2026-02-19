@@ -1,12 +1,12 @@
 # Build stage
-FROM node:20-slim
+FROM node:20-slim AS builder
 
 WORKDIR /app
 
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm install
+RUN npm ci
 
 COPY . .
 
@@ -14,7 +14,7 @@ RUN npm run build
 RUN npx prisma generate
 
 # Production stage
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
