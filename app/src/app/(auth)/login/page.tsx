@@ -35,7 +35,7 @@ export default function LoginPage() {
           conductor_id: res.context?.conductor_id ?? null,
           es_patron: res.context?.es_patron ?? false,
         });
-        router.replace(res.context?.es_patron ? '/admin' : '/conductor');
+        router.replace('/conductor');
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al iniciar sesion';

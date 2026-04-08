@@ -22,25 +22,20 @@ export function middleware(request: NextRequest) {
   // ── Rutas públicas: login y onboarding ────────────────────────────────────
   if (pathname === '/login' || pathname === '/onboarding' || pathname === '/') {
     if (token) {
-      // Usuario ya autenticado → llevarlo a su área
+      // Usuario ya autenticado → /conductor es el home para todos (patrón y asalariado)
       const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = esPatron ? '/admin' : '/conductor';
+      redirectUrl.pathname = '/conductor';
       return NextResponse.redirect(redirectUrl);
     }
     return NextResponse.next();
   }
 
   // ── Área del conductor (/conductor/*) ─────────────────────────────────────
+  // Accesible para TODOS los usuarios autenticados: asalariados Y patrones.
   if (pathname.startsWith('/conductor')) {
     if (!token) {
       const url = request.nextUrl.clone();
       url.pathname = '/login';
-      return NextResponse.redirect(url);
-    }
-    // El patrón no debe entrar en el área del conductor
-    if (esPatron) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/admin';
       return NextResponse.redirect(url);
     }
     return NextResponse.next();

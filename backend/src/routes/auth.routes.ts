@@ -24,11 +24,14 @@ router.post('/login', async (req: Request, res: Response) => {
         if (telefono.startsWith('+')) phoneVariants.push(telefono.substring(1));
         else phoneVariants.push('+' + telefono);
 
-        const usuario = await prisma.minosUser.findFirst({
+        // Buscar todos los usuarios con ese teléfono (puede haber varios en el ecosistema NexOS,
+        // ej. un usuario de RentOS y uno de PilotOS con el mismo número).
+        // Preferir el usuario que tenga contexto PilotOS (conductor o patrón).
+        const candidatos = await prisma.minosUser.findMany({
             where: { telefono: { in: phoneVariants } },
         });
 
-        if (!usuario) {
+        if (candidatos.length === 0) {
             res.status(404).json({
                 status: 'FAIL',
                 error: 'user_not_found',
@@ -36,6 +39,16 @@ router.post('/login', async (req: Request, res: Response) => {
                 action: 'REDIRECT_ONBOARDING',
             });
             return;
+        }
+
+        // Seleccionar el usuario con contexto PilotOS; si ninguno lo tiene, usar el primero.
+        let usuario = candidatos[0];
+        if (candidatos.length > 1) {
+            for (const candidato of candidatos) {
+                const tienePilotos = await prisma.conductor.findFirst({ where: { usuario_id: candidato.id, activo: true } })
+                    ?? await prisma.cliente.findFirst({ where: { patron_id: candidato.id, activo: true } });
+                if (tienePilotos) { usuario = candidato; break; }
+            }
         }
 
         const token = generarToken({ id: usuario.id, telefono: usuario.telefono || '', role: usuario.role || 'user' });

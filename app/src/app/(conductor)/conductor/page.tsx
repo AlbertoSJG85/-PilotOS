@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { getPartes, getMe } from '@/lib/api';
 import { getSessionUser, clearSession } from '@/lib/auth';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { FileText, LogOut, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { FileText, LogOut, CheckCircle, Clock, AlertCircle, LayoutDashboard } from 'lucide-react';
 import type { ParteDiario, Vehiculo } from '@/types';
 
 /** Fecha local en formato YYYY-MM-DD, sin conversión UTC */
@@ -177,6 +177,22 @@ export default function ConductorHome() {
             </div>
           )}
         </div>
+
+        {/* Acceso al panel de gestión — solo visible para patrones */}
+        {!loading && user?.es_patron && (
+          <Link
+            href="/admin"
+            className="flex items-center gap-3 rounded-2xl border border-zinc-800/60 bg-zinc-900/40 px-5 py-4 active:bg-zinc-800 transition-colors"
+          >
+            <LayoutDashboard className="h-5 w-5 text-amber-500 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-zinc-200">Panel de gestión</p>
+              <p className="text-xs text-zinc-500">Flota, conductores, informes</p>
+            </div>
+            <span className="ml-auto text-zinc-600 text-sm">→</span>
+          </Link>
+        )}
+
       </main>
 
       {/* Safe area bottom para iPhone */}
