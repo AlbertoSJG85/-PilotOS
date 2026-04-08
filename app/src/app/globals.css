@@ -1,41 +1,54 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0f172a;
-  --foreground: #f1f5f9;
+  --background: #09090b;
+  --foreground: #fafafa;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-inter), system-ui, sans-serif;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* PWA styles */
-html, body {
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
+/* Smooth inputs on mobile */
+input, select, textarea {
+  font-size: 16px;
 }
 
-/* Remove blue highlight on tap */
+/* Safe area insets para iPhone con notch (PWA standalone) */
+.pt-safe-top {
+  /* min 24px de padding, más el notch si existe */
+  padding-top: max(env(safe-area-inset-top, 0px), 1.5rem);
+}
+.pb-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.h-safe-bottom {
+  height: max(env(safe-area-inset-bottom, 0px), 1rem);
+}
+
+/* Evitar el efecto de tap en toda la app PWA */
 * {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Smooth inputs */
-input, select, textarea {
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
+/* Scrollbar minimal */
+::-webkit-scrollbar {
+  width: 6px;
 }
-
-/* Number input without spinners */
-input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
+::-webkit-scrollbar-track {
+  background: transparent;
 }
-
-input[type="number"] {
-  -moz-appearance: textfield;
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 3px;
 }

@@ -1,7 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { upload } from '../services/storage.service';
+import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
+router.use(requireAuth);
 
 // POST /api/upload - Subir foto
 // Espera un campo "foto" en el multipart/form-data

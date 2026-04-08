@@ -1,168 +1,100 @@
-import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Router, Response } from 'express';
+import { prisma } from '../lib/prisma';
+import { requireAuth, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
-const prisma = new PrismaClient();
 
-// GET /api/mantenimientos/catalogo - Listar catálogo
-router.get('/catalogo', async (req: Request, res: Response) => {
+router.get('/catalogo', async (_req: any, res: Response) => {
     try {
-        const catalogo = await prisma.mantenimientoCatalogo.findMany({
-            where: { activo: true },
-            orderBy: { tipo: 'asc' }
-        });
-        res.json({ data: catalogo });
-    } catch (error) {
-        console.error('Error listando catálogo:', error);
-        res.status(500).json({ error: 'Error interno' });
-    }
+        const catalogo = await prisma.mantenimientoCatalogo.findMany({ where: { activo: true }, orderBy: { tipo: 'asc' } });
+        res.json({ status: 'OK', data: catalogo });
+    } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
 });
 
-// GET /api/mantenimientos/vehiculo/:vehiculoId - Mantenimientos de un vehículo
-router.get('/vehiculo/:vehiculoId', async (req: Request, res: Response) => {
+router.get('/vehiculo/:vehiculoId', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const { soloActivos } = req.query;
-
-        const mantenimientos = await prisma.mantenimientoVehiculo.findMany({
-            where: {
-                vehiculoId: req.params.vehiculoId,
-                // R-MT-005: Si nunca se usa, no aparece (solo mostrar usados o pendientes)
-                ...(soloActivos === 'true' ? {
-                    OR: [
-                        { ultimaEjecucionKm: { not: null } },
-                        { estado: { in: ['PENDIENTE', 'VENCIDO'] } }
-                    ]
-                } : {})
-            },
-            include: { catalogo: true },
-            orderBy: { estado: 'asc' }
-        });
-
-        res.json({ data: mantenimientos });
-
-    } catch (error) {
-        console.error('Error listando mantenimientos:', error);
-        res.status(500).json({ error: 'Error interno' });
-    }
+        const where: any = { vehiculo_id: req.params.vehiculoId };
+        if (soloActivos === 'true') {
+            where.OR = [{ ultima_ejecucion_km: { not: null } }, { estado: { in: ['PENDIENTE', 'VENCIDO'] } }];
+        }
+        const mantenimientos = await prisma.mantenimientoVehiculo.findMany({ where, include: { catalogo: true }, orderBy: { estado: 'asc' } });
+        res.json({ status: 'OK', data: mantenimientos });
+    } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
 });
 
-// GET /api/mantenimientos/vehiculo/:vehiculoId/proximos - Próximos mantenimientos
-router.get('/vehiculo/:vehiculoId/proximos', async (req: Request, res: Response) => {
+router.get('/vehiculo/:vehiculoId/proximos', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const vehiculo = await prisma.vehiculo.findUnique({
-            where: { id: req.params.vehiculoId }
-        });
+        const vehiculo = await prisma.vehiculo.findUnique({ where: { id: req.params.vehiculoId } });
+        if (!vehiculo) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
 
-        if (!vehiculo) {
-            return res.status(404).json({ error: 'Vehículo no encontrado' });
-        }
-
-        // Mantenimientos próximos (umbral: 1000 km o 30 días)
-        const kmUmbral = vehiculo.kmActuales + 1000;
+        const kmUmbral = vehiculo.km_actuales + 1000;
         const fechaUmbral = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-
         const proximos = await prisma.mantenimientoVehiculo.findMany({
-            where: {
-                vehiculoId: req.params.vehiculoId,
-                OR: [
-                    { proximoKm: { lte: kmUmbral } },
-                    { proximaFecha: { lte: fechaUmbral } }
-                ],
-                estado: { not: 'RESUELTO' }
-            },
-            include: { catalogo: true }
+            where: { vehiculo_id: req.params.vehiculoId, OR: [{ proximo_km: { lte: kmUmbral } }, { proxima_fecha: { lte: fechaUmbral } }], estado: { not: 'RESUELTO' } },
+            include: { catalogo: true },
         });
-
-        res.json({
-            data: proximos,
-            kmActuales: vehiculo.kmActuales,
-            fechaActual: new Date()
-        });
-
-    } catch (error) {
-        console.error('Error obteniendo próximos mantenimientos:', error);
-        res.status(500).json({ error: 'Error interno' });
-    }
+        res.json({ status: 'OK', data: proximos, km_actuales: vehiculo.km_actuales });
+    } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
 });
 
-// POST /api/mantenimientos/:id/resolver - Resolver mantenimiento (por factura)
-router.post('/:id/resolver', async (req: Request, res: Response) => {
+// POST /api/mantenimientos/:id/resolver — Resolver mantenimiento (DT-012: transaccion)
+router.post('/:id/resolver', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const { kmEjecucion, fechaFactura, urlFactura } = req.body;
+        const { km_ejecucion, fecha_factura, url_factura, importe } = req.body;
+        const mant = await prisma.mantenimientoVehiculo.findUnique({ where: { id: req.params.id }, include: { catalogo: true, vehiculo: true } });
+        if (!mant) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
 
-        const mantenimiento = await prisma.mantenimientoVehiculo.findUnique({
-            where: { id: req.params.id },
-            include: { catalogo: true, vehiculo: true }
-        });
+        const km = km_ejecucion || mant.vehiculo.km_actuales;
+        const frecKm = mant.frecuencia_aprendida || mant.catalogo.frecuencia_km;
+        const frecMeses = mant.catalogo.frecuencia_meses;
 
-        if (!mantenimiento) {
-            return res.status(404).json({ error: 'Mantenimiento no encontrado' });
-        }
-
-        // Calcular próximo km/fecha basado en frecuencia
-        const km = kmEjecucion || mantenimiento.vehiculo.kmActuales;
-        const frecuenciaKm = mantenimiento.frecuenciaAprendida || mantenimiento.catalogo.frecuenciaKm;
-        const frecuenciaMeses = mantenimiento.catalogo.frecuenciaMeses;
-
-        const actualizado = await prisma.mantenimientoVehiculo.update({
-            where: { id: req.params.id },
-            data: {
-                ultimaEjecucionKm: km,
-                ultimaEjecucionFecha: fechaFactura ? new Date(fechaFactura) : new Date(),
-                proximoKm: frecuenciaKm ? km + frecuenciaKm : null,
-                proximaFecha: frecuenciaMeses
-                    ? new Date(Date.now() + frecuenciaMeses * 30 * 24 * 60 * 60 * 1000)
-                    : null,
-                estado: 'RESUELTO'
-            },
-            include: { catalogo: true }
-        });
-
-        // Registrar gasto si hay factura
-        if (urlFactura) {
-            await prisma.gasto.create({
+        const result = await prisma.$transaction(async (tx) => {
+            const updated = await tx.mantenimientoVehiculo.update({
+                where: { id: req.params.id },
                 data: {
-                    vehiculoId: mantenimiento.vehiculoId,
-                    tipo: 'MANTENIMIENTO',
-                    descripcion: mantenimiento.catalogo.nombre,
-                    importe: req.body.importe || 0,
-                    fecha: new Date(),
-                    urlFactura
-                }
+                    ultima_ejecucion_km: km,
+                    ultima_ejecucion_fecha: fecha_factura ? new Date(fecha_factura) : new Date(),
+                    proximo_km: frecKm ? km + frecKm : null,
+                    proxima_fecha: frecMeses ? new Date(Date.now() + frecMeses * 30 * 24 * 60 * 60 * 1000) : null,
+                    estado: 'RESUELTO',
+                },
             });
-        }
 
-        res.json({
-            data: actualizado,
-            evento: 'E-MT-003' // Mantenimiento resuelto
+            // Seguimiento
+            await tx.seguimientoMantenimiento.create({
+                data: { mantenimiento_vehiculo_id: mant.id, accion: 'RESUELTO', detalle: mant.catalogo.nombre, km_en_momento: km },
+            });
+
+            // Gasto si hay factura
+            if (url_factura && req.usuario?.cliente_id) {
+                await tx.gasto.create({
+                    data: { cliente_id: req.usuario.cliente_id, vehiculo_id: mant.vehiculo_id, tipo: 'MANTENIMIENTO', descripcion: mant.catalogo.nombre, importe: importe || 0, fecha: new Date(), url_factura },
+                });
+            }
+
+            return updated;
         });
 
-    } catch (error) {
-        console.error('Error resolviendo mantenimiento:', error);
-        res.status(500).json({ error: 'Error interno' });
+        res.json({ status: 'OK', data: result, evento: 'E-MT-003' });
+    } catch (err: any) {
+        console.error('[MANTENIMIENTO] Error resolviendo:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 
-// POST /api/mantenimientos/:id/aprender - Actualizar frecuencia aprendida
-// R-MT-003: El sistema puede aprender la frecuencia real por vehículo
-router.post('/:id/aprender', async (req: Request, res: Response) => {
+router.post('/:id/aprender', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const { frecuenciaAprendida } = req.body;
-
-        const actualizado = await prisma.mantenimientoVehiculo.update({
-            where: { id: req.params.id },
-            data: { frecuenciaAprendida }
+        const { frecuencia_aprendida } = req.body;
+        const updated = await prisma.$transaction(async (tx) => {
+            const m = await tx.mantenimientoVehiculo.update({ where: { id: req.params.id }, data: { frecuencia_aprendida } });
+            await tx.seguimientoMantenimiento.create({
+                data: { mantenimiento_vehiculo_id: req.params.id, accion: 'FRECUENCIA_ACTUALIZADA', detalle: `Nueva frecuencia: ${frecuencia_aprendida} km` },
+            });
+            return m;
         });
-
-        res.json({
-            data: actualizado,
-            evento: 'E-MT-004' // Frecuencia actualizada
-        });
-
-    } catch (error) {
-        console.error('Error actualizando frecuencia:', error);
-        res.status(500).json({ error: 'Error interno' });
-    }
+        res.json({ status: 'OK', data: updated, evento: 'E-MT-004' });
+    } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
 });
 
 export default router;

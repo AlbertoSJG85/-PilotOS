@@ -1,249 +1,199 @@
-import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+/**
+ * Parte Diario routes — Motor del sistema PilotOS.
+ * R-PD-001: Solo entra por app web. R-PD-017: Inmutable tras envio.
+ * DT-007: Calculo separado en calculos_partes.
+ * DT-011: Singleton. DT-012: Transacciones.
+ */
+import { Router, Response } from 'express';
+import { prisma } from '../lib/prisma';
+import { requireAuth, AuthRequest } from '../middleware/auth.middleware';
+import { crearOActualizarCalculo } from '../services/calculo.service';
 
 const router = Router();
-const prisma = new PrismaClient();
-
-// ============================================
-// VALIDACIONES SEGÚN REGLAS CANÓNICAS
-// ============================================
 
 interface ParteDiarioInput {
-    fechaTrabajada: string;
-    vehiculoId: string;
-    conductorId: string;
-    kmInicio: number;
-    kmFin: number;
-    ingresoTotal: number;
-    ingresoDatafono: number;
+    fecha_trabajada: string;
+    vehiculo_id: string;
+    conductor_id: string;
+    km_inicio: number;
+    km_fin: number;
+    ingreso_bruto: number;
+    ingreso_datafono: number;
     combustible?: number;
-    fotoTaximetroUrl?: string; // Nuevo campo
-    fotoGasoilUrl?: string;     // Nuevo campo
+    varios?: number;
+    concepto_varios?: string;
 }
 
-function validarParteDiario(data: ParteDiarioInput): { valid: boolean; errors: string[] } {
+function validarParte(data: ParteDiarioInput): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
-
-    // R-PD-012: Campos obligatorios
-    if (!data.fechaTrabajada) errors.push('fecha_trabajada es obligatorio');
-    if (!data.vehiculoId) errors.push('vehículo es obligatorio');
-    if (!data.conductorId) errors.push('conductor es obligatorio');
-    if (data.kmInicio === undefined) errors.push('km_inicio es obligatorio');
-    if (data.kmFin === undefined) errors.push('km_fin es obligatorio');
-    if (data.ingresoTotal === undefined) errors.push('ingreso_total es obligatorio');
-    if (data.ingresoDatafono === undefined) errors.push('ingreso_datáfono es obligatorio');
-
-    // R-PD-013: km_fin > km_inicio
-    if (data.kmFin <= data.kmInicio) {
-        errors.push('km_fin debe ser estrictamente mayor que km_inicio');
+    if (!data.fecha_trabajada) errors.push('fecha_trabajada es obligatorio');
+    if (!data.vehiculo_id) errors.push('vehiculo_id es obligatorio');
+    if (!data.conductor_id) errors.push('conductor_id es obligatorio');
+    if (data.km_inicio === undefined) errors.push('km_inicio es obligatorio');
+    if (data.km_fin === undefined) errors.push('km_fin es obligatorio');
+    if (data.ingreso_bruto === undefined) errors.push('ingreso_bruto es obligatorio');
+    if (data.ingreso_datafono === undefined) errors.push('ingreso_datafono es obligatorio');
+    if (data.km_fin !== undefined && data.km_inicio !== undefined && data.km_fin <= data.km_inicio) {
+        errors.push('km_fin debe ser mayor que km_inicio (R-PD-013)');
     }
-
-    // R-PD-014: ingreso_total >= ingreso_datáfono
-    if (data.ingresoTotal < data.ingresoDatafono) {
-        errors.push('ingreso_total debe ser mayor o igual que ingreso_datáfono');
+    if (data.ingreso_bruto !== undefined && data.ingreso_datafono !== undefined && data.ingreso_bruto < data.ingreso_datafono) {
+        errors.push('ingreso_bruto debe ser >= ingreso_datafono (R-PD-014)');
     }
-
+    if (data.varios && data.varios > 0 && !data.concepto_varios) {
+        errors.push('concepto_varios es obligatorio si varios > 0');
+    }
     return { valid: errors.length === 0, errors };
 }
 
-// ============================================
-// ENDPOINTS
-// ============================================
-
-// POST /api/partes - Crear parte diario
-router.post('/', async (req: Request, res: Response) => {
+// POST /api/partes — Crear parte diario
+router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const data: ParteDiarioInput = req.body;
-
-        // Validar campos
-        const validation = validarParteDiario(data);
-
-        const {
-            fechaTrabajada,
-            vehiculoId,
-            conductorId,
-            kmInicio,
-            kmFin,
-            ingresoTotal,
-            ingresoDatafono,
-            combustible,
-            fotoTaximetroUrl,
-            fotoGasoilUrl
-        } = data;
+        const validation = validarParte(data);
         if (!validation.valid) {
-            return res.status(400).json({
-                error: 'Validación fallida',
-                detalles: validation.errors,
-                regla: 'R-PD-012'
-            });
+            res.status(400).json({ status: 'FAIL', error: 'validation_failed', detalles: validation.errors });
+            return;
         }
 
-        // R-PD-016: Solo un parte por vehículo y día
-        const fechaDate = new Date(data.fechaTrabajada);
+        const fechaDate = new Date(data.fecha_trabajada);
+
+        // R-PD-016: Solo un parte por vehiculo y dia
         const existente = await prisma.parteDiario.findUnique({
-            where: {
-                vehiculoId_fechaTrabajada: {
-                    vehiculoId: data.vehiculoId,
-                    fechaTrabajada: fechaDate
-                }
-            }
+            where: { vehiculo_id_fecha_trabajada: { vehiculo_id: data.vehiculo_id, fecha_trabajada: fechaDate } },
         });
-
         if (existente) {
-            return res.status(409).json({
-                error: 'Ya existe un parte para este vehículo y día',
-                regla: 'R-PD-016'
-            });
+            res.status(409).json({ status: 'FAIL', error: 'duplicate_parte', regla: 'R-PD-016' });
+            return;
         }
 
-        // Verificar si hay tareas pendientes (bloqueo por foto)
-        const tareasPendientes = await prisma.tareaPendiente.findFirst({
-            where: {
-                conductorId: data.conductorId,
-                resuelta: false
-            }
+        // R-FT-006: Verificar tareas pendientes (desactivado en fase de test — C-019)
+        // El bloqueo se reactivará cuando haya UI de resolución de tareas pendientes.
+        // Ver: docs/learning/correcciones.md C-019
+
+        // Crear parte + actualizar km + calcular reparto en transaccion (DT-012)
+        const result = await prisma.$transaction(async (tx) => {
+            const parte = await tx.parteDiario.create({
+                data: {
+                    fecha_trabajada: fechaDate,
+                    vehiculo_id: data.vehiculo_id,
+                    conductor_id: data.conductor_id,
+                    km_inicio: data.km_inicio,
+                    km_fin: data.km_fin,
+                    ingreso_bruto: data.ingreso_bruto,
+                    ingreso_datafono: data.ingreso_datafono,
+                    combustible: data.combustible ?? null,
+                    varios: data.varios ?? null,
+                    concepto_varios: data.concepto_varios ?? null,
+                    estado: 'ENVIADO',
+                },
+            });
+
+            // Actualizar km del vehiculo (km oficial = ultimo parte validado)
+            await tx.vehiculo.update({
+                where: { id: data.vehiculo_id },
+                data: { km_actuales: data.km_fin },
+            });
+
+            // Registrar evento en ledger
+            await tx.ledgerEvento.create({
+                data: {
+                    tipo_evento: 'PARTE_ENVIADO',
+                    source: 'PILOTOS',
+                    dedupe_key: `parte-${parte.id}`,
+                    datos: { parte_id: parte.id, conductor_id: data.conductor_id, vehiculo_id: data.vehiculo_id },
+                },
+            });
+
+            return parte;
         });
 
-        if (tareasPendientes) {
-            return res.status(403).json({
-                error: 'No puedes subir un nuevo parte. Tienes tareas pendientes.',
-                regla: 'R-FT-006',
-                tareaId: tareasPendientes.id
-            });
+        // Calcular reparto (fuera de la transaccion principal para no bloquear si falla config)
+        try {
+            if (req.usuario?.cliente_id) {
+                await crearOActualizarCalculo({ parte_diario_id: result.id, cliente_id: req.usuario.cliente_id });
+            }
+        } catch (calcErr: any) {
+            console.warn('[PARTES] Calculo de reparto fallido (no bloquea parte):', calcErr.message);
         }
 
-        // Crear el parte
-        const parte = await prisma.parteDiario.create({
-            data: {
-                fechaTrabajada: new Date(fechaTrabajada),
-                vehiculoId,
-                conductorId,
-                kmInicio,
-                kmFin,
-                ingresoTotal,
-                ingresoDatafono,
-                combustible,
-                estado: 'ENVIADO',
-                fotos: {
-                    create: [
-                        {
-                            tipo: 'TAXIMETRO',
-                            url: fotoTaximetroUrl || '',
-                            estado: 'VALIDA' // Se asume válida por defecto, OCR validará después
-                        },
-                        ...(fotoGasoilUrl && combustible ? [{
-                            tipo: 'GASOIL',
-                            url: fotoGasoilUrl,
-                            estado: 'VALIDA'
-                        }] : [])
-                    ]
-                }
-            },
-            include: {
-                vehiculo: true,
-                conductor: true
-            }
-        });
-
-        // Actualizar km del vehículo
-        await prisma.vehiculo.update({
-            where: { id: data.vehiculoId },
-            data: { kmActuales: data.kmFin }
-        });
-
-        res.status(201).json({
-            success: true,
-            data: parte,
-            evento: 'E-PD-001' // Parte enviado
-        });
-
-    } catch (error) {
-        console.error('Error creando parte:', error);
-        res.status(500).json({ error: 'Error interno' });
+        res.status(201).json({ status: 'OK', data: result, evento: 'E-PD-001' });
+    } catch (err: any) {
+        console.error('[PARTES] Error creando parte:', err.message);
+        const isDev = process.env.NODE_ENV === 'development';
+        res.status(500).json({ status: 'FAIL', error: 'server_error', message: isDev ? err.message : 'Error interno' });
     }
 });
 
-// GET /api/partes - Listar partes
-router.get('/', async (req: Request, res: Response) => {
+// GET /api/partes — Listar partes (filtrado por tenant)
+router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const { vehiculoId, conductorId, desde, hasta } = req.query;
-
+        const { vehiculo_id, conductor_id, desde, hasta } = req.query;
         const where: any = {};
-        if (vehiculoId) where.vehiculoId = vehiculoId;
-        if (conductorId) where.conductorId = conductorId;
+
+        // Tenant filter: solo partes de vehiculos del cliente
+        if (req.usuario?.cliente_id) {
+            where.vehiculo = { cliente_id: req.usuario.cliente_id };
+        }
+        if (vehiculo_id) where.vehiculo_id = vehiculo_id;
+        if (conductor_id) where.conductor_id = conductor_id;
         if (desde || hasta) {
-            where.fechaTrabajada = {};
-            if (desde) where.fechaTrabajada.gte = new Date(desde as string);
-            if (hasta) where.fechaTrabajada.lte = new Date(hasta as string);
+            where.fecha_trabajada = {};
+            if (desde) where.fecha_trabajada.gte = new Date(desde as string);
+            if (hasta) where.fecha_trabajada.lte = new Date(hasta as string);
         }
 
         const partes = await prisma.parteDiario.findMany({
             where,
             include: {
-                vehiculo: true,
-                conductor: true,
-                fotos: true
+                vehiculo: { select: { id: true, matricula: true, marca: true, modelo: true } },
+                conductor: { include: { usuario: { select: { nombre: true } } } },
+                calculo: true,
+                documentos: { include: { documento: true } },
             },
-            orderBy: { fechaTrabajada: 'desc' }
+            orderBy: { fecha_trabajada: 'desc' },
         });
 
-        res.json({ data: partes });
-
-    } catch (error) {
-        console.error('Error listando partes:', error);
-        res.status(500).json({ error: 'Error interno' });
+        res.json({ status: 'OK', data: partes });
+    } catch (err: any) {
+        console.error('[PARTES] Error listando:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 
-// GET /api/partes/:id - Obtener un parte
-router.get('/:id', async (req: Request, res: Response) => {
+// GET /api/partes/:id
+router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const parte = await prisma.parteDiario.findUnique({
             where: { id: req.params.id },
             include: {
                 vehiculo: true,
-                conductor: true,
-                fotos: true,
-                incidencias: true
-            }
+                conductor: { include: { usuario: { select: { nombre: true, telefono: true } } } },
+                calculo: true,
+                documentos: { include: { documento: true } },
+                incidencias: true,
+            },
         });
-
-        if (!parte) {
-            return res.status(404).json({ error: 'Parte no encontrado' });
-        }
-
-        res.json({ data: parte });
-
-    } catch (error) {
-        console.error('Error obteniendo parte:', error);
-        res.status(500).json({ error: 'Error interno' });
+        if (!parte) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
+        res.json({ status: 'OK', data: parte });
+    } catch (err: any) {
+        console.error('[PARTES] Error:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 
-// R-PD-017: El parte NO se puede editar una vez enviado
-// Solo permitimos actualizar el estado o fotos
-router.patch('/:id/estado', async (req: Request, res: Response) => {
+// PATCH /api/partes/:id/estado — Solo permite FOTO_SUSTITUIDA (R-PD-017)
+router.patch('/:id/estado', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const { estado } = req.body;
-
-        // Solo permitir cambio a FOTO_SUSTITUIDA
         if (estado !== 'FOTO_SUSTITUIDA') {
-            return res.status(400).json({
-                error: 'Solo se permite cambiar estado a FOTO_SUSTITUIDA',
-                regla: 'R-PD-017'
-            });
+            res.status(400).json({ status: 'FAIL', error: 'invalid_state', regla: 'R-PD-017' });
+            return;
         }
-
-        const parte = await prisma.parteDiario.update({
-            where: { id: req.params.id },
-            data: { estado }
-        });
-
-        res.json({ data: parte });
-
-    } catch (error) {
-        console.error('Error actualizando estado:', error);
-        res.status(500).json({ error: 'Error interno' });
+        const parte = await prisma.parteDiario.update({ where: { id: req.params.id }, data: { estado } });
+        res.json({ status: 'OK', data: parte });
+    } catch (err: any) {
+        console.error('[PARTES] Error actualizando estado:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 

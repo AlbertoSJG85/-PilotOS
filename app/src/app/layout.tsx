@@ -1,29 +1,40 @@
-import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
-import "./globals.css";
+import type { Metadata, Viewport } from 'next';
+import { Geist, Geist_Mono } from 'next/font/google';
+import './globals.css';
+import { ServiceWorkerRegistration } from '@/components/layout/sw-registration';
 
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
+const geistSans = Geist({
+  variable: '--font-geist-sans',
+  subsets: ['latin'],
+});
+
+const geistMono = Geist_Mono({
+  variable: '--font-geist-mono',
+  subsets: ['latin'],
 });
 
 export const metadata: Metadata = {
-  title: "PilotOS - Parte Diario",
-  description: "Sistema de gestión integral de taxi",
-  manifest: "/manifest.json",
+  title: 'PilotOS by NexOS',
+  description: 'Registra tu parte diario de taxi',
+  manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
-    title: "PilotOS",
+    title: 'PilotOS',
+    statusBarStyle: 'black-translucent',
+  },
+  icons: {
+    apple: '/icon-192',
+    icon: '/icon-192',
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#f59e0b",
-  width: "device-width",
+  width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  themeColor: '#f59e0b',
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({
@@ -32,12 +43,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es">
-      <head>
-        <link rel="apple-touch-icon" href="/icon-192.png" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-      </head>
-      <body className={`${inter.variable} antialiased font-sans`}>
+    <html lang="es" className="dark">
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <ServiceWorkerRegistration />
         {children}
       </body>
     </html>

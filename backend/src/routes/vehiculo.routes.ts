@@ -1,71 +1,67 @@
-import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Router, Response } from 'express';
+import { prisma } from '../lib/prisma';
+import { requireAuth, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
-const prisma = new PrismaClient();
 
-// GET /api/vehiculos - Listar vehículos
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
+        const where: any = { activo: true };
+        if (req.usuario?.cliente_id) where.cliente_id = req.usuario.cliente_id;
+
         const vehiculos = await prisma.vehiculo.findMany({
-            where: { activo: true },
-            include: {
-                conductores: {
-                    include: { conductor: true }
-                }
-            }
+            where,
+            include: { conductores: { where: { activo: true }, include: { conductor: { include: { usuario: { select: { nombre: true } } } } } } },
         });
-        res.json({ data: vehiculos });
-    } catch (error) {
-        console.error('Error listando vehículos:', error);
-        res.status(500).json({ error: 'Error interno' });
+        res.json({ status: 'OK', data: vehiculos });
+    } catch (err: any) {
+        console.error('[VEHICULOS] Error:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 
-// GET /api/vehiculos/:id - Obtener vehículo
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const vehiculo = await prisma.vehiculo.findUnique({
             where: { id: req.params.id },
             include: {
-                conductores: { include: { conductor: true } },
-                mantenimientos: { include: { catalogo: true } }
-            }
+                conductores: { include: { conductor: { include: { usuario: { select: { nombre: true } } } } } },
+                mantenimientos: { include: { catalogo: true } },
+            },
         });
-        if (!vehiculo) {
-            return res.status(404).json({ error: 'Vehículo no encontrado' });
-        }
-        res.json({ data: vehiculo });
-    } catch (error) {
-        console.error('Error obteniendo vehículo:', error);
-        res.status(500).json({ error: 'Error interno' });
+        if (!vehiculo) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
+        res.json({ status: 'OK', data: vehiculo });
+    } catch (err: any) {
+        console.error('[VEHICULOS] Error:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 
-// POST /api/vehiculos - Crear vehículo
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
+        if (!req.usuario?.cliente_id) { res.status(400).json({ status: 'FAIL', error: 'no_client_context' }); return; }
+        const { matricula, marca, modelo, fecha_matriculacion, tipo_combustible, tipo_transmision, km_actuales } = req.body;
         const vehiculo = await prisma.vehiculo.create({
-            data: req.body
+            data: { cliente_id: req.usuario.cliente_id, matricula, marca, modelo, fecha_matriculacion: new Date(fecha_matriculacion), tipo_combustible, tipo_transmision, km_actuales: Number(km_actuales) || 0 },
         });
-        res.status(201).json({ data: vehiculo });
-    } catch (error) {
-        console.error('Error creando vehículo:', error);
-        res.status(500).json({ error: 'Error interno' });
+        res.status(201).json({ status: 'OK', data: vehiculo });
+    } catch (err: any) {
+        console.error('[VEHICULOS] Error:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 
-// PATCH /api/vehiculos/:id - Actualizar vehículo
-router.patch('/:id', async (req: Request, res: Response) => {
+router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
+        const { matricula, marca, modelo, tipo_combustible, tipo_transmision } = req.body;
         const vehiculo = await prisma.vehiculo.update({
             where: { id: req.params.id },
-            data: req.body
+            data: { ...(matricula && { matricula }), ...(marca && { marca }), ...(modelo && { modelo }), ...(tipo_combustible && { tipo_combustible }), ...(tipo_transmision && { tipo_transmision }) },
         });
-        res.json({ data: vehiculo });
-    } catch (error) {
-        console.error('Error actualizando vehículo:', error);
-        res.status(500).json({ error: 'Error interno' });
+        res.json({ status: 'OK', data: vehiculo });
+    } catch (err: any) {
+        console.error('[VEHICULOS] Error:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 

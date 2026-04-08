@@ -6,7 +6,6 @@
 
 import cron from 'node-cron';
 import { PrismaClient } from '@prisma/client';
-import { notificarPatronMantenimiento } from './whatsapp.service';
 
 const prisma = new PrismaClient();
 
@@ -25,14 +24,9 @@ async function verificarMantenimientos(): Promise<void> {
         const vehiculos = await prisma.vehiculo.findMany({
             where: { activo: true },
             include: {
-                conductores: {
-                    where: { activo: true },
+                cliente: {
                     include: {
-                        conductor: {
-                            include: {
-                                patron: true
-                            }
-                        }
+                        patron: true
                     }
                 },
                 mantenimientos: {
@@ -47,20 +41,20 @@ async function verificarMantenimientos(): Promise<void> {
         let totalAlertas = 0;
 
         for (const vehiculo of vehiculos) {
-            // Find the patron for this vehicle
-            const patronData = vehiculo.conductores[0]?.conductor?.patron;
+            // Find the patron for this vehicle via the client
+            const patronData = vehiculo.cliente?.patron;
             if (!patronData) continue;
 
             for (const mant of vehiculo.mantenimientos) {
                 let nuevoEstado: 'PENDIENTE' | 'VENCIDO' | null = null;
 
                 // Check by kilometers
-                if (mant.proximoKm && mant.proximoKm <= vehiculo.kmActuales) {
+                if (mant.proximo_km && mant.proximo_km <= vehiculo.km_actuales) {
                     nuevoEstado = 'VENCIDO';
                 }
 
                 // Check by date
-                if (mant.proximaFecha && mant.proximaFecha <= ahora) {
+                if (mant.proxima_fecha && mant.proxima_fecha <= ahora) {
                     nuevoEstado = 'VENCIDO';
                 }
 
@@ -71,28 +65,20 @@ async function verificarMantenimientos(): Promise<void> {
                         data: { estado: 'VENCIDO' }
                     });
 
-                    await notificarPatronMantenimiento(
-                        patronData.telefono,
-                        vehiculo.matricula,
-                        mant.catalogo.nombre,
-                        'VENCIDO'
-                    );
+                    // TODO (DT-003): Enviar webhook/evento a n8n para que GlorIA notifique
+                    // patronData.telefono, vehiculo.matricula, mant.catalogo.nombre, 'VENCIDO'
 
                     totalAlertas++;
                     console.log(`  🔴 VENCIDO: ${mant.catalogo.nombre} → ${vehiculo.matricula}`);
                 }
 
                 // Check if approaching (within 1000km or 30 days)
-                const proximoEnKm = mant.proximoKm && mant.proximoKm <= vehiculo.kmActuales + 1000;
-                const proximoEnFecha = mant.proximaFecha && mant.proximaFecha <= en30Dias;
+                const proximoEnKm = mant.proximo_km && mant.proximo_km <= vehiculo.km_actuales + 1000;
+                const proximoEnFecha = mant.proxima_fecha && mant.proxima_fecha <= en30Dias;
 
                 if ((proximoEnKm || proximoEnFecha) && mant.estado === 'PENDIENTE') {
-                    await notificarPatronMantenimiento(
-                        patronData.telefono,
-                        vehiculo.matricula,
-                        mant.catalogo.nombre,
-                        'PROXIMO'
-                    );
+                    // TODO (DT-003): Enviar webhook/evento a n8n para que GlorIA notifique
+                    // patronData.telefono, vehiculo.matricula, mant.catalogo.nombre, 'PROXIMO'
 
                     totalAlertas++;
                     console.log(`  🟡 PROXIMO: ${mant.catalogo.nombre} → ${vehiculo.matricula}`);

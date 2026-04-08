@@ -1,32 +1,43 @@
-import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Router, Response } from 'express';
+import { prisma } from '../lib/prisma';
+import { requireAuth, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
-const prisma = new PrismaClient();
 
-// POST /api/gastos - Crear gasto
-router.post('/', async (req: Request, res: Response) => {
+// POST /api/gastos
+router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const gasto = await prisma.gasto.create({
-            data: {
-                ...req.body,
-                estado: 'REGISTRADO'
-            }
+        if (!req.usuario?.cliente_id) { res.status(400).json({ status: 'FAIL', error: 'no_client_context' }); return; }
+        const { vehiculo_id, tipo, descripcion, importe, fecha, forma_pago, url_factura } = req.body;
+        if (!tipo || !descripcion || importe === undefined || !fecha) {
+            res.status(400).json({ status: 'FAIL', error: 'missing_fields' });
+            return;
+        }
+
+        const gasto = await prisma.$transaction(async (tx) => {
+            const g = await tx.gasto.create({
+                data: { cliente_id: req.usuario!.cliente_id!, vehiculo_id: vehiculo_id || null, tipo, descripcion, importe, fecha: new Date(fecha), forma_pago: forma_pago || null, url_factura: url_factura || null, estado: 'REGISTRADO' },
+            });
+            await tx.ledgerEvento.create({
+                data: { tipo_evento: 'GASTO_REGISTRADO', source: 'PILOTOS', dedupe_key: `gasto-${g.id}`, datos: { gasto_id: g.id, tipo, importe, origen: 'FRONTEND' } },
+            });
+            return g;
         });
-        res.status(201).json({ data: gasto });
-    } catch (error) {
-        console.error('Error creando gasto:', error);
-        res.status(500).json({ error: 'Error interno' });
+
+        res.status(201).json({ status: 'OK', data: gasto });
+    } catch (err: any) {
+        console.error('[GASTOS] Error:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 
-// GET /api/gastos - Listar gastos
-router.get('/', async (req: Request, res: Response) => {
+// GET /api/gastos
+router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const { vehiculoId, tipo, desde, hasta } = req.query;
+        const { vehiculo_id, tipo, desde, hasta } = req.query;
         const where: any = {};
-
-        if (vehiculoId) where.vehiculoId = vehiculoId;
+        if (req.usuario?.cliente_id) where.cliente_id = req.usuario.cliente_id;
+        if (vehiculo_id) where.vehiculo_id = vehiculo_id;
         if (tipo) where.tipo = tipo;
         if (desde || hasta) {
             where.fecha = {};
@@ -34,124 +45,57 @@ router.get('/', async (req: Request, res: Response) => {
             if (hasta) where.fecha.lte = new Date(hasta as string);
         }
 
-        const gastos = await prisma.gasto.findMany({
-            where,
-            orderBy: { fecha: 'desc' }
-        });
+        const gastos = await prisma.gasto.findMany({ where, orderBy: { fecha: 'desc' } });
+        const totales = await prisma.gasto.groupBy({ by: ['tipo'], _sum: { importe: true }, where });
 
-        // Calcular totales por tipo
-        const totales = await prisma.gasto.groupBy({
-            by: ['tipo'],
-            _sum: { importe: true },
-            where
-        });
-
-        res.json({ data: gastos, totales });
-
-    } catch (error) {
-        console.error('Error listando gastos:', error);
-        res.status(500).json({ error: 'Error interno' });
+        res.json({ status: 'OK', data: gastos, totales });
+    } catch (err: any) {
+        console.error('[GASTOS] Error:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 
-// GET /api/gastos/resumen - Resumen de gastos por tipo y período
-router.get('/resumen', async (req: Request, res: Response) => {
+// GET /api/gastos/resumen
+router.get('/resumen', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const { desde, hasta, vehiculoId } = req.query;
         const where: any = {};
+        if (req.usuario?.cliente_id) where.cliente_id = req.usuario.cliente_id;
 
-        if (vehiculoId) where.vehiculoId = vehiculoId;
-        if (desde || hasta) {
-            where.fecha = {};
-            if (desde) where.fecha.gte = new Date(desde as string);
-            if (hasta) where.fecha.lte = new Date(hasta as string);
-        }
+        const porTipo = await prisma.gasto.groupBy({ by: ['tipo'], _sum: { importe: true }, _count: { id: true }, where });
+        const total = await prisma.gasto.aggregate({ _sum: { importe: true }, _count: { id: true }, where });
 
-        // Total by type
-        const porTipo = await prisma.gasto.groupBy({
-            by: ['tipo'],
-            _sum: { importe: true },
-            _count: { id: true },
-            where
-        });
-
-        // Grand total
-        const total = await prisma.gasto.aggregate({
-            _sum: { importe: true },
-            _count: { id: true },
-            where
-        });
-
-        // Monthly breakdown (last 6 months)
-        const hace6Meses = new Date();
-        hace6Meses.setMonth(hace6Meses.getMonth() - 6);
-
-        const gastosMensuales = await prisma.gasto.findMany({
-            where: { ...where, fecha: { gte: hace6Meses } },
-            select: { fecha: true, importe: true, tipo: true },
-            orderBy: { fecha: 'asc' }
-        });
-
-        // Group by month manually
-        const porMes: Record<string, number> = {};
-        for (const g of gastosMensuales) {
-            const key = `${g.fecha.getFullYear()}-${String(g.fecha.getMonth() + 1).padStart(2, '0')}`;
-            porMes[key] = (porMes[key] || 0) + g.importe;
-        }
-
-        res.json({
-            porTipo,
-            total: {
-                importe: total._sum.importe || 0,
-                cantidad: total._count.id || 0
-            },
-            porMes
-        });
-
-    } catch (error) {
-        console.error('Error generando resumen de gastos:', error);
-        res.status(500).json({ error: 'Error interno' });
+        res.json({ status: 'OK', porTipo, total: { importe: total._sum.importe || 0, cantidad: total._count.id || 0 } });
+    } catch (err: any) {
+        console.error('[GASTOS] Error resumen:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 
-// GET /api/gastos/fijos - Listar gastos fijos
-router.get('/fijos', async (req: Request, res: Response) => {
+// GET /api/gastos/fijos
+router.get('/fijos', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const gastosFijos = await prisma.gastoFijo.findMany({
-            where: { activo: true },
-            include: { vehiculo: true }
-        });
-        res.json({ data: gastosFijos });
-    } catch (error) {
-        console.error('Error listando gastos fijos:', error);
-        res.status(500).json({ error: 'Error interno' });
+        const where: any = { activo: true };
+        if (req.usuario?.cliente_id) where.cliente_id = req.usuario.cliente_id;
+        const gastosFijos = await prisma.gastoFijo.findMany({ where, include: { vehiculo: { select: { matricula: true } } } });
+        res.json({ status: 'OK', data: gastosFijos });
+    } catch (err: any) {
+        console.error('[GASTOS] Error fijos:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 
-// POST /api/gastos/fijos - Crear gasto fijo
-router.post('/fijos', async (req: Request, res: Response) => {
+// POST /api/gastos/fijos
+router.post('/fijos', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const gastoFijo = await prisma.gastoFijo.create({
-            data: req.body
+        if (!req.usuario?.cliente_id) { res.status(400).json({ status: 'FAIL', error: 'no_client_context' }); return; }
+        const { vehiculo_id, tipo, descripcion, importe, periodicidad } = req.body;
+        const gf = await prisma.gastoFijo.create({
+            data: { cliente_id: req.usuario.cliente_id, vehiculo_id: vehiculo_id || null, tipo, descripcion, importe, periodicidad },
         });
-        res.status(201).json({ data: gastoFijo });
-    } catch (error) {
-        console.error('Error creando gasto fijo:', error);
-        res.status(500).json({ error: 'Error interno' });
-    }
-});
-
-// PATCH /api/gastos/fijos/:id - Actualizar gasto fijo
-router.patch('/fijos/:id', async (req: Request, res: Response) => {
-    try {
-        const gastoFijo = await prisma.gastoFijo.update({
-            where: { id: req.params.id },
-            data: req.body
-        });
-        res.json({ data: gastoFijo });
-    } catch (error) {
-        console.error('Error actualizando gasto fijo:', error);
-        res.status(500).json({ error: 'Error interno' });
+        res.status(201).json({ status: 'OK', data: gf });
+    } catch (err: any) {
+        console.error('[GASTOS] Error creando fijo:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 

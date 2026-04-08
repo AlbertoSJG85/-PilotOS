@@ -1,97 +1,101 @@
+/**
+ * Auth routes — Login y /me para PilotOS.
+ * Conecta con minos.Users (DT-011 singleton, DT-010 sin fallback).
+ */
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { generarToken, requireAuth, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 /**
  * POST /api/auth/login
- * Login by phone number — returns JWT token
- * In production this would use OTP verification via WhatsApp
+ * Autenticacion por telefono. Dual-format (+34.../34...).
  */
 router.post('/login', async (req: Request, res: Response) => {
     try {
         const { telefono } = req.body;
-
         if (!telefono) {
-            return res.status(400).json({ error: 'Teléfono es requerido' });
+            res.status(400).json({ status: 'FAIL', error: 'missing_telefono' });
+            return;
         }
 
-        const usuario = await prisma.usuario.findUnique({
-            where: { telefono },
-            include: {
-                vehiculosAsignados: {
-                    where: { activo: true },
-                    include: { vehiculo: true }
-                }
-            }
+        const phoneVariants = [telefono];
+        if (telefono.startsWith('+')) phoneVariants.push(telefono.substring(1));
+        else phoneVariants.push('+' + telefono);
+
+        const usuario = await prisma.minosUser.findFirst({
+            where: { telefono: { in: phoneVariants } },
         });
 
         if (!usuario) {
-            return res.status(404).json({
-                error: 'Usuario no encontrado. Completa el onboarding primero.',
-                redirectTo: `/onboarding?tel=${encodeURIComponent(telefono)}`
+            res.status(404).json({
+                status: 'FAIL',
+                error: 'user_not_found',
+                message: 'Usuario no registrado',
+                action: 'REDIRECT_ONBOARDING',
             });
+            return;
         }
 
-        if (!usuario.activo) {
-            return res.status(403).json({ error: 'Cuenta desactivada' });
-        }
+        const token = generarToken({ id: usuario.id, telefono: usuario.telefono || '', role: usuario.role || 'user' });
 
-        const token = generarToken(usuario);
+        const conductor = await prisma.conductor.findFirst({
+            where: { usuario_id: usuario.id, activo: true },
+            include: { cliente: true },
+        });
+        const cliente = conductor?.cliente
+            ?? await prisma.cliente.findFirst({ where: { patron_id: usuario.id, activo: true } });
 
         res.json({
+            status: 'OK',
             token,
-            usuario: {
-                id: usuario.id,
-                nombre: usuario.nombre,
-                telefono: usuario.telefono,
-                rol: usuario.rol,
-                vehiculos: usuario.vehiculosAsignados.map(va => ({
-                    id: va.vehiculo.id,
-                    matricula: va.vehiculo.matricula,
-                    marca: va.vehiculo.marca,
-                    modelo: va.vehiculo.modelo,
-                })),
-            }
+            user: { id: usuario.id, nombre: usuario.nombre || '', telefono: usuario.telefono || '', role: usuario.role || 'user' },
+            context: cliente ? {
+                cliente_id: cliente.id,
+                conductor_id: conductor?.id,
+                es_patron: conductor?.es_patron ?? (cliente.patron_id === usuario.id),
+                tipo_actividad: cliente.tipo_actividad,
+            } : null,
         });
-
-    } catch (error) {
-        console.error('Error en login:', error);
-        res.status(500).json({ error: 'Error interno' });
+    } catch (err: any) {
+        console.error('[AUTH] login error:', err.message);
+        const isDev = process.env.NODE_ENV === 'development';
+        res.status(500).json({ status: 'FAIL', error: 'server_error', message: isDev ? err.message : 'Error interno' });
     }
 });
 
 /**
  * GET /api/auth/me
- * Get current authenticated user info
  */
-router.get('/me', requireAuth as any, async (req: AuthRequest, res: Response) => {
+router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const usuario = await prisma.usuario.findUnique({
-            where: { id: req.usuario!.id },
-            include: {
-                vehiculosAsignados: {
-                    where: { activo: true },
-                    include: { vehiculo: true }
-                },
-                conductores: req.usuario!.rol === 'PATRON' ? {
-                    where: { activo: true },
-                    select: { id: true, nombre: true, telefono: true }
-                } : false,
-            }
+        if (!req.usuario) { res.status(401).json({ status: 'FAIL', error: 'auth_required' }); return; }
+
+        const vehiculos = req.usuario.conductor_id
+            ? await prisma.vehiculoConductor.findMany({
+                where: { conductor_id: req.usuario.conductor_id, activo: true },
+                include: { vehiculo: { select: { id: true, matricula: true, marca: true, modelo: true, km_actuales: true } } },
+            })
+            : [];
+
+        const conductores = req.usuario.es_patron && req.usuario.cliente_id
+            ? await prisma.conductor.findMany({
+                where: { cliente_id: req.usuario.cliente_id, activo: true },
+                include: { usuario: { select: { id: true, nombre: true, telefono: true } } },
+            })
+            : [];
+
+        res.json({
+            status: 'OK',
+            user: req.usuario,
+            vehiculos: vehiculos.map((vc) => vc.vehiculo),
+            conductores: conductores.map((c) => ({ id: c.id, nombre: c.usuario.nombre, telefono: c.usuario.telefono, es_patron: c.es_patron })),
         });
-
-        if (!usuario) {
-            return res.status(404).json({ error: 'Usuario no encontrado' });
-        }
-
-        res.json({ data: usuario });
-
-    } catch (error) {
-        console.error('Error en /me:', error);
-        res.status(500).json({ error: 'Error interno' });
+    } catch (err: any) {
+        console.error('[AUTH] /me error:', err.message);
+        const isDev = process.env.NODE_ENV === 'development';
+        res.status(500).json({ status: 'FAIL', error: 'server_error', message: isDev ? err.message : 'Error interno' });
     }
 });
 
