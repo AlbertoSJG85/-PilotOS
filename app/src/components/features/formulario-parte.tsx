@@ -118,8 +118,10 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
       }
     }
     if (step === 3) {
-      if (!ticketTaxi) errs.push('El ticket del taxímetro es obligatorio');
-      if (Number(form.combustible) > 0 && !ticketGasoil) {
+      // Propietarios: fotos opcionales. Asalariados: obligatorias.
+      const isPatron = user?.es_patron === true;
+      if (!isPatron && !ticketTaxi) errs.push('El ticket del taxímetro es obligatorio');
+      if (!isPatron && Number(form.combustible) > 0 && !ticketGasoil) {
         errs.push('El ticket de combustible es obligatorio cuando hay repostaje');
       }
     }
@@ -362,10 +364,14 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
           <CardTitle>Tickets del turno</CardTitle>
           <div className="mt-4 space-y-6">
 
-            {/* Ticket taxímetro — obligatorio */}
+            {/* Ticket taxímetro — obligatorio para asalariados, opcional para propietarios */}
             <div>
               <p className="mb-2 text-sm font-medium text-zinc-300">
-                Ticket taxímetro <span className="text-red-400">*</span>
+                Ticket taxímetro{' '}
+                {user?.es_patron
+                  ? <span className="text-zinc-500 text-xs font-normal">(opcional)</span>
+                  : <span className="text-red-400">*</span>
+                }
               </p>
               {/* Sin capture="environment" para que iOS permita elegir cámara o galería */}
               <input
@@ -401,11 +407,15 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
               )}
             </div>
 
-            {/* Ticket combustible — solo si repostó */}
+            {/* Ticket combustible — obligatorio para asalariados si repostó, opcional para propietarios */}
             {Number(form.combustible) > 0 && (
               <div>
                 <p className="mb-2 text-sm font-medium text-zinc-300">
-                  Ticket combustible <span className="text-red-400">*</span>
+                  Ticket combustible{' '}
+                  {user?.es_patron
+                    ? <span className="text-zinc-500 text-xs font-normal">(opcional)</span>
+                    : <span className="text-red-400">*</span>
+                  }
                 </p>
                 <input
                   ref={gasoilInputRef}
@@ -479,14 +489,14 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
             )}
             <ConfirmRow
               label="Ticket taxímetro"
-              value={ticketTaxi ? '✓ Adjunto' : '✗ Falta'}
-              highlight={!ticketTaxi}
+              value={ticketTaxi ? '✓ Adjunto' : user?.es_patron ? '— Opcional' : '✗ Falta'}
+              highlight={!ticketTaxi && !user?.es_patron}
             />
             {Number(form.combustible) > 0 && (
               <ConfirmRow
                 label="Ticket combustible"
-                value={ticketGasoil ? '✓ Adjunto' : '✗ Falta'}
-                highlight={!ticketGasoil}
+                value={ticketGasoil ? '✓ Adjunto' : user?.es_patron ? '— Opcional' : '✗ Falta'}
+                highlight={!ticketGasoil && !user?.es_patron}
               />
             )}
           </div>
