@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { Button, Input } from '@/components/ui';
 import { login } from '@/lib/api';
 import { setSession } from '@/lib/auth';
@@ -47,33 +48,56 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-950 px-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-10 text-center">
-          <h1 className="text-3xl font-bold text-zinc-100">
-            Pilot<span className="text-amber-500">OS</span>
-          </h1>
-          <p className="mt-1 text-xs tracking-widest text-zinc-600">by NexOS</p>
+      {/* Fondo sutil con degradado */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -top-40 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-pilot-teal/8 blur-3xl" />
+        <div className="absolute bottom-0 right-1/4 h-64 w-64 rounded-full bg-pilot-lime/5 blur-3xl" />
+      </div>
+
+      <div className="relative w-full max-w-sm">
+        {/* Logo */}
+        <div className="mb-10 flex flex-col items-center gap-4">
+          <Image
+            src="/branding/pilotos/logo-compact.png"
+            alt="PilotOS"
+            width={200}
+            height={52}
+            className="h-14 w-auto object-contain"
+            priority
+          />
+          <p className="text-xs tracking-widest text-zinc-600 uppercase font-medium">
+            by NexOS
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <Input
-            label="Telefono"
-            type="tel"
-            placeholder="34600000001"
-            value={telefono}
-            onChange={(e) => setTelefono(e.target.value)}
-            required
-            autoComplete="tel"
-          />
+        {/* Formulario */}
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-8 shadow-xl">
+          <p className="mb-6 text-sm text-zinc-400 text-center">
+            Introduce tu numero de telefono para acceder
+          </p>
 
-          {error && (
-            <p className="rounded-lg bg-red-900/30 px-3 py-2 text-sm text-red-400">{error}</p>
-          )}
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <Input
+              label="Telefono"
+              type="tel"
+              placeholder="34600000001"
+              value={telefono}
+              onChange={(e) => setTelefono(e.target.value)}
+              required
+              autoComplete="tel"
+            />
 
-          <Button type="submit" className="w-full" size="lg" disabled={loading}>
-            {loading ? 'Entrando...' : 'Entrar'}
-          </Button>
-        </form>
+            {error && (
+              <p className="rounded-lg bg-red-900/30 border border-red-800/50 px-3 py-2 text-sm text-red-400">
+                {error}
+              </p>
+            )}
+
+            <Button type="submit" className="w-full" size="lg" disabled={loading}>
+              {loading ? 'Entrando...' : 'Entrar'}
+            </Button>
+          </form>
+        </div>
 
         <p className="mt-6 text-center text-xs text-zinc-600">
           Si no tienes cuenta, contacta con tu patron o administrador.

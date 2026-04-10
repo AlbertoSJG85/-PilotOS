@@ -45,7 +45,7 @@ export function PeriodFilter() {
             <select
                 value={currentPeriod}
                 onChange={handleChange}
-                className="h-10 items-center justify-between rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 ring-offset-zinc-950 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
+                className="h-10 items-center justify-between rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-pilot-lime"
             >
                 <option value="all">Historico</option>
                 <option value="semana">Ultimos 7 dias</option>

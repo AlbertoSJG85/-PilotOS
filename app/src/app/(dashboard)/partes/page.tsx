@@ -68,7 +68,7 @@ function PartesPageContent() {
         <div className="space-y-3">
           {partes.map((p) => (
             <Link href={`/partes/${p.id}`} key={p.id} className="block">
-              <Card className="flex items-center justify-between gap-4 hover:border-amber-500/50 transition-colors">
+              <Card className="flex items-center justify-between gap-4 hover:border-pilot-lime/40 transition-colors">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-zinc-100">{formatDate(p.fecha_trabajada)}</span>

@@ -205,8 +205,8 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
       <div className="mb-6 flex items-center gap-1">
         {STEPS.map((s, i) => (
           <div key={s} className="flex flex-1 flex-col items-center">
-            <div className={`h-1.5 w-full rounded-full transition-colors ${i <= step ? 'bg-amber-500' : 'bg-zinc-800'}`} />
-            <span className={`mt-1 text-[10px] ${i === step ? 'text-amber-500 font-semibold' : 'text-zinc-600'}`}>
+            <div className={`h-1.5 w-full rounded-full transition-colors ${i <= step ? 'bg-pilot-lime' : 'bg-zinc-800'}`} />
+            <span className={`mt-1 text-[10px] ${i === step ? 'text-pilot-lime font-semibold' : 'text-zinc-600'}`}>
               {s}
             </span>
           </div>
@@ -224,7 +224,7 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
                 <select
                   value={form.vehiculo_id}
                   onChange={(e) => update('vehiculo_id', e.target.value)}
-                  className="flex h-12 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-base text-zinc-100 focus:border-amber-500 focus:outline-none"
+                  className="flex h-12 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-base text-zinc-100 focus:border-pilot-lime focus:outline-none"
                 >
                   <option value="">Seleccionar vehículo...</option>
                   {vehiculos.map((v) => (
@@ -280,9 +280,9 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
               required
             />
             {form.km_inicio !== '' && form.km_fin !== '' && Number(form.km_fin) > Number(form.km_inicio) && (
-              <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-4 text-center">
+              <div className="rounded-xl bg-pilot-lime/10 border border-pilot-lime/20 p-4 text-center">
                 <p className="text-xs text-zinc-400 mb-1">Km recorridos hoy</p>
-                <p className="text-3xl font-black text-amber-400">
+                <p className="text-3xl font-black text-pilot-lime">
                   {(Number(form.km_fin) - Number(form.km_inicio)).toLocaleString('es-ES')}
                 </p>
               </div>
@@ -396,7 +396,7 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
                 <button
                   type="button"
                   onClick={() => taxiInputRef.current?.click()}
-                  className="flex h-44 w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-zinc-700 bg-zinc-900/50 text-zinc-400 hover:border-amber-500/70 hover:text-amber-500 active:bg-zinc-800 transition-colors"
+                  className="flex h-44 w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-zinc-700 bg-zinc-900/50 text-zinc-400 hover:border-pilot-lime/70 hover:text-pilot-lime active:bg-zinc-800 transition-colors"
                 >
                   <Camera className="h-8 w-8" />
                   <div className="text-center">

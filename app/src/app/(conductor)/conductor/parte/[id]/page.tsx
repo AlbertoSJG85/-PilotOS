@@ -56,7 +56,7 @@ export default function ParteDetalleConductor() {
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-zinc-950">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-pilot-lime border-t-transparent" />
       </div>
     );
   }
@@ -65,7 +65,7 @@ export default function ParteDetalleConductor() {
     return (
       <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center px-5 gap-4">
         <p className="text-zinc-400">{error || 'Parte no encontrado'}</p>
-        <button onClick={() => router.push('/conductor')} className="text-amber-500 text-sm font-medium">Volver</button>
+        <button onClick={() => router.push('/conductor')} className="text-pilot-lime text-sm font-medium">Volver</button>
       </div>
     );
   }
@@ -102,7 +102,7 @@ export default function ParteDetalleConductor() {
             </div>
             {calculo && (
               <div className="text-right">
-                <p className="text-lg font-bold text-amber-400">{formatCurrency(calculo.parte_conductor)}</p>
+                <p className="text-lg font-bold text-pilot-lime">{formatCurrency(calculo.parte_conductor)}</p>
                 <p className="text-xs text-zinc-500">Tu parte</p>
               </div>
             )}
@@ -147,7 +147,7 @@ export default function ParteDetalleConductor() {
               {parte.documentos.map((enlace: any) => (
                 <div key={enlace.id} className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3">
                   {enlace.documento?.tipo === 'TICKET_TAXIMETRO' ? (
-                    <Receipt className="h-4 w-4 text-amber-500" />
+                    <Receipt className="h-4 w-4 text-pilot-lime" />
                   ) : (
                     <Fuel className="h-4 w-4 text-blue-400" />
                   )}
@@ -164,7 +164,7 @@ export default function ParteDetalleConductor() {
                       href={enlace.documento.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs text-amber-500 hover:text-amber-400"
+                      className="text-xs text-pilot-lime hover:text-pilot-lime-light"
                     >
                       Ver
                     </a>

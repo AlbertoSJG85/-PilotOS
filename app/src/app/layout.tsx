@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: 'PilotOS by NexOS',
-  description: 'Registra tu parte diario de taxi',
+  description: 'Gestión profesional de taxi y VTC',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
@@ -33,7 +33,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: '#f59e0b',
+  themeColor: '#8DC63F',
   viewportFit: 'cover',
 };
 

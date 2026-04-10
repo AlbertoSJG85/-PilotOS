@@ -130,8 +130,8 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
 
                 {/* Reparto (si existe cálculo) */}
                 {parte.calculo && (
-                    <Card className="p-6 md:col-span-2 bg-zinc-900/50 border-amber-500/20">
-                        <h3 className="text-sm font-semibold text-amber-500 mb-4 uppercase tracking-wider">Reparto Económico (Neto)</h3>
+                    <Card className="p-6 md:col-span-2 bg-zinc-900/50 border-pilot-lime/20">
+                        <h3 className="text-sm font-semibold text-pilot-lime mb-4 uppercase tracking-wider">Reparto Económico (Neto)</h3>
                         <div className="grid gap-6 sm:grid-cols-3">
                             <div className="flex flex-col">
                                 <span className="text-xs text-zinc-400 mb-1">Beneficio Neto Diario</span>
@@ -145,7 +145,7 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                             </div>
                             <div className="flex flex-col">
                                 <span className="text-xs text-zinc-400 mb-1">Parte Propietario</span>
-                                <span className="text-2xl font-bold border-l-2 border-amber-500 pl-3 text-zinc-100">
+                                <span className="text-2xl font-bold border-l-2 border-pilot-lime pl-3 text-zinc-100">
                                     {formatCurrency(parte.calculo.parte_patron)}
                                 </span>
                             </div>
@@ -167,7 +167,7 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                                     className="flex flex-col items-center justify-center p-4 border border-zinc-800 rounded-lg bg-zinc-950 hover:bg-zinc-800 transition-colors"
                                 >
                                     <span className="text-sm font-medium text-zinc-200">{dLink.documento.tipo}</span>
-                                    <span className="text-xs text-amber-500 mt-1">Ver documento &rarr;</span>
+                                    <span className="text-xs text-pilot-lime mt-1">Ver documento &rarr;</span>
                                 </a>
                             ))}
                         </div>

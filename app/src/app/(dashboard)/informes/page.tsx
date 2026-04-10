@@ -97,7 +97,7 @@ function InformesContent({ searchParams }: { searchParams: { desde?: string; has
             <div className="grid gap-6 md:grid-cols-2">
                 <Card className="p-5">
                     <h3 className="mb-4 text-lg font-medium text-zinc-100 flex items-center gap-2">
-                        <Calculator className="w-5 h-5 text-amber-500" />
+                        <Calculator className="w-5 h-5 text-pilot-lime" />
                         Balance del Patrón
                     </h3>
                     <div className="space-y-3 text-sm">

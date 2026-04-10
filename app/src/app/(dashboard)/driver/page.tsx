@@ -85,7 +85,7 @@ function DriverDashboardContent() {
           <div className="space-y-2">
             {recentPartes.map((p) => (
               <Link href={`/partes/${p.id}`} key={p.id} className="block">
-                <Card className="flex items-center justify-between py-3 hover:border-amber-500/50 transition-colors">
+                <Card className="flex items-center justify-between py-3 hover:border-pilot-lime/40 transition-colors">
                   <div>
                     <span className="text-sm font-medium text-zinc-200">{formatDate(p.fecha_trabajada)}</span>
                     {p.vehiculo && <span className="ml-2 text-xs text-zinc-500">{p.vehiculo.matricula}</span>}
@@ -104,7 +104,7 @@ function DriverDashboardContent() {
       {/* Floating Action Button (Solo Mobile) */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950/90 backdrop-blur border-t border-zinc-800 sm:hidden z-50">
         <Link href="/partes/nuevo" className="block w-full">
-          <Button className="w-full h-14 text-lg font-bold bg-amber-500 text-black hover:bg-amber-400">
+          <Button className="w-full h-14 text-lg font-bold bg-pilot-lime text-zinc-950 hover:bg-pilot-lime-dim">
             <FileText className="w-6 h-6 mr-2" />
             NUEVO PARTE
           </Button>

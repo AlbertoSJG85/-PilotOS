@@ -72,7 +72,7 @@ export default function NuevoGastoPage() {
                         <div className="space-y-1">
                             <label className="text-sm font-medium text-zinc-300">Tipo de Gasto</label>
                             <select
-                                className="w-full h-10 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                className="w-full h-10 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 focus:border-pilot-lime focus:outline-none focus:ring-1 focus:ring-pilot-lime"
                                 value={form.tipo}
                                 onChange={(e) => setForm({ ...form, tipo: e.target.value })}
                                 required
@@ -90,7 +90,7 @@ export default function NuevoGastoPage() {
                         <div className="space-y-1">
                             <label className="text-sm font-medium text-zinc-300">Vehículo Asociado (Opcional)</label>
                             <select
-                                className="w-full h-10 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                className="w-full h-10 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 focus:border-pilot-lime focus:outline-none focus:ring-1 focus:ring-pilot-lime"
                                 value={form.vehiculo_id}
                                 onChange={(e) => setForm({ ...form, vehiculo_id: e.target.value })}
                             >
@@ -137,7 +137,7 @@ export default function NuevoGastoPage() {
                         <div className="space-y-1">
                             <label className="text-sm font-medium text-zinc-300">Forma de Pago</label>
                             <select
-                                className="w-full h-10 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                className="w-full h-10 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 focus:border-pilot-lime focus:outline-none focus:ring-1 focus:ring-pilot-lime"
                                 value={form.forma_pago}
                                 onChange={(e) => setForm({ ...form, forma_pago: e.target.value })}
                             >

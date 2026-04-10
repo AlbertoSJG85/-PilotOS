@@ -1,15 +1,52 @@
 @import "tailwindcss";
 
-:root {
-  --background: #09090b;
-  --foreground: #fafafa;
+/* ─────────────────────────────────────────────
+   PilotOS — Design System
+   Paleta derivada del logo oficial:
+   • Fondo navy oscuro  (#07111E → #0C1A2B)
+   • Teal de arcos      (#1E7070)
+   • Verde lima accent  (#8DC63F) ← "OS" del logo
+   • Blanco texto       (#E4EEF6)
+───────────────────────────────────────────── */
+
+@theme {
+  /* ── Zinc remapeado → navy PilotOS ── */
+  --color-zinc-950: #07111E;
+  --color-zinc-900: #0C1A2B;
+  --color-zinc-800: #122236;
+  --color-zinc-700: #1A3049;
+  --color-zinc-600: #2A4460;
+  --color-zinc-500: #4A6A8A;
+  --color-zinc-400: #7A9AB8;
+  --color-zinc-300: #A8C0D4;
+  --color-zinc-200: #C8D8E8;
+  --color-zinc-100: #E4EEF6;
+  --color-zinc-50:  #F0F6FA;
+
+  /* ── Pilot brand tokens ── */
+  --color-pilot-lime:       #8DC63F;
+  --color-pilot-lime-dim:   #6FA832;
+  --color-pilot-lime-light: #A5D455;
+  --color-pilot-teal:       #1E7070;
+  --color-pilot-teal-dim:   #155555;
+  --color-pilot-navy:       #07111E;
+  --color-pilot-card:       #0C1A2B;
+  --color-pilot-surface:    #122236;
+  --color-pilot-border:     #1A3049;
+  --color-pilot-muted:      #4A6A8A;
+  --color-pilot-text:       #E4EEF6;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: #07111E;
+  --color-foreground: #E4EEF6;
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+}
+
+:root {
+  --background: #07111E;
+  --foreground: #E4EEF6;
 }
 
 body {
@@ -19,14 +56,13 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Smooth inputs on mobile */
+/* Smooth inputs on mobile — previene zoom en iOS */
 input, select, textarea {
   font-size: 16px;
 }
 
 /* Safe area insets para iPhone con notch (PWA standalone) */
 .pt-safe-top {
-  /* min 24px de padding, más el notch si existe */
   padding-top: max(env(safe-area-inset-top, 0px), 1.5rem);
 }
 .pb-safe-bottom {
@@ -36,19 +72,28 @@ input, select, textarea {
   height: max(env(safe-area-inset-bottom, 0px), 1rem);
 }
 
-/* Evitar el efecto de tap en toda la app PWA */
+/* Eliminar tap highlight en toda la PWA */
 * {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Scrollbar minimal */
+/* Scrollbar minimal — tono navy */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: #1A3049;
   border-radius: 3px;
+}
+
+/* ── Animación slide-in para el drawer mobile ── */
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+.animate-slide-in-left {
+  animation: slideInLeft 0.22s ease-out;
 }

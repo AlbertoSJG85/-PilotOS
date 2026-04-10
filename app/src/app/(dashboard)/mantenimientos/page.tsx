@@ -99,7 +99,7 @@ export default function MantenimientosPage() {
           {vehiculos.length > 1 && (
             <div className="mb-4">
               <select
-                className="h-10 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 focus:border-amber-500 focus:outline-none"
+                className="h-10 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 focus:border-pilot-lime focus:outline-none"
                 value={selectedVehiculo || ''}
                 onChange={(e) => setSelectedVehiculo(e.target.value)}
               >

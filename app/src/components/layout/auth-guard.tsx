@@ -34,7 +34,7 @@ export function AuthGuard({ children, requirePatron }: AuthGuardProps) {
   if (!ready) {
     return (
       <div className="flex h-screen items-center justify-center bg-zinc-950">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-pilot-lime border-t-transparent" />
       </div>
     );
   }
