@@ -13,7 +13,7 @@ import { prisma } from '../lib/prisma';
 
 // JWT_SECRET se valida al arrancar en index.ts
 const JWT_SECRET = process.env.JWT_SECRET!;
-const JWT_EXPIRATION = '24h'; // Consistente con NexOS (era 7d, alineado a 24h)
+const JWT_EXPIRATION = '30d'; // Sesión larga para uso real en móvil (PWA)
 
 export interface AuthRequest extends Request {
     usuario?: {

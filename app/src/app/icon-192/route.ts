@@ -1,18 +1,18 @@
-/**
- * Genera el icono 192x192 de la PWA dinámicamente.
- * En producción, sustituir por un PNG estático optimizado.
- */
-export function GET() {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
-  <rect width="192" height="192" rx="40" fill="#09090b"/>
-  <text x="96" y="80" font-family="system-ui, sans-serif" font-size="60" font-weight="900" text-anchor="middle" fill="#fafafa">P</text>
-  <text x="96" y="140" font-family="system-ui, sans-serif" font-size="36" font-weight="900" text-anchor="middle" fill="#f59e0b">OS</text>
-</svg>`;
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
-  return new Response(svg, {
-    headers: {
-      'Content-Type': 'image/svg+xml',
-      'Cache-Control': 'public, max-age=86400',
-    },
-  });
+/** Sirve el icono PNG real de PilotOS (192x192). Mantiene compatibilidad con manifests cacheados. */
+export function GET() {
+  try {
+    const filePath = join(process.cwd(), 'public', 'branding', 'pilotos', 'icon-192.png');
+    const file = readFileSync(filePath);
+    return new Response(file, {
+      headers: {
+        'Content-Type': 'image/png',
+        'Cache-Control': 'public, max-age=604800',
+      },
+    });
+  } catch {
+    return new Response('Not found', { status: 404 });
+  }
 }

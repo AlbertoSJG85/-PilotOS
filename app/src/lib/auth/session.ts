@@ -37,8 +37,8 @@ export function setSession(token: string, user: SessionUser): void {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 
   // Set cookies for Next.js Middleware (Server-Side checking)
-  // Max-age: 7 days
-  const maxAge = 60 * 60 * 24 * 7;
+  // Max-age: 30 days — alineado con expiración JWT del backend
+  const maxAge = 60 * 60 * 24 * 30;
   document.cookie = `pilotos_token=${token}; path=/; max-age=${maxAge}; samesite=lax`;
   document.cookie = `pilotos_es_patron=${user.es_patron.toString()}; path=/; max-age=${maxAge}; samesite=lax`;
 }

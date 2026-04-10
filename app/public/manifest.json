@@ -1,26 +1,32 @@
 {
-  "name": "PilotOS — Parte Diario",
+  "name": "PilotOS — Gestión Taxi",
   "short_name": "PilotOS",
-  "description": "Registra tu parte diario de taxi",
+  "description": "Gestión profesional de taxi y VTC",
   "start_url": "/conductor",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#09090b",
-  "theme_color": "#f59e0b",
+  "background_color": "#07111E",
+  "theme_color": "#8DC63F",
   "lang": "es",
   "icons": [
     {
-      "src": "/icon-192",
+      "src": "/branding/pilotos/icon-192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
-      "src": "/icon-512",
+      "src": "/branding/pilotos/icon-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/branding/pilotos/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "shortcuts": [
@@ -28,7 +34,8 @@
       "name": "Nuevo Parte",
       "short_name": "Parte",
       "url": "/conductor/parte/nuevo",
-      "description": "Registrar parte diario"
+      "description": "Registrar parte diario",
+      "icons": [{ "src": "/branding/pilotos/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }
