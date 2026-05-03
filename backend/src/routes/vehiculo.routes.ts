@@ -53,14 +53,50 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
 
 router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const { matricula, marca, modelo, tipo_combustible, tipo_transmision } = req.body;
+        const { matricula, marca, modelo, tipo_combustible, tipo_transmision, activo } = req.body;
         const vehiculo = await prisma.vehiculo.update({
             where: { id: req.params.id },
-            data: { ...(matricula && { matricula }), ...(marca && { marca }), ...(modelo && { modelo }), ...(tipo_combustible && { tipo_combustible }), ...(tipo_transmision && { tipo_transmision }) },
+            data: { 
+                ...(matricula && { matricula }), 
+                ...(marca && { marca }), 
+                ...(modelo && { modelo }), 
+                ...(tipo_combustible && { tipo_combustible }), 
+                ...(tipo_transmision && { tipo_transmision }),
+                ...(activo !== undefined && { activo })
+            },
         });
         res.json({ status: 'OK', data: vehiculo });
     } catch (err: any) {
         console.error('[VEHICULOS] Error:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
+router.post('/:id/conductores', requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const vehiculo_id = req.params.id;
+        const { conductor_ids } = req.body;
+
+        // 1. Desactivar las asignaciones actuales de este vehículo
+        await prisma.vehiculoConductor.updateMany({
+            where: { vehiculo_id },
+            data: { activo: false }
+        });
+
+        // 2. Activar o crear las nuevas asignaciones
+        if (conductor_ids && Array.isArray(conductor_ids)) {
+            for (const conductor_id of conductor_ids) {
+                await prisma.vehiculoConductor.upsert({
+                    where: { vehiculo_id_conductor_id: { vehiculo_id, conductor_id } },
+                    update: { activo: true },
+                    create: { vehiculo_id, conductor_id, activo: true }
+                });
+            }
+        }
+
+        res.json({ status: 'OK' });
+    } catch (err: any) {
+        console.error('[VEHICULOS] Error al asignar conductores:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });

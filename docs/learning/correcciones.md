@@ -214,3 +214,70 @@ Formato: fecha | area | problema | causa | solucion | prevencion
 4. **Contexto**: El formulario de onboarding guardaba `AUTOMATICO` pero el schema Prisma documenta el valor como `AUTOMATICA`. Esto generaba datos inconsistentes en la BD.
 5. **Solución**: Corregido a `AUTOMATICA` tanto en el valor por defecto como en la opción del select.
 6. **Prevención**: Definir los valores de enum como constantes compartidas entre frontend y backend.
+
+---
+
+## 2026-05-03 · Fase 1 + Fase 2 (operacional crítico + OCR útil)
+
+### C-016 · Cierres mensuales filtraban por estado fantasma `VALIDADO`
+- Area: Backend / cierres
+- Problema: `cierre.routes.ts` filtraba partes con `estado: 'VALIDADO'`. El estado no existe en el schema Prisma (solo `BORRADOR`, `ENVIADO`, `FOTO_SUSTITUIDA`). Resultado: todos los cierres en producción salían con 0 partes.
+- Causa: Estado planeado pero nunca implementado en el flujo. Filtrado por una etiqueta sin ningún writer.
+- Solucion: Filtrado cambiado a `{ in: ['ENVIADO', 'FOTO_SUSTITUIDA'] }`. `VALIDADO` queda reservado para fase posterior con flujo real de validación si se necesita.
+- Prevencion: Cuando un estado se planee pero no se implemente, no filtrar por él. Usar test de integración que cree un parte y consulte cierres.
+
+### C-017 · PeriodFilter usaba rolling 30 días en vez de mes natural
+- Area: Frontend / filtros
+- Problema: `period-filter.tsx` con `setMonth(now.getMonth() - 1)` daba rango "hace 30 días → hoy", no del 1 del mes en curso. Default era `'all'` (histórico). Sin opción de mes anterior.
+- Causa: Implementación inicial confundió "último mes" (rolling) con "mes natural en curso".
+- Solucion: Reescrito `getRangoPeriodo()` con cálculo de calendario real. Opciones: `mes_actual`, `mes_anterior`, `semana`, `all`. Default `mes_actual`. Fechas en formato unificado `YYYY-MM-DD`.
+- Prevencion: Para periodos contables, calcular siempre con `new Date(year, month, 1)` y `new Date(year, month, 0)` (último día del mes anterior). No usar `setMonth(-1)`.
+
+### C-018 · Dashboard mezclaba histórico de gastos con periodo de partes
+- Area: Frontend + Backend / dashboard económico
+- Problema: `admin/page.tsx` filtraba partes por desde/hasta pero llamaba `getGastosResumen()` sin fechas. `/api/gastos/resumen` además ignoraba filtros de fecha y omitía gastos fijos. Beneficio estimado mezclaba periodo seleccionado con gastos históricos totales.
+- Causa: Cálculos duplicados entre dashboard e informes con implementaciones inconsistentes.
+- Solucion: Nuevo servicio `resumen.service.ts` y endpoint `GET /api/dashboard/resumen?desde=&hasta=`. Calcula partes (filtrados por estado y fecha), gastos variables (filtrados por fecha), gastos fijos (prorrateados a mensualidad por periodicidad). Admin e informes consumen el mismo endpoint.
+- Prevencion: Lógica de cálculo financiero centralizada en un único servicio backend. Nunca duplicar agregaciones en frontend.
+
+### C-019 (revisado) · Parte podía quedar `ENVIADO` sin fotos obligatorias
+- Area: Backend + Frontend / fotos parte diario
+- Problema: El parte se creaba en `ENVIADO` antes de subir fotos. Si fallaba upload o vincular, el parte quedaba válido sin fotos. La validación de rol estaba solo en frontend (eludible).
+- Causa: Diseño optimista sin estado intermedio ni validación backend.
+- Solucion: Flujo asalariado en dos pasos:
+  1. POST `/api/partes` con `borrador:true` → estado `BORRADOR` (no computa en cierres ni listados por defecto).
+  2. POST `/api/upload` + POST `/api/fotos` para cada ticket.
+  3. PATCH `/api/partes/:id/confirmar` → backend valida fotos según rol; si OK pasa a `ENVIADO`.
+  El patrón sigue creando `ENVIADO` directo sin fotos (regla de negocio intacta).
+  Reanudación: GET `/api/partes/borrador/actual?vehiculo_id=&fecha=`.
+  Descarte: DELETE `/api/partes/:id` (solo BORRADOR).
+  Limpieza: scheduler diario a las 03:00 elimina BORRADOR > 48h para evitar bloqueo del unique `[vehiculo_id, fecha_trabajada]`.
+- Prevencion: Nunca dar por válido un parte sin sus documentos obligatorios verificados en backend. Estado intermedio + validación final atómica.
+
+### C-020 · Hash de deduplicación incluía `Date.now()` y nunca detectaba duplicados
+- Area: Backend / fotos
+- Problema: `foto.routes.ts` calculaba `sha256(url + Date.now())`. Cada upload generaba un hash distinto incluso con el mismo fichero. La unicidad por `hash_sha256` en `Documento` no servía para nada.
+- Causa: Implementación inicial sin acceso al buffer del fichero.
+- Solucion: `upload.routes.ts` calcula `sha256` real del buffer al subir y devuelve `hash_sha256`. `foto.routes.ts` busca documento existente por hash; si ya está vinculado al parte responde `duplicado:true`; si existe pero no está vinculado, reutiliza el documento y crea solo el enlace.
+- Prevencion: El hash debe ser del contenido real, nunca de URL ni metadatos volátiles.
+
+### C-021 · OCR ilegible silenciado al usuario
+- Area: Frontend / fotos
+- Problema: Cuando OCR fallaba, backend devolvía 201 con `legible: false` y creaba `TareaPendiente`. El frontend no leía el campo `legible` y mostraba al usuario "✓ enviado" como si todo fuese bien.
+- Causa: Contrato de respuesta no consumido por el cliente.
+- Solucion: `vincularFoto` propaga `legible` y `duplicado`. El formulario muestra banner amarillo "Ticket subido pero poco legible" sin bloquear el envío del parte.
+- Prevencion: Cuando un endpoint devuelve un campo de estado, el cliente debe consumirlo o rechazar la respuesta.
+
+### C-022 · Sin comparación entre OCR y datos declarados
+- Area: Backend / OCR
+- Problema: Los datos extraídos por OCR se guardaban en `Documento.ocr_datos_extraidos` pero nunca se cruzaban con `ParteDiario.ingreso_bruto` ni `combustible`.
+- Causa: Funcionalidad planeada y no implementada.
+- Solucion: Nuevo `ocrComparacion.service.ts` ejecutado tras `confirmarParte`. Tolerancias: taxímetro ±3 €, combustible ±0.50 € (suma de tickets). Si supera tolerancia, crea `Anomalia` tipo `NORMAL` (no bloquea el envío). Combustible permite múltiples tickets vinculados al mismo parte.
+- Prevencion: La comparación es parte del valor del OCR; sin ella el OCR es solo storage.
+
+### C-023 · Mensajes de error de upload genéricos
+- Area: Frontend / upload
+- Problema: `upload.ts` lanzaba `throw new Error('Error subiendo foto')` para todo. El usuario no podía distinguir tamaño excesivo, formato no soportado, sesión caducada o caída del servidor.
+- Causa: Implementación mínima sin diferenciar códigos HTTP.
+- Solucion: Mapping explícito de 413 (file_too_large), 415 (invalid_mime), 401 (sesión expirada con redirect), errores de red, fallo del servidor. Backend `upload.routes.ts` añade middleware multer-error que traduce `LIMIT_FILE_SIZE` y MIME inválido a 413/415 con mensaje claro.
+- Prevencion: Diferenciar mensajes según código HTTP. El usuario debe saber si puede arreglarlo (foto más pequeña) o necesita ayuda técnica.

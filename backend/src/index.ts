@@ -21,6 +21,7 @@ import mantenimientoRoutes from './routes/mantenimiento.routes';
 import fotoRoutes from './routes/foto.routes';
 import incidenciaRoutes from './routes/incidencia.routes';
 import cierreRoutes from './routes/cierre.routes';
+import dashboardRoutes from './routes/dashboard.routes';
 
 // Routes — Internal API (GlorIA integration)
 import internalRoutes from './routes/internal.routes';
@@ -81,6 +82,7 @@ app.use('/api/mantenimientos', mantenimientoRoutes);
 app.use('/api/fotos', fotoRoutes);
 app.use('/api/incidencias', incidenciaRoutes);
 app.use('/api/cierres', cierreRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 
 

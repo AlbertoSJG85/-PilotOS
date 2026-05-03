@@ -22,8 +22,7 @@ export async function getParte(id: string): Promise<ApiResponse<ParteDiario>> {
   return apiFetch(`/api/partes/${id}`);
 }
 
-/** POST /api/partes — Contrato real del backend */
-export async function crearParte(data: {
+interface CrearParteInput {
   vehiculo_id: string;
   conductor_id: string;
   fecha_trabajada: string;
@@ -34,6 +33,27 @@ export async function crearParte(data: {
   combustible?: number;
   varios?: number;
   concepto_varios?: string;
-}): Promise<ApiResponse<ParteDiario>> {
+  /** Si true, se crea/actualiza como BORRADOR (asalariado, antes de subir fotos). */
+  borrador?: boolean;
+}
+
+/** POST /api/partes — Crea ENVIADO directo, o BORRADOR si borrador:true. */
+export async function crearParte(data: CrearParteInput): Promise<ApiResponse<ParteDiario>> {
   return apiFetch('/api/partes', { method: 'POST', body: data });
+}
+
+/** PATCH /api/partes/:id/confirmar — Asalariado confirma BORRADOR. Backend valida fotos. */
+export async function confirmarParte(id: string): Promise<ApiResponse<ParteDiario>> {
+  return apiFetch(`/api/partes/${id}/confirmar`, { method: 'PATCH', body: {} });
+}
+
+/** GET /api/partes/borrador/actual — Devuelve BORRADOR del usuario para vehículo+fecha si existe. */
+export async function getBorradorActual(vehiculo_id: string, fecha: string): Promise<ApiResponse<ParteDiario | null>> {
+  const params = new URLSearchParams({ vehiculo_id, fecha });
+  return apiFetch(`/api/partes/borrador/actual?${params.toString()}`);
+}
+
+/** DELETE /api/partes/:id — Solo permitido si estado BORRADOR. */
+export async function descartarBorrador(id: string): Promise<{ status: string }> {
+  return apiFetch(`/api/partes/${id}`, { method: 'DELETE' });
 }

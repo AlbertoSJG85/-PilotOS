@@ -94,6 +94,40 @@ async function verificarMantenimientos(): Promise<void> {
 }
 
 /**
+ * Purga partes en estado BORRADOR antiguos (> 48h).
+ * Evita que un BORRADOR olvidado bloquee el unique [vehiculo_id, fecha_trabajada]
+ * cuando el conductor abandone el flujo a medias.
+ *
+ * Solo se eliminan los enlaces a documentos; los Documento se conservan
+ * por su hash para deduplicación futura.
+ */
+async function purgarBorradoresAntiguos(): Promise<void> {
+    console.log('⏰ [Scheduler] Purgando borradores > 48h...');
+    try {
+        const limite = new Date(Date.now() - 48 * 60 * 60 * 1000);
+        const candidatos = await prisma.parteDiario.findMany({
+            where: { estado: 'BORRADOR', created_at: { lt: limite } },
+            select: { id: true },
+        });
+        if (candidatos.length === 0) {
+            console.log('⏰ [Scheduler] Sin borradores antiguos.');
+            return;
+        }
+        for (const c of candidatos) {
+            await prisma.$transaction(async (tx) => {
+                await tx.documentoEnlace.deleteMany({
+                    where: { entidad_tipo: 'PARTE_DIARIO', entidad_id: c.id },
+                });
+                await tx.parteDiario.delete({ where: { id: c.id } });
+            });
+        }
+        console.log(`⏰ [Scheduler] ${candidatos.length} borradores eliminados.`);
+    } catch (error) {
+        console.error('❌ [Scheduler] Error purgando borradores:', error);
+    }
+}
+
+/**
  * Initialize all scheduled tasks
  */
 export function iniciarScheduler(): void {
@@ -103,8 +137,13 @@ export function iniciarScheduler(): void {
     cron.schedule('0 8 * * *', () => {
         verificarMantenimientos();
     });
-
     console.log('  ✅ Verificación de mantenimientos: diario a las 08:00');
+
+    // Every day at 03:00 — purge stale BORRADOR partes
+    cron.schedule('0 3 * * *', () => {
+        purgarBorradoresAntiguos();
+    });
+    console.log('  ✅ Purga de borradores antiguos: diario a las 03:00');
 
     // Run immediately on startup in development
     if (process.env.NODE_ENV === 'development') {
@@ -113,4 +152,4 @@ export function iniciarScheduler(): void {
     }
 }
 
-export { verificarMantenimientos };
+export { verificarMantenimientos, purgarBorradoresAntiguos };

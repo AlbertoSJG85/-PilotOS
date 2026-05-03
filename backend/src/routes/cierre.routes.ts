@@ -48,11 +48,13 @@ router.post('/', requireRol('admin', 'patron'), async (req, res, next) => {
         const fechaFin = new Date(hasta);
 
         // 1. Obtener partes diarios
+        // R-CI-001 (MVP): se computan partes ENVIADO y FOTO_SUSTITUIDA. BORRADOR queda fuera.
+        // El estado VALIDADO no existe en el schema actual; queda reservado para fase posterior.
         const partes = await prisma.parteDiario.findMany({
             where: {
                 vehiculo: { cliente_id },
                 fecha_trabajada: { gte: fechaInicio, lte: fechaFin },
-                estado: 'VALIDADO' // Consideramos solo partes validados (o todos? PilotOS_Master dice último validado)
+                estado: { in: ['ENVIADO', 'FOTO_SUSTITUIDA'] }
             },
             include: { calculo: true }
         });

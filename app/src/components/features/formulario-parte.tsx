@@ -3,7 +3,15 @@
 import { useState, useRef, useEffect, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Input, Card, CardTitle } from '@/components/ui';
-import { crearParte, uploadFoto, vincularFoto } from '@/lib/api';
+import {
+  crearParte,
+  confirmarParte,
+  getBorradorActual,
+  descartarBorrador,
+  uploadFoto,
+  vincularFoto,
+} from '@/lib/api';
+import { ApiError } from '@/lib/api/fetcher';
 import { getSessionUser } from '@/lib/auth';
 import { Camera, ChevronLeft, ChevronRight, Check, AlertTriangle, Loader2 } from 'lucide-react';
 import type { Vehiculo } from '@/types';
@@ -34,23 +42,29 @@ function localTodayString(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-type UploadStep = '' | 'parte' | 'taxi' | 'gasoil';
+type UploadStep = '' | 'parte' | 'taxi' | 'gasoil' | 'confirmar';
 
 const uploadLabel: Record<UploadStep, string> = {
   '': 'Enviando...',
-  parte: 'Guardando parte...',
+  parte: 'Guardando borrador...',
   taxi: 'Subiendo ticket taxímetro...',
   gasoil: 'Subiendo ticket combustible...',
+  confirmar: 'Confirmando parte...',
 };
 
 export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
   const router = useRouter();
   const user = getSessionUser();
+  const isPatron = user?.es_patron === true;
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [uploadStep, setUploadStep] = useState<UploadStep>('');
   const [error, setError] = useState('');
+  const [warningIlegible, setWarningIlegible] = useState<string[]>([]);
   const [showErrors, setShowErrors] = useState(false);
+  const [borradorId, setBorradorId] = useState<string | null>(null);
+  const [taxiUploaded, setTaxiUploaded] = useState(false);
+  const [gasoilUploaded, setGasoilUploaded] = useState(false);
 
   const initialVehiculo = vehiculos.length === 1 ? vehiculos[0] : null;
 
@@ -73,7 +87,7 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
   const taxiInputRef = useRef<HTMLInputElement>(null);
   const gasoilInputRef = useRef<HTMLInputElement>(null);
 
-  // Cuando el usuario cambia de vehículo, pre-rellenar km_inicio si no lo ha tocado
+  // Pre-rellenar km_inicio según vehículo seleccionado
   const [kmEdited, setKmEdited] = useState(false);
   useEffect(() => {
     if (!kmEdited && form.vehiculo_id) {
@@ -82,6 +96,35 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
     }
   }, [form.vehiculo_id, kmEdited, vehiculos]);
 
+  // Reanudación: si existe BORRADOR del usuario para vehículo+fecha, recuperarlo.
+  useEffect(() => {
+    if (isPatron) return;
+    if (!form.vehiculo_id || !form.fecha_trabajada) return;
+    let cancel = false;
+    getBorradorActual(form.vehiculo_id, form.fecha_trabajada)
+      .then((r) => {
+        if (cancel || !r.data) return;
+        const b = r.data as any;
+        setBorradorId(b.id);
+        setForm((prev) => ({
+          ...prev,
+          km_inicio: b.km_inicio ?? prev.km_inicio,
+          km_fin: b.km_fin ?? prev.km_fin,
+          ingreso_bruto: b.ingreso_bruto ?? prev.ingreso_bruto,
+          ingreso_datafono: b.ingreso_datafono ?? prev.ingreso_datafono,
+          combustible: b.combustible ?? prev.combustible,
+          varios: b.varios ?? prev.varios,
+          concepto_varios: b.concepto_varios ?? prev.concepto_varios,
+        }));
+        // Detectar fotos ya vinculadas en el borrador.
+        const docs = (b.documentos || []) as Array<{ documento: { tipo: string } }>;
+        if (docs.some((d) => d.documento.tipo === 'TICKET_TAXIMETRO')) setTaxiUploaded(true);
+        if (docs.some((d) => d.documento.tipo === 'TICKET_GASOIL' || d.documento.tipo === 'TICKET_COMBUSTIBLE')) setGasoilUploaded(true);
+      })
+      .catch(() => { /* sin borrador o sin permiso, ignoramos */ });
+    return () => { cancel = true; };
+  }, [form.vehiculo_id, form.fecha_trabajada, isPatron]);
+
   function update<K extends keyof FormData>(field: K, value: FormData[K]) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
@@ -89,8 +132,8 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
   function handleFileChange(type: 'taxi' | 'gasoil', file: File | null) {
     if (!file) return;
     const url = URL.createObjectURL(file);
-    if (type === 'taxi') { setTicketTaxi(file); setPreviewTaxi(url); }
-    else { setTicketGasoil(file); setPreviewGasoil(url); }
+    if (type === 'taxi') { setTicketTaxi(file); setPreviewTaxi(url); setTaxiUploaded(false); }
+    else { setTicketGasoil(file); setPreviewGasoil(url); setGasoilUploaded(false); }
   }
 
   function getStepErrors(): string[] {
@@ -118,10 +161,11 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
       }
     }
     if (step === 3) {
-      // Propietarios: fotos opcionales. Asalariados: obligatorias.
-      const isPatron = user?.es_patron === true;
-      if (!isPatron && !ticketTaxi) errs.push('El ticket del taxímetro es obligatorio');
-      if (!isPatron && Number(form.combustible) > 0 && !ticketGasoil) {
+      // Patrón: opcional. Asalariado: obligatorio.
+      const tieneTaxi = !!ticketTaxi || taxiUploaded;
+      const tieneGasoil = !!ticketGasoil || gasoilUploaded;
+      if (!isPatron && !tieneTaxi) errs.push('El ticket del taxímetro es obligatorio');
+      if (!isPatron && Number(form.combustible) > 0 && !tieneGasoil) {
         errs.push('El ticket de combustible es obligatorio cuando hay repostaje');
       }
     }
@@ -144,8 +188,19 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
 
   function handleBack() {
     if (step > 0) { prev(); return; }
-    // En step 0 → volver a la app conductor (no router.back() para evitar salir de la PWA)
     router.push(returnPath);
+  }
+
+  async function handleDescartar() {
+    if (!borradorId) { router.push(returnPath); return; }
+    if (!confirm('¿Descartar el borrador y empezar de cero? No se guardará nada.')) return;
+    try {
+      await descartarBorrador(borradorId);
+      setBorradorId(null);
+      router.push(returnPath);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo descartar el borrador.');
+    }
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -153,11 +208,10 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
     if (!canAdvance || submitting) return;
     setSubmitting(true);
     setError('');
+    setWarningIlegible([]);
 
     try {
-      // 1. Crear parte
-      setUploadStep('parte');
-      const res = await crearParte({
+      const baseData = {
         vehiculo_id: form.vehiculo_id,
         conductor_id: user?.conductor_id || '',
         fecha_trabajada: form.fecha_trabajada,
@@ -168,28 +222,86 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
         combustible: form.combustible !== '' ? Number(form.combustible) : undefined,
         varios: form.varios !== '' ? Number(form.varios) : undefined,
         concepto_varios: form.concepto_varios || undefined,
-      });
+      };
 
+      // Patrón: flujo directo (sin BORRADOR), las fotos son opcionales.
+      if (isPatron) {
+        setUploadStep('parte');
+        const res = await crearParte(baseData);
+        const parteId = res.data?.id;
+        if (!parteId) throw new Error('No se obtuvo ID del parte');
+
+        const avisos: string[] = [];
+        if (ticketTaxi) {
+          setUploadStep('taxi');
+          const up = await uploadFoto(ticketTaxi);
+          const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_TAXIMETRO', url: up.url, hash_sha256: up.hash_sha256 });
+          if (!v.legible) avisos.push('El ticket de taxímetro se ha subido pero no se ha leído bien. Puedes reemplazarlo desde el detalle del parte.');
+        }
+        if (ticketGasoil && Number(form.combustible) > 0) {
+          setUploadStep('gasoil');
+          const up = await uploadFoto(ticketGasoil);
+          const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_GASOIL', url: up.url, hash_sha256: up.hash_sha256 });
+          if (!v.legible) avisos.push('El ticket de combustible se ha subido pero no se ha leído bien. Puedes reemplazarlo desde el detalle del parte.');
+        }
+        if (avisos.length > 0) {
+          setWarningIlegible(avisos);
+          setTimeout(() => router.push(returnPath), 2500);
+        } else {
+          router.push(returnPath);
+        }
+        return;
+      }
+
+      // Asalariado: 1) BORRADOR  2) fotos  3) confirmar
+      setUploadStep('parte');
+      const res = await crearParte({ ...baseData, borrador: true });
       const parteId = res.data?.id;
       if (!parteId) throw new Error('No se obtuvo ID del parte');
+      setBorradorId(parteId);
 
-      // 2. Subir ticket taxímetro
+      const avisos: string[] = [];
+
       if (ticketTaxi) {
         setUploadStep('taxi');
-        const uploaded = await uploadFoto(ticketTaxi);
-        await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_TAXIMETRO', url: uploaded.url });
+        const up = await uploadFoto(ticketTaxi);
+        const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_TAXIMETRO', url: up.url, hash_sha256: up.hash_sha256 });
+        setTaxiUploaded(true);
+        if (!v.legible) avisos.push('El ticket de taxímetro está poco legible. El parte se enviará igualmente; podrás reemplazarlo después si quieres.');
       }
 
-      // 3. Subir ticket combustible si aplica
       if (ticketGasoil && Number(form.combustible) > 0) {
         setUploadStep('gasoil');
-        const uploaded = await uploadFoto(ticketGasoil);
-        await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_GASOIL', url: uploaded.url });
+        const up = await uploadFoto(ticketGasoil);
+        const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_GASOIL', url: up.url, hash_sha256: up.hash_sha256 });
+        setGasoilUploaded(true);
+        if (!v.legible) avisos.push('El ticket de combustible está poco legible. El parte se enviará igualmente; podrás reemplazarlo después si quieres.');
       }
 
-      router.push(returnPath);
+      setUploadStep('confirmar');
+      await confirmarParte(parteId);
+
+      if (avisos.length > 0) {
+        setWarningIlegible(avisos);
+        setTimeout(() => router.push(returnPath), 2500);
+      } else {
+        router.push(returnPath);
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error al enviar el parte. Inténtalo de nuevo.');
+      // Mensajes específicos según código de error del backend.
+      let msg = 'Error al enviar el parte. Inténtalo de nuevo.';
+      if (err instanceof ApiError) {
+        if (err.code === 'falta_taximetro') msg = 'Falta el ticket del taxímetro. Adjúntalo y vuelve a confirmar.';
+        else if (err.code === 'falta_gasoil') msg = 'Falta el ticket de combustible. Adjúntalo y vuelve a confirmar.';
+        else if (err.code === 'file_too_large') msg = err.message;
+        else if (err.code === 'invalid_mime') msg = err.message;
+        else if (err.code === 'network_error') msg = 'Sin conexión. Reintenta cuando vuelvas.';
+        else if (err.code === 'duplicate_parte') msg = 'Ya existe un parte enviado para este vehículo y fecha.';
+        else if (err.message) msg = err.message;
+      } else if (err instanceof Error) {
+        msg = err.message;
+      }
+      setError(msg);
     } finally {
       setSubmitting(false);
       setUploadStep('');
@@ -212,6 +324,19 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
           </div>
         ))}
       </div>
+
+      {/* Aviso de borrador recuperado */}
+      {borradorId && step === 0 && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl bg-amber-950/40 border border-amber-900/50 p-3 text-xs text-amber-300">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="flex-1">
+            <p>Tienes un borrador en curso para este vehículo y fecha. Lo hemos recuperado.</p>
+            <button type="button" onClick={handleDescartar} className="mt-1 underline hover:text-amber-200">
+              Descartar y empezar de cero
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Step 0: Vehículo y Fecha ─────────────────────────────────── */}
       {step === 0 && (
@@ -364,16 +489,17 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
           <CardTitle>Tickets del turno</CardTitle>
           <div className="mt-4 space-y-6">
 
-            {/* Ticket taxímetro — obligatorio para asalariados, opcional para propietarios */}
             <div>
               <p className="mb-2 text-sm font-medium text-zinc-300">
                 Ticket taxímetro{' '}
-                {user?.es_patron
+                {isPatron
                   ? <span className="text-zinc-500 text-xs font-normal">(opcional)</span>
                   : <span className="text-red-400">*</span>
                 }
+                {taxiUploaded && !ticketTaxi && (
+                  <span className="ml-2 text-emerald-400 text-xs">✓ Ya subido</span>
+                )}
               </p>
-              {/* Sin capture="environment" para que iOS permita elegir cámara o galería */}
               <input
                 ref={taxiInputRef}
                 type="file"
@@ -407,15 +533,17 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
               )}
             </div>
 
-            {/* Ticket combustible — obligatorio para asalariados si repostó, opcional para propietarios */}
             {Number(form.combustible) > 0 && (
               <div>
                 <p className="mb-2 text-sm font-medium text-zinc-300">
                   Ticket combustible{' '}
-                  {user?.es_patron
+                  {isPatron
                     ? <span className="text-zinc-500 text-xs font-normal">(opcional)</span>
                     : <span className="text-red-400">*</span>
                   }
+                  {gasoilUploaded && !ticketGasoil && (
+                    <span className="ml-2 text-emerald-400 text-xs">✓ Ya subido</span>
+                  )}
                 </p>
                 <input
                   ref={gasoilInputRef}
@@ -489,14 +617,14 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
             )}
             <ConfirmRow
               label="Ticket taxímetro"
-              value={ticketTaxi ? '✓ Adjunto' : user?.es_patron ? '— Opcional' : '✗ Falta'}
-              highlight={!ticketTaxi && !user?.es_patron}
+              value={(ticketTaxi || taxiUploaded) ? '✓ Adjunto' : isPatron ? '— Opcional' : '✗ Falta'}
+              highlight={!(ticketTaxi || taxiUploaded) && !isPatron}
             />
             {Number(form.combustible) > 0 && (
               <ConfirmRow
                 label="Ticket combustible"
-                value={ticketGasoil ? '✓ Adjunto' : user?.es_patron ? '— Opcional' : '✗ Falta'}
-                highlight={!ticketGasoil && !user?.es_patron}
+                value={(ticketGasoil || gasoilUploaded) ? '✓ Adjunto' : isPatron ? '— Opcional' : '✗ Falta'}
+                highlight={!(ticketGasoil || gasoilUploaded) && !isPatron}
               />
             )}
           </div>
@@ -512,6 +640,16 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <ul className="space-y-1">
             {stepErrors.map((e) => <li key={e}>{e}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* Aviso de imagen ilegible (parte sí enviado) */}
+      {warningIlegible.length > 0 && (
+        <div className="mt-3 flex items-start gap-2 rounded-xl bg-amber-950/60 border border-amber-900/50 p-4 text-sm text-amber-300">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <ul className="space-y-1">
+            {warningIlegible.map((e, i) => <li key={i}>{e}</li>)}
           </ul>
         </div>
       )}

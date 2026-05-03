@@ -38,6 +38,7 @@ export interface Vehiculo {
   tipo_combustible?: string;
   tipo_transmision?: string;
   fecha_matriculacion?: string;
+  conductores?: any[];
 }
 
 export interface ParteDiario {

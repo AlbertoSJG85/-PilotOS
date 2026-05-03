@@ -5,10 +5,11 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/layout';
 import { StatCard, Card, Badge, Skeleton, Button } from '@/components/ui';
-import { getPartes, getGastosResumen, getVehiculos, getAnomalias, getMantenimientosProximos } from '@/lib/api';
+import { getPartes, getResumenDashboard, getVehiculos, getAnomalias, getMantenimientosProximos } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { DollarSign, Fuel, TrendingUp, Wrench, AlertTriangle, ArrowRight, Activity, CalendarDays, FileText, Car } from 'lucide-react';
 import type { ParteDiario, Vehiculo, Anomalia, MantenimientoVehiculo } from '@/types';
+import type { ResumenDashboard } from '@/lib/api/dashboard';
 import { PeriodFilter } from '@/components/features/period-filter';
 
 function AdminDashboardContent() {
@@ -18,7 +19,7 @@ function AdminDashboardContent() {
 
   const [partes, setPartes] = useState<ParteDiario[]>([]);
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
-  const [gastosTotal, setGastosTotal] = useState(0);
+  const [resumen, setResumen] = useState<ResumenDashboard | null>(null);
   const [anomalias, setAnomalias] = useState<Anomalia[]>([]);
   const [mantenimientos, setMantenimientos] = useState<MantenimientoVehiculo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,13 +29,13 @@ function AdminDashboardContent() {
 
     Promise.all([
       getPartes({ desde, hasta }).then((r) => r.data || []),
-      getGastosResumen().then((r) => r.total?.importe || 0),
+      getResumenDashboard({ desde, hasta }).then((r) => r.data),
       getVehiculos().then((r) => r.data || []),
       getAnomalias().then((r) => r.data || []),
     ])
-      .then(([rPartes, rGastos, rVehiculos, rAnomalias]) => {
+      .then(([rPartes, rResumen, rVehiculos, rAnomalias]) => {
         setPartes(rPartes);
-        setGastosTotal(rGastos);
+        setResumen(rResumen);
         setVehiculos(rVehiculos);
         setAnomalias(rAnomalias);
 
@@ -58,10 +59,11 @@ function AdminDashboardContent() {
       .finally(() => setLoading(false));
   }, [desde, hasta]);
 
-  const totalBruto = partes.reduce((sum, p) => sum + Number(p.ingreso_bruto || 0), 0);
-  const totalCombustible = partes.reduce((sum, p) => sum + Number(p.combustible || 0), 0);
-  const totalNeto = partes.reduce((sum, p) => sum + Number(p.calculo?.neto_diario || 0), 0);
-  const beneficioEstimado = partes.reduce((sum, p) => sum + Number(p.calculo?.parte_patron || 0), 0) - gastosTotal;
+  const totalBruto = resumen?.bruto ?? 0;
+  const totalCombustible = resumen?.combustible ?? 0;
+  const totalNeto = resumen?.neto ?? 0;
+  const gastosTotal = (resumen?.gastos_variables ?? 0) + (resumen?.gastos_fijos_prorrateados ?? 0);
+  const beneficioEstimado = resumen?.beneficio_estimado ?? 0;
 
   const recentPartes = partes.slice(0, 4);
   const pendingAnomalias = anomalias.filter(a => !a.notificada).slice(0, 4);
@@ -91,7 +93,7 @@ function AdminDashboardContent() {
         <StatCard title="Beneficio Estimado"  value={formatCurrency(beneficioEstimado)}   subtitle="Ingresos - Gastos"                icon={TrendingUp}  variant={beneficioEstimado >= 0 ? 'success' : 'danger'} />
         <StatCard title="Neto Operativo"      value={formatCurrency(totalNeto)}           subtitle="Rebote líquido"                   icon={Activity} />
         <StatCard title="Combustible"         value={formatCurrency(totalCombustible)}    subtitle="Descontado en Turnos"             icon={Fuel}        variant="warning" />
-        <StatCard title="Gastos Acumulados"   value={formatCurrency(gastosTotal)}         subtitle="Fijos + Variables"               icon={Wrench}      variant="danger" />
+        <StatCard title="Gastos del periodo"  value={formatCurrency(gastosTotal)}         subtitle="Variables + fijos prorrateados"  icon={Wrench}      variant="danger" />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">

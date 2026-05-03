@@ -1,10 +1,22 @@
 import { apiFetch } from './fetcher';
 
-/** POST /api/fotos — Vincular foto a parte con OCR */
+export interface VincularFotoResponse {
+  status: string;
+  data: { id: string; estado: string; tipo: string };
+  legible: boolean;
+  duplicado?: boolean;
+  motivo?: string;
+}
+
+/**
+ * POST /api/fotos — Vincular foto a parte con OCR.
+ * Devuelve `legible` (false si el OCR no la entendió) y `duplicado` (si reutilizó documento existente).
+ */
 export async function vincularFoto(data: {
   parte_diario_id: string;
-  tipo: 'TICKET_TAXIMETRO' | 'TICKET_GASOIL';
+  tipo: 'TICKET_TAXIMETRO' | 'TICKET_GASOIL' | 'TICKET_COMBUSTIBLE';
   url: string;
-}): Promise<{ status: string; data: unknown; legible: boolean }> {
+  hash_sha256?: string | null;
+}): Promise<VincularFotoResponse> {
   return apiFetch('/api/fotos', { method: 'POST', body: data });
 }
