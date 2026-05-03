@@ -47,10 +47,12 @@ export async function compararDocumentosConParte(parte_diario_id: string): Promi
         .map((e) => e.documento)
         .filter((d) => (d.tipo === 'TICKET_GASOIL' || d.tipo === 'TICKET_COMBUSTIBLE') && d.estado !== 'BLOQUEADO');
 
-    // 1. Taxímetro: si hay algún ticket con importe leído, comparar contra el bruto.
+    // 1. Taxímetro: solo comparar si el OCR validó el ticket (valido === true).
+    //    Si el OCR leyó algo pero no llegó a validar (fecha ausente, confianza baja, etc.),
+    //    no es una anomalía — es resultado no concluyente y no debe penalizar al conductor.
     for (const doc of docsTaxi) {
         const datos = leerDatosOcr(doc.ocr_datos_extraidos);
-        if (!datos?.importe) continue;
+        if (!datos?.importe || !datos.valido) continue;
         const diff = Math.abs(datos.importe - ingresoDeclarado);
         if (diff > TOLERANCIA_TAXIMETRO_EUR) {
             await crearAnomalia(parte.conductor_id,

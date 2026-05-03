@@ -81,9 +81,9 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
   });
 
   const [ticketTaxi, setTicketTaxi] = useState<File | null>(null);
-  const [ticketGasoil, setTicketGasoil] = useState<File | null>(null);
+  const [ticketsGasoil, setTicketsGasoil] = useState<File[]>([]);
   const [previewTaxi, setPreviewTaxi] = useState<string | null>(null);
-  const [previewGasoil, setPreviewGasoil] = useState<string | null>(null);
+  const [previewsGasoil, setPreviewsGasoil] = useState<string[]>([]);
   const taxiInputRef = useRef<HTMLInputElement>(null);
   const gasoilInputRef = useRef<HTMLInputElement>(null);
 
@@ -133,7 +133,16 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
     if (!file) return;
     const url = URL.createObjectURL(file);
     if (type === 'taxi') { setTicketTaxi(file); setPreviewTaxi(url); setTaxiUploaded(false); }
-    else { setTicketGasoil(file); setPreviewGasoil(url); setGasoilUploaded(false); }
+    else {
+      setTicketsGasoil((prev) => [...prev, file]);
+      setPreviewsGasoil((prev) => [...prev, url]);
+      setGasoilUploaded(false);
+    }
+  }
+
+  function removeGasoil(idx: number) {
+    setTicketsGasoil((prev) => prev.filter((_, i) => i !== idx));
+    setPreviewsGasoil((prev) => prev.filter((_, i) => i !== idx));
   }
 
   function getStepErrors(): string[] {
@@ -163,7 +172,7 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
     if (step === 3) {
       // Patrón: opcional. Asalariado: obligatorio.
       const tieneTaxi = !!ticketTaxi || taxiUploaded;
-      const tieneGasoil = !!ticketGasoil || gasoilUploaded;
+      const tieneGasoil = ticketsGasoil.length > 0 || gasoilUploaded;
       if (!isPatron && !tieneTaxi) errs.push('El ticket del taxímetro es obligatorio');
       if (!isPatron && Number(form.combustible) > 0 && !tieneGasoil) {
         errs.push('El ticket de combustible es obligatorio cuando hay repostaje');
@@ -238,11 +247,13 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
           const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_TAXIMETRO', url: up.url, hash_sha256: up.hash_sha256 });
           if (!v.legible) avisos.push('El ticket de taxímetro se ha subido pero no se ha leído bien. Puedes reemplazarlo desde el detalle del parte.');
         }
-        if (ticketGasoil && Number(form.combustible) > 0) {
-          setUploadStep('gasoil');
-          const up = await uploadFoto(ticketGasoil);
-          const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_GASOIL', url: up.url, hash_sha256: up.hash_sha256 });
-          if (!v.legible) avisos.push('El ticket de combustible se ha subido pero no se ha leído bien. Puedes reemplazarlo desde el detalle del parte.');
+        if (ticketsGasoil.length > 0 && Number(form.combustible) > 0) {
+          for (const file of ticketsGasoil) {
+            setUploadStep('gasoil');
+            const up = await uploadFoto(file);
+            const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_GASOIL', url: up.url, hash_sha256: up.hash_sha256 });
+            if (!v.legible) avisos.push('Un ticket de combustible se ha subido pero no se ha leído bien. Puedes reemplazarlo desde el detalle del parte.');
+          }
         }
         if (avisos.length > 0) {
           setWarningIlegible(avisos);
@@ -270,12 +281,14 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
         if (!v.legible) avisos.push('El ticket de taxímetro está poco legible. El parte se enviará igualmente; podrás reemplazarlo después si quieres.');
       }
 
-      if (ticketGasoil && Number(form.combustible) > 0) {
-        setUploadStep('gasoil');
-        const up = await uploadFoto(ticketGasoil);
-        const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_GASOIL', url: up.url, hash_sha256: up.hash_sha256 });
+      if (ticketsGasoil.length > 0 && Number(form.combustible) > 0) {
+        for (const file of ticketsGasoil) {
+          setUploadStep('gasoil');
+          const up = await uploadFoto(file);
+          const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_GASOIL', url: up.url, hash_sha256: up.hash_sha256 });
+          if (!v.legible) avisos.push('Un ticket de combustible está poco legible. El parte se enviará igualmente; podrás reemplazarlo después si quieres.');
+        }
         setGasoilUploaded(true);
-        if (!v.legible) avisos.push('El ticket de combustible está poco legible. El parte se enviará igualmente; podrás reemplazarlo después si quieres.');
       }
 
       setUploadStep('confirmar');
@@ -541,7 +554,7 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
                     ? <span className="text-zinc-500 text-xs font-normal">(opcional)</span>
                     : <span className="text-red-400">*</span>
                   }
-                  {gasoilUploaded && !ticketGasoil && (
+                  {gasoilUploaded && ticketsGasoil.length === 0 && (
                     <span className="ml-2 text-emerald-400 text-xs">✓ Ya subido</span>
                   )}
                 </p>
@@ -550,32 +563,35 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
                   type="file"
                   accept="image/*"
                   className="hidden"
-                  onChange={(e) => handleFileChange('gasoil', e.target.files?.[0] || null)}
+                  onChange={(e) => { handleFileChange('gasoil', e.target.files?.[0] || null); if (gasoilInputRef.current) gasoilInputRef.current.value = ''; }}
                 />
-                {previewGasoil ? (
-                  <div className="relative rounded-xl overflow-hidden">
-                    <img src={previewGasoil} alt="Ticket combustible" className="h-44 w-full object-cover" />
-                    <button
-                      type="button"
-                      onClick={() => gasoilInputRef.current?.click()}
-                      className="absolute right-2 top-2 flex items-center gap-1.5 rounded-xl bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 transition-colors"
-                    >
-                      <Camera className="h-3.5 w-3.5" /> Cambiar
-                    </button>
-                  </div>
-                ) : (
+                <div className="space-y-2">
+                  {previewsGasoil.map((url, idx) => (
+                    <div key={idx} className="relative rounded-xl overflow-hidden">
+                      <img src={url} alt={`Ticket combustible ${idx + 1}`} className="h-36 w-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => removeGasoil(idx)}
+                        className="absolute right-2 top-2 flex items-center gap-1.5 rounded-xl bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-zinc-800 transition-colors"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  ))}
                   <button
                     type="button"
                     onClick={() => gasoilInputRef.current?.click()}
-                    className="flex h-44 w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-zinc-700 bg-zinc-900/50 text-zinc-400 hover:border-blue-500/70 hover:text-blue-400 active:bg-zinc-800 transition-colors"
+                    className="flex h-36 w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-zinc-700 bg-zinc-900/50 text-zinc-400 hover:border-blue-500/70 hover:text-blue-400 active:bg-zinc-800 transition-colors"
                   >
-                    <Camera className="h-8 w-8" />
+                    <Camera className="h-7 w-7" />
                     <div className="text-center">
-                      <p className="text-sm font-semibold">Foto del ticket de gasoil</p>
+                      <p className="text-sm font-semibold">
+                        {ticketsGasoil.length === 0 ? 'Foto del ticket de gasoil' : 'Añadir otro ticket'}
+                      </p>
                       <p className="text-xs mt-0.5 text-zinc-600">Cámara o galería</p>
                     </div>
                   </button>
-                )}
+                </div>
               </div>
             )}
           </div>
@@ -623,8 +639,14 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
             {Number(form.combustible) > 0 && (
               <ConfirmRow
                 label="Ticket combustible"
-                value={(ticketGasoil || gasoilUploaded) ? '✓ Adjunto' : isPatron ? '— Opcional' : '✗ Falta'}
-                highlight={!(ticketGasoil || gasoilUploaded) && !isPatron}
+                value={
+                  (ticketsGasoil.length > 0 || gasoilUploaded)
+                    ? ticketsGasoil.length > 1
+                      ? `✓ ${ticketsGasoil.length} tickets`
+                      : '✓ Adjunto'
+                    : isPatron ? '— Opcional' : '✗ Falta'
+                }
+                highlight={!(ticketsGasoil.length > 0 || gasoilUploaded) && !isPatron}
               />
             )}
           </div>
