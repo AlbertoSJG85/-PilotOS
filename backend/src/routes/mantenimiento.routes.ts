@@ -116,8 +116,38 @@ router.put('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
         } = req.body;
 
         const updated = await prisma.$transaction(async (tx) => {
-            const current = await tx.mantenimientoVehiculo.findUnique({ where: { id: req.params.id } });
+            const current = await tx.mantenimientoVehiculo.findUnique({ 
+                where: { id: req.params.id },
+                include: { catalogo: true }
+            });
             if (!current) throw new Error('not_found');
+
+            let newProximoKm = proximo_km !== undefined ? proximo_km : undefined;
+            let newProximaFecha = proxima_fecha !== undefined ? (proxima_fecha ? new Date(proxima_fecha) : null) : undefined;
+
+            // Recalcular Km si cambia frecuencia o última ejecución y NO se manda próximo km explícito
+            if (proximo_km === undefined && (frecuencia_km_personalizada !== undefined || ultima_ejecucion_km !== undefined)) {
+                const uKm = ultima_ejecucion_km !== undefined ? ultima_ejecucion_km : current.ultima_ejecucion_km;
+                const fKm = frecuencia_km_personalizada !== undefined ? frecuencia_km_personalizada : 
+                           (current.frecuencia_km_personalizada || current.frecuencia_aprendida || current.catalogo.frecuencia_km);
+                
+                if (uKm != null && fKm != null) {
+                    newProximoKm = uKm + fKm;
+                }
+            }
+
+            // Recalcular Fecha si cambia frecuencia o última ejecución y NO se manda próxima fecha explícita
+            if (proxima_fecha === undefined && (frecuencia_meses_personalizada !== undefined || ultima_ejecucion_fecha !== undefined)) {
+                const uFecha = ultima_ejecucion_fecha !== undefined ? (ultima_ejecucion_fecha ? new Date(ultima_ejecucion_fecha) : null) : current.ultima_ejecucion_fecha;
+                const fMeses = frecuencia_meses_personalizada !== undefined ? frecuencia_meses_personalizada : 
+                              (current.frecuencia_meses_personalizada || current.catalogo.frecuencia_meses);
+                
+                if (uFecha != null && fMeses != null) {
+                    const d = new Date(uFecha);
+                    d.setMonth(d.getMonth() + fMeses);
+                    newProximaFecha = d;
+                }
+            }
 
             const m = await tx.mantenimientoVehiculo.update({
                 where: { id: req.params.id },
@@ -125,8 +155,8 @@ router.put('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
                     activo: activo !== undefined ? activo : undefined,
                     frecuencia_km_personalizada: frecuencia_km_personalizada !== undefined ? frecuencia_km_personalizada : undefined,
                     frecuencia_meses_personalizada: frecuencia_meses_personalizada !== undefined ? frecuencia_meses_personalizada : undefined,
-                    proximo_km: proximo_km !== undefined ? proximo_km : undefined,
-                    proxima_fecha: proxima_fecha ? new Date(proxima_fecha) : undefined,
+                    proximo_km: newProximoKm,
+                    proxima_fecha: newProximaFecha,
                     ultima_ejecucion_km: ultima_ejecucion_km !== undefined ? ultima_ejecucion_km : undefined,
                     ultima_ejecucion_fecha: ultima_ejecucion_fecha ? new Date(ultima_ejecucion_fecha) : undefined,
                 }

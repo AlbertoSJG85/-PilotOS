@@ -242,7 +242,17 @@ export default function MantenimientosPage() {
                               <select 
                                 className="w-full h-8 rounded border border-zinc-700 bg-zinc-900 px-2 text-xs text-zinc-100"
                                 value={editForm.frecuencia_meses_personalizada || ''}
-                                onChange={(e) => setEditForm({ ...editForm, frecuencia_meses_personalizada: e.target.value ? parseInt(e.target.value) : null })}
+                                onChange={(e) => {
+                                  const val = e.target.value ? parseInt(e.target.value) : null;
+                                  const fMeses = val || m.catalogo.frecuencia_meses;
+                                  let next = editForm.proxima_fecha;
+                                  if (editForm.ultima_ejecucion_fecha && fMeses) {
+                                    const d = new Date(editForm.ultima_ejecucion_fecha);
+                                    d.setMonth(d.getMonth() + fMeses);
+                                    next = d.toISOString().split('T')[0];
+                                  }
+                                  setEditForm({ ...editForm, frecuencia_meses_personalizada: val, proxima_fecha: next });
+                                }}
                               >
                                 <option value="">Usar valor por defecto</option>
                                 <option value="1">Mensual (1)</option>
@@ -256,7 +266,15 @@ export default function MantenimientosPage() {
                                 type="number" className="h-8 text-xs"
                                 placeholder="Vacío para usar defecto"
                                 value={editForm.frecuencia_km_personalizada || ''}
-                                onChange={(e) => setEditForm({ ...editForm, frecuencia_km_personalizada: e.target.value ? parseInt(e.target.value) : null })}
+                                onChange={(e) => {
+                                  const val = e.target.value ? parseInt(e.target.value) : null;
+                                  const fKm = val || m.frecuencia_aprendida || m.catalogo.frecuencia_km;
+                                  let next = editForm.proximo_km;
+                                  if (editForm.ultima_ejecucion_km != null && fKm != null) {
+                                    next = editForm.ultima_ejecucion_km + fKm;
+                                  }
+                                  setEditForm({ ...editForm, frecuencia_km_personalizada: val, proximo_km: next });
+                                }}
                               />
                             )}
                             <p className="text-[9px] text-zinc-500">Déjalo vacío para usar la frecuencia del catálogo.</p>
@@ -288,7 +306,13 @@ export default function MantenimientosPage() {
                             <Input
                               type="number" className="h-8 text-xs"
                               value={editForm.ultima_ejecucion_km || ''}
-                              onChange={(e) => setEditForm({ ...editForm, ultima_ejecucion_km: e.target.value ? parseInt(e.target.value) : null })}
+                              onChange={(e) => {
+                                const uKm = e.target.value ? parseInt(e.target.value) : null;
+                                const fKm = editForm.frecuencia_km_personalizada || m.frecuencia_aprendida || m.catalogo.frecuencia_km;
+                                let next = editForm.proximo_km;
+                                if (uKm != null && fKm != null) next = uKm + fKm;
+                                setEditForm({ ...editForm, ultima_ejecucion_km: uKm, proximo_km: next });
+                              }}
                             />
                           </div>
                           <div className="space-y-1">
@@ -296,7 +320,17 @@ export default function MantenimientosPage() {
                             <Input
                               type="date" className="h-8 text-xs"
                               value={editForm.ultima_ejecucion_fecha || ''}
-                              onChange={(e) => setEditForm({ ...editForm, ultima_ejecucion_fecha: e.target.value })}
+                              onChange={(e) => {
+                                const uFecha = e.target.value;
+                                const fMeses = editForm.frecuencia_meses_personalizada || m.catalogo.frecuencia_meses;
+                                let next = editForm.proxima_fecha;
+                                if (uFecha && fMeses != null) {
+                                  const d = new Date(uFecha);
+                                  d.setMonth(d.getMonth() + fMeses);
+                                  next = d.toISOString().split('T')[0];
+                                }
+                                setEditForm({ ...editForm, ultima_ejecucion_fecha: uFecha, proxima_fecha: next });
+                              }}
                             />
                           </div>
                         </div>
