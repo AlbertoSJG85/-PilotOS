@@ -4,14 +4,15 @@ import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/layout';
 import { Card, Badge, Skeleton, Button } from '@/components/ui';
-import { getParte } from '@/lib/api';
+import { getParte, uploadFoto, reemplazarFoto } from '@/lib/api';
 import { formatCurrency, formatDate, formatKm } from '@/lib/utils';
 import type { ParteDiario } from '@/types';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Camera, RefreshCw, AlertCircle } from 'lucide-react';
 
 const ESTADO_BADGE: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'default'> = {
     ENVIADO: 'info',
     VALIDADO: 'success',
+    ILEGIBLE: 'danger',
     FOTO_ILEGIBLE: 'danger',
     FOTO_SUSTITUIDA: 'warning',
     CON_INCIDENCIA: 'danger',
@@ -24,8 +25,10 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
     const [parte, setParte] = useState<ParteDiario | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [replacingId, setReplacingId] = useState<string | null>(null);
 
-    useEffect(() => {
+    const refresh = () => {
+        setLoading(true);
         getParte(id)
             .then((res) => {
                 if (res.data) setParte(res.data);
@@ -34,7 +37,30 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                 setError(err.message || 'Error al cargar el parte');
             })
             .finally(() => setLoading(false));
+    };
+
+    useEffect(() => {
+        refresh();
     }, [id]);
+
+    const handleReplaceFoto = async (docId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+            setReplacingId(docId);
+            const upload = await uploadFoto(file);
+            await reemplazarFoto(docId, {
+                url: upload.url,
+                hash_sha256: upload.hash_sha256
+            });
+            refresh();
+        } catch (err: any) {
+            alert(err.message || 'Error al reemplazar la foto');
+        } finally {
+            setReplacingId(null);
+        }
+    };
 
     if (loading) {
         return (
@@ -158,18 +184,68 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                     <Card className="p-6 md:col-span-2">
                         <h3 className="text-sm font-semibold text-zinc-400 mb-4 uppercase tracking-wider">Documentos y Tickets ({parte.documentos.length})</h3>
                         <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-                            {parte.documentos.map((dLink: any) => (
-                                <a
-                                    key={dLink.id}
-                                    href={dLink.documento.url || '#'}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex flex-col items-center justify-center p-4 border border-zinc-800 rounded-lg bg-zinc-950 hover:bg-zinc-800 transition-colors"
-                                >
-                                    <span className="text-sm font-medium text-zinc-200">{dLink.documento.tipo}</span>
-                                    <span className="text-xs text-pilot-lime mt-1">Ver documento &rarr;</span>
-                                </a>
-                            ))}
+                            {parte.documentos.map((dLink: any) => {
+                                const doc = dLink.documento;
+                                const isIlegible = doc.estado === 'ILEGIBLE' || doc.estado === 'BLOQUEADO';
+                                const isReplacing = replacingId === doc.id;
+
+                                return (
+                                    <div
+                                        key={dLink.id}
+                                        className="relative flex flex-col items-center justify-center p-4 border border-zinc-800 rounded-lg bg-zinc-950 hover:bg-zinc-900/50 transition-colors"
+                                    >
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <span className="text-sm font-medium text-zinc-200">{doc.tipo}</span>
+                                            <Badge variant={ESTADO_BADGE[doc.estado] || 'default'} className="text-[10px] px-1 py-0 uppercase">
+                                                {doc.estado}
+                                            </Badge>
+                                        </div>
+
+                                        <div className="flex flex-col w-full gap-2 mt-2">
+                                            <a
+                                                href={doc.url || '#'}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-xs text-center py-2 px-3 bg-zinc-800 rounded text-zinc-100 hover:bg-zinc-700 transition-colors"
+                                            >
+                                                Ver documento &rarr;
+                                            </a>
+
+                                            {isIlegible && (
+                                                <div className="relative">
+                                                    <input
+                                                        type="file"
+                                                        accept="image/*"
+                                                        capture="environment"
+                                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                                                        onChange={(e) => handleReplaceFoto(doc.id, e)}
+                                                        disabled={isReplacing}
+                                                    />
+                                                    <Button
+                                                        variant="outline"
+                                                        className="w-full text-xs gap-2 border-dashed border-rose-900/50 text-rose-400 hover:bg-rose-950/20"
+                                                        disabled={isReplacing}
+                                                    >
+                                                        {isReplacing ? (
+                                                            <RefreshCw className="w-3 h-3 animate-spin" />
+                                                        ) : (
+                                                            <Camera className="w-3 h-3" />
+                                                        )}
+                                                        Reemplazar Ticket
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                        
+                                        {isIlegible && (
+                                            <div className="mt-3 flex items-start gap-2 p-2 bg-rose-950/20 border border-rose-900/30 rounded text-[10px] text-rose-300">
+                                                <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                                                <span>No se pudo procesar correctamente. Por favor, sube una foto más nítida.</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     </Card>
                 )}

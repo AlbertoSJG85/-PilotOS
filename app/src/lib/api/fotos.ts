@@ -20,3 +20,12 @@ export async function vincularFoto(data: {
 }): Promise<VincularFotoResponse> {
   return apiFetch('/api/fotos', { method: 'POST', body: data });
 }
+/**
+ * POST /api/fotos/:id/reemplazar — Reemplazar foto ilegible con OCR.
+ */
+export async function reemplazarFoto(docId: string, data: {
+  url: string;
+  hash_sha256?: string | null;
+}): Promise<VincularFotoResponse> {
+  return apiFetch(`/api/fotos/${docId}/reemplazar`, { method: 'POST', body: data });
+}
