@@ -1,8 +1,3 @@
-// PilotOS — Schema Prisma
-// PostgreSQL con schema "pilotos" dentro de BD compartida "nexos"
-// Fecha: 2026-03-10
-// Ref: PilotOS_Master.md, decisiones-tecnicas.md, introspeccion real
-
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["multiSchema"]
@@ -11,48 +6,38 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["pilotos", "minos", "ledger"]
+  schemas  = ["ledger", "minos", "pilotos"]
 }
 
-// ============================================
-// MINOS — Tablas compartidas (solo lectura desde Prisma)
-// Estas tablas las gestiona el ecosistema NexOS.
-// PilotOS las referencia pero no las crea ni migra.
-// ============================================
-
 model MinosUser {
-  id                     Int       @id @default(autoincrement())
-  email                  String    @unique @db.VarChar(255)
-  password_hash          String    @db.VarChar(255)
-  role                   String?   @default("user") @db.VarChar(50)
-  created_at             DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at             DateTime? @default(now()) @updatedAt @db.Timestamptz(6)
+  id                     Int                @id @default(autoincrement())
+  email                  String             @unique @db.VarChar(255)
+  password_hash          String             @db.VarChar(255)
+  role                   String?            @default("user") @db.VarChar(50)
+  created_at             DateTime?          @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime?          @default(now()) @updatedAt @db.Timestamptz(6)
   google_access_token    String?
   google_refresh_token   String?
   google_token_expiry    BigInt?
-  google_email           String?   @db.VarChar(255)
-  gmail_connected        Boolean?  @default(false)
-  forwarding_verified    Boolean?  @default(false)
-  nombre                 String?   @db.VarChar(255)
-  nif_cif                String?   @db.VarChar(50)
-  stripe_customer_id     String?   @db.VarChar(100)
-  stripe_subscription_id String?   @db.VarChar(100)
-  cuota_mensual          Decimal?  @default(0.00) @db.Decimal(10, 2)
-  estado_pago            String?   @default("AL DIA") @db.VarChar(20)
-  fecha_bloqueo          DateTime? @db.Timestamp(6)
-  telefono               String?   @db.VarChar(50)
-
-  // Relaciones con PilotOS
-  clientesPilotOS    Cliente[]
-  conductoresPilotOS Conductor[]
+  google_email           String?            @db.VarChar(255)
+  gmail_connected        Boolean?           @default(false)
+  forwarding_verified    Boolean?           @default(false)
+  nombre                 String?            @db.VarChar(255)
+  nif_cif                String?            @db.VarChar(50)
+  stripe_customer_id     String?            @db.VarChar(100)
+  stripe_subscription_id String?            @db.VarChar(100)
+  cuota_mensual          Decimal?           @default(0.00) @db.Decimal(10, 2)
+  estado_pago            String?            @default("AL DIA") @db.VarChar(20)
+  fecha_bloqueo          DateTime?          @db.Timestamp(6)
+  telefono               String?            @db.VarChar(50)
+  gmail_last_scan        DateTime?          @db.Timestamptz(6)
+  LegalAcceptances       LegalAcceptances[]
+  clientesPilotOS        Cliente[]
+  conductoresPilotOS     Conductor[]
 
   @@map("Users")
   @@schema("minos")
 }
-
-// ============================================
-// LEDGER — Auditoria inmutable (solo escritura desde PilotOS)
-// ============================================
 
 model LedgerEvento {
   id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -72,219 +57,167 @@ model LedgerEvento {
   @@schema("ledger")
 }
 
-// ============================================
-// PILOTOS — CLIENTES (tenant key del producto)
-// Un cliente es el titular de licencia / empresa.
-// ============================================
-
 model Cliente {
-  id               String   @id @default(uuid())
-  patron_id        Int // FK a minos.Users
-  nombre_comercial String?
-  tipo_actividad   String   @default("TAXI") // TAXI, VTC (futuro)
-  activo           Boolean  @default(true)
-  created_at       DateTime @default(now())
-  updated_at       DateTime @updatedAt
-
-  // Relaciones
+  id                     String                   @id @default(uuid())
+  patron_id              Int
+  nombre_comercial       String?
+  tipo_actividad         String                   @default("TAXI")
+  activo                 Boolean                  @default(true)
+  created_at             DateTime                 @default(now())
+  updated_at             DateTime                 @updatedAt
+  cierresPeriodo         CierrePeriodo[]
   patron                 MinosUser                @relation(fields: [patron_id], references: [id])
-  vehiculos              Vehiculo[]
   conductores            Conductor[]
   configuracionEconomica ConfiguracionEconomica[]
   gastosFijos            GastoFijo[]
-  cierresPeriodo         CierrePeriodo[]
+  vehiculos              Vehiculo[]
 
   @@map("clientes")
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — CONDUCTORES
-// Relacion entre un usuario minos y un cliente PilotOS.
-// ============================================
-
 model Conductor {
-  id         String   @id @default(uuid())
-  cliente_id String
-  usuario_id Int // FK a minos.Users
-  es_patron  Boolean  @default(false)
-  activo     Boolean  @default(true)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  // Relaciones
+  id                 String                   @id @default(uuid())
+  cliente_id         String
+  usuario_id         Int
+  es_patron          Boolean                  @default(false)
+  activo             Boolean                  @default(true)
+  created_at         DateTime                 @default(now())
+  updated_at         DateTime                 @updatedAt
+  anomalias          Anomalia[]
   cliente            Cliente                  @relation(fields: [cliente_id], references: [id])
   usuario            MinosUser                @relation(fields: [usuario_id], references: [id])
-  vehiculosAsignados VehiculoConductor[]
-  partesDiarios      ParteDiario[]
-  anomalias          Anomalia[]
   configuraciones    ConfiguracionEconomica[]
+  partesDiarios      ParteDiario[]
+  vehiculosAsignados VehiculoConductor[]
 
   @@unique([cliente_id, usuario_id])
   @@map("conductores")
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — VEHICULOS
-// ============================================
-
 model Vehiculo {
-  id                 String   @id @default(uuid())
-  cliente_id         String
-  matricula          String   @unique
-  marca              String
-  modelo             String
+  id                  String                  @id @default(uuid())
+  cliente_id          String
+  matricula           String                  @unique
+  marca               String
+  modelo              String
   fecha_matriculacion DateTime
-  tipo_combustible   String // GASOLINA, DIESEL, HIBRIDO, ELECTRICO, GLP
-  tipo_transmision   String // MANUAL, AUTOMATICA
-  km_actuales        Int
-  activo             Boolean  @default(true)
-  created_at         DateTime @default(now())
-  updated_at         DateTime @updatedAt
-
-  // Relaciones
-  cliente        Cliente                 @relation(fields: [cliente_id], references: [id])
-  conductores    VehiculoConductor[]
-  partesDiarios  ParteDiario[]
-  mantenimientos MantenimientoVehiculo[]
-  gastosFijos    GastoFijo[]
+  tipo_combustible    String
+  tipo_transmision    String
+  km_actuales         Int
+  activo              Boolean                 @default(true)
+  created_at          DateTime                @default(now())
+  updated_at          DateTime                @updatedAt
+  gastosFijos         GastoFijo[]
+  mantenimientos      MantenimientoVehiculo[]
+  partesDiarios       ParteDiario[]
+  conductores         VehiculoConductor[]
+  cliente             Cliente                 @relation(fields: [cliente_id], references: [id])
 
   @@map("vehiculos")
   @@schema("pilotos")
 }
 
 model VehiculoConductor {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   vehiculo_id  String
   conductor_id String
-  activo       Boolean  @default(true)
-  created_at   DateTime @default(now())
-
-  vehiculo  Vehiculo  @relation(fields: [vehiculo_id], references: [id])
-  conductor Conductor @relation(fields: [conductor_id], references: [id])
+  activo       Boolean   @default(true)
+  created_at   DateTime  @default(now())
+  conductor    Conductor @relation(fields: [conductor_id], references: [id])
+  vehiculo     Vehiculo  @relation(fields: [vehiculo_id], references: [id])
 
   @@unique([vehiculo_id, conductor_id])
   @@map("vehiculo_conductores")
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — CONFIGURACION ECONOMICA
-// DT-006: Entidad propia, soporta multiples modelos.
-// Se crea un registro vigente por cliente. Si cambia, se crea uno nuevo
-// y el anterior se marca con fecha_fin.
-// ============================================
-
 model ConfiguracionEconomica {
-  id                            String    @id @default(uuid())
-  cliente_id                    String
-  modelo_reparto                String    @default("PORCENTAJE") // PORCENTAJE, FIJO_DIARIO, PERSONALIZADO
-  porcentaje_conductor          Decimal   @default(50) @db.Decimal(5, 2)
-  porcentaje_patron             Decimal   @default(50) @db.Decimal(5, 2)
-  cuota_pilotos                 Decimal   @default(0) @db.Decimal(10, 2) // Visible aunque bonificada a 0
-  incluye_combustible_en_reparto Boolean   @default(true) // true = se descuenta antes de repartir
-  notas                         String?
-  conductor_id                  String? // Opcional: Especifica si la regla es para un conductor concreto
-  fecha_inicio                  DateTime  @default(now())
-  fecha_fin                     DateTime? // null = vigente
-  activo                        Boolean   @default(true)
-  created_at                    DateTime  @default(now())
-  updated_at                    DateTime  @updatedAt
-
-  // Relaciones
-  cliente        Cliente        @relation(fields: [cliente_id], references: [id])
-  conductor      Conductor?     @relation(fields: [conductor_id], references: [id])
-  calculosPartes CalculoParte[]
+  id                             String         @id @default(uuid())
+  cliente_id                     String
+  modelo_reparto                 String         @default("PORCENTAJE")
+  porcentaje_conductor           Decimal        @default(50) @db.Decimal(5, 2)
+  porcentaje_patron              Decimal        @default(50) @db.Decimal(5, 2)
+  cuota_pilotos                  Decimal        @default(0) @db.Decimal(10, 2)
+  incluye_combustible_en_reparto Boolean        @default(true)
+  notas                          String?
+  conductor_id                   String?
+  fecha_inicio                   DateTime       @default(now())
+  fecha_fin                      DateTime?
+  activo                         Boolean        @default(true)
+  created_at                     DateTime       @default(now())
+  updated_at                     DateTime       @updatedAt
+  calculosPartes                 CalculoParte[]
+  cliente                        Cliente        @relation(fields: [cliente_id], references: [id])
+  conductor                      Conductor?     @relation(fields: [conductor_id], references: [id])
 
   @@map("configuracion_economica")
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — PARTE DIARIO (MOTOR DEL SISTEMA)
-// R-PD-*: Inmutable tras envio. Un parte por dia, conductor y vehiculo.
-// ============================================
-
 model ParteDiario {
-  id               String   @id @default(uuid())
-  fecha_trabajada  DateTime @db.Date
-  fecha_envio      DateTime @default(now())
+  id               String            @id @default(uuid())
+  fecha_trabajada  DateTime          @db.Date
+  fecha_envio      DateTime          @default(now())
   vehiculo_id      String
   conductor_id     String
   km_inicio        Int
   km_fin           Int
-  ingreso_bruto    Decimal  @db.Decimal(10, 2)
-  ingreso_datafono Decimal  @db.Decimal(10, 2)
-  combustible      Decimal? @db.Decimal(10, 2)
-  varios           Decimal? @db.Decimal(10, 2)
-  concepto_varios  String? // Obligatorio si varios > 0
-  estado           String   @default("ENVIADO") // BORRADOR, ENVIADO, FOTO_SUSTITUIDA
-  created_at       DateTime @default(now())
-  updated_at       DateTime @updatedAt
+  ingreso_bruto    Decimal           @db.Decimal(10, 2)
+  ingreso_datafono Decimal           @db.Decimal(10, 2)
+  combustible      Decimal?          @db.Decimal(10, 2)
+  varios           Decimal?          @db.Decimal(10, 2)
+  concepto_varios  String?
+  estado           String            @default("ENVIADO")
+  created_at       DateTime          @default(now())
+  updated_at       DateTime          @updatedAt
+  calculo          CalculoParte?
+  documentos       DocumentoEnlace[]
+  incidencias      Incidencia[]
+  conductor        Conductor         @relation(fields: [conductor_id], references: [id])
+  vehiculo         Vehiculo          @relation(fields: [vehiculo_id], references: [id])
 
-  // Relaciones
-  vehiculo   Vehiculo        @relation(fields: [vehiculo_id], references: [id])
-  conductor  Conductor       @relation(fields: [conductor_id], references: [id])
-  documentos DocumentoEnlace[]
-  incidencias Incidencia[]
-  calculo    CalculoParte?
-
-  // Un parte por vehiculo y dia
   @@unique([vehiculo_id, fecha_trabajada])
   @@map("partes_diarios")
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — CALCULOS DE PARTE (DT-007)
-// Derivado del parte + configuracion economica vigente.
-// Separado del parte porque el parte es inmutable.
-// ============================================
-
 model CalculoParte {
-  id                            String   @id @default(uuid())
-  parte_diario_id               String   @unique
+  id                            String                 @id @default(uuid())
+  parte_diario_id               String                 @unique
   configuracion_id              String
-  bruto_diario                  Decimal  @db.Decimal(10, 2)
-  combustible                   Decimal  @default(0) @db.Decimal(10, 2)
-  neto_diario                   Decimal  @db.Decimal(10, 2)
-  varios                        Decimal  @default(0) @db.Decimal(10, 2)
-  parte_conductor               Decimal  @db.Decimal(10, 2)
-  parte_patron                  Decimal  @db.Decimal(10, 2)
+  bruto_diario                  Decimal                @db.Decimal(10, 2)
+  combustible                   Decimal                @default(0) @db.Decimal(10, 2)
+  neto_diario                   Decimal                @db.Decimal(10, 2)
+  varios                        Decimal                @default(0) @db.Decimal(10, 2)
+  parte_conductor               Decimal                @db.Decimal(10, 2)
+  parte_patron                  Decimal                @db.Decimal(10, 2)
   modelo_reparto_aplicado       String
-  porcentaje_conductor_aplicado Decimal  @db.Decimal(5, 2)
-  porcentaje_patron_aplicado    Decimal  @db.Decimal(5, 2)
-  created_at                    DateTime @default(now())
-
-  // Relaciones
-  parteDiario   ParteDiario            @relation(fields: [parte_diario_id], references: [id])
-  configuracion ConfiguracionEconomica @relation(fields: [configuracion_id], references: [id])
+  porcentaje_conductor_aplicado Decimal                @db.Decimal(5, 2)
+  porcentaje_patron_aplicado    Decimal                @db.Decimal(5, 2)
+  created_at                    DateTime               @default(now())
+  configuracion                 ConfiguracionEconomica @relation(fields: [configuracion_id], references: [id])
+  parteDiario                   ParteDiario            @relation(fields: [parte_diario_id], references: [id])
 
   @@map("calculos_partes")
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — DOCUMENTOS (DT-008)
-// Modelo documental generico con hash, deduplicacion y vinculo a Drive.
-// Reemplaza FotoTicket del schema legacy.
-// ============================================
-
 model Documento {
-  id                    String              @id @default(uuid())
-  tipo                  String // TICKET_TAXIMETRO, TICKET_COMBUSTIBLE, FACTURA, RECIBO, FOTO, PDF, OTRO
-  url                   String // URL local o Drive
-  drive_file_id         String? // ID en Google Drive, si aplica
-  hash_sha256           String? // Hash para deduplicacion
-  estado                String              @default("RECIBIDO") // RECIBIDO, VALIDO, ILEGIBLE, REEMPLAZADO, BLOQUEADO
+  id                    String               @id @default(uuid())
+  tipo                  String
+  url                   String
+  drive_file_id         String?
+  hash_sha256           String?
+  estado                String               @default("RECIBIDO")
   ocr_texto             String?
   ocr_confianza         Float?
-  ocr_datos_extraidos   Json? // Datos estructurados del OCR (importe, fecha, litros, etc.)
-  intentos_reemplazo    Int                 @default(0)
-  subido_por_usuario_id Int? // FK a minos.Users (quien subio el doc)
-  created_at            DateTime            @default(now())
-  updated_at            DateTime            @updatedAt
+  ocr_datos_extraidos   Json?
+  intentos_reemplazo    Int                  @default(0)
+  subido_por_usuario_id Int?
+  created_at            DateTime             @default(now())
+  updated_at            DateTime             @updatedAt
   enlaces               DocumentoEnlace[]
   historial             DocumentoHistorial[]
 
@@ -293,15 +226,13 @@ model Documento {
 }
 
 model DocumentoEnlace {
-  id           String   @id @default(uuid())
+  id           String      @id @default(uuid())
   documento_id String
-  entidad_tipo String // PARTE_DIARIO, GASTO, MANTENIMIENTO, VEHICULO, CONDUCTOR
-  entidad_id   String // UUID de la entidad vinculada
-  created_at   DateTime @default(now())
-
-  // Relaciones
-  documento   Documento    @relation(fields: [documento_id], references: [id])
-  parteDiario ParteDiario? @relation(fields: [entidad_id], references: [id], map: "doc_enlace_parte_fk")
+  entidad_tipo String
+  entidad_id   String
+  created_at   DateTime    @default(now())
+  parteDiario  ParteDiario @relation(fields: [entidad_id], references: [id], map: "doc_enlace_parte_fk")
+  documento    Documento   @relation(fields: [documento_id], references: [id])
 
   @@unique([documento_id, entidad_tipo, entidad_id])
   @@map("documento_enlaces")
@@ -309,26 +240,21 @@ model DocumentoEnlace {
 }
 
 model DocumentoHistorial {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   documento_id String
   url_anterior String
   motivo       String
-  created_at   DateTime @default(now())
-
-  documento Documento @relation(fields: [documento_id], references: [id])
+  created_at   DateTime  @default(now())
+  documento    Documento @relation(fields: [documento_id], references: [id])
 
   @@map("documento_historial")
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — TAREAS PENDIENTES
-// ============================================
-
 model TareaPendiente {
   id           String    @id @default(uuid())
-  tipo         String // FOTO_ILEGIBLE, DATO_FALTANTE, etc.
-  entidad_tipo String // PARTE_DIARIO, DOCUMENTO, etc.
+  tipo         String
+  entidad_tipo String
   entidad_id   String
   conductor_id String
   resuelta     Boolean   @default(false)
@@ -339,62 +265,46 @@ model TareaPendiente {
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — ANOMALIAS
-// R-AN-*: Se acumulan, NUNCA se resetean.
-// ============================================
-
 model Anomalia {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   conductor_id String
-  tipo         String // NORMAL, CRITICA
+  tipo         String
   descripcion  String
-  notificada   Boolean  @default(false)
-  created_at   DateTime @default(now())
-
-  conductor Conductor @relation(fields: [conductor_id], references: [id])
+  notificada   Boolean   @default(false)
+  created_at   DateTime  @default(now())
+  conductor    Conductor @relation(fields: [conductor_id], references: [id])
 
   @@map("anomalias")
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — INCIDENCIAS
-// R-IN-*: Solo via GlorIA, solo patron autoriza.
-// ============================================
-
 model Incidencia {
-  id              String    @id @default(uuid())
+  id              String      @id @default(uuid())
   parte_diario_id String
   que_ocurrio     String
   decision_tomada String
   justificacion   String
-  autorizador_id  String // conductor_id del patron
-  estado          String    @default("CREADA") // CREADA, CERRADA
-  created_at      DateTime  @default(now())
+  autorizador_id  String
+  estado          String      @default("CREADA")
+  created_at      DateTime    @default(now())
   closed_at       DateTime?
-
-  parteDiario ParteDiario @relation(fields: [parte_diario_id], references: [id])
+  parteDiario     ParteDiario @relation(fields: [parte_diario_id], references: [id])
 
   @@map("incidencias")
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — GASTOS
-// ============================================
-
 model Gasto {
   id          String   @id @default(uuid())
-  cliente_id  String // Tenant key
+  cliente_id  String
   vehiculo_id String?
-  tipo        String // COMBUSTIBLE, MANTENIMIENTO, SEGURO, AUTONOMO, GESTORIA, EMISORA, IGIC, IRPF, VARIOS
+  tipo        String
   descripcion String
   importe     Decimal  @db.Decimal(10, 2)
   fecha       DateTime @db.Date
-  forma_pago  String? // EFECTIVO, TARJETA, TRANSFERENCIA, DOMICILIACION
+  forma_pago  String?
   url_factura String?
-  estado      String   @default("REGISTRADO") // RECIBIDO, CLASIFICADO, PENDIENTE_CONFIRMACION, REGISTRADO
+  estado      String   @default("REGISTRADO")
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
 
@@ -403,98 +313,81 @@ model Gasto {
 }
 
 model GastoFijo {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   cliente_id   String
   vehiculo_id  String?
-  tipo         String // AUTONOMO, SEGURO, EMISORA, IMPUESTO, OTRO
+  tipo         String
   descripcion  String
-  importe      Decimal  @db.Decimal(10, 2)
-  periodicidad String // MENSUAL, TRIMESTRAL, ANUAL
-  activo       Boolean  @default(true)
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
-
-  cliente  Cliente   @relation(fields: [cliente_id], references: [id])
-  vehiculo Vehiculo? @relation(fields: [vehiculo_id], references: [id])
+  importe      Decimal   @db.Decimal(10, 2)
+  periodicidad String
+  activo       Boolean   @default(true)
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+  cliente      Cliente   @relation(fields: [cliente_id], references: [id])
+  vehiculo     Vehiculo? @relation(fields: [vehiculo_id], references: [id])
 
   @@map("gastos_fijos")
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — MANTENIMIENTOS
-// R-MT-*: Catalogo cerrado, frecuencia aprendible.
-// ============================================
-
 model MantenimientoCatalogo {
-  id               String   @id @default(uuid())
-  nombre           String   @unique
-  tipo             String // POR_KILOMETRAJE, SEGUN_USO, POR_FECHA
+  id               String                  @id @default(uuid())
+  nombre           String                  @unique
+  tipo             String
   frecuencia_km    Int?
   frecuencia_meses Int?
-  activo           Boolean  @default(true)
-  created_at       DateTime @default(now())
-
-  vehiculos MantenimientoVehiculo[]
+  activo           Boolean                 @default(true)
+  created_at       DateTime                @default(now())
+  vehiculos        MantenimientoVehiculo[]
 
   @@map("mantenimiento_catalogo")
   @@schema("pilotos")
 }
 
 model MantenimientoVehiculo {
-  id                     String    @id @default(uuid())
+  id                     String                     @id @default(uuid())
   vehiculo_id            String
   catalogo_id            String
   ultima_ejecucion_km    Int?
   ultima_ejecucion_fecha DateTime?
   proximo_km             Int?
   proxima_fecha          DateTime?
-  estado                 String    @default("PENDIENTE") // PENDIENTE, VENCIDO, RESUELTO
+  estado                 String                     @default("PENDIENTE")
   frecuencia_aprendida   Int?
-  created_at             DateTime  @default(now())
-  updated_at             DateTime  @updatedAt
-
-  vehiculo Vehiculo              @relation(fields: [vehiculo_id], references: [id])
-  catalogo MantenimientoCatalogo @relation(fields: [catalogo_id], references: [id])
-
-  // Seguimiento historico
-  seguimiento SeguimientoMantenimiento[]
+  activo                 Boolean                    @default(true)
+  frecuencia_km_personalizada    Int?
+  frecuencia_meses_personalizada Int?
+  created_at             DateTime                   @default(now())
+  updated_at             DateTime                   @updatedAt
+  catalogo               MantenimientoCatalogo      @relation(fields: [catalogo_id], references: [id])
+  vehiculo               Vehiculo                   @relation(fields: [vehiculo_id], references: [id])
+  seguimiento            SeguimientoMantenimiento[]
 
   @@unique([vehiculo_id, catalogo_id])
   @@map("mantenimientos_vehiculos")
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — SEGUIMIENTO DE MANTENIMIENTO
-// Historial de acciones sobre cada mantenimiento.
-// ============================================
-
 model SeguimientoMantenimiento {
-  id                        String   @id @default(uuid())
+  id                        String                @id @default(uuid())
   mantenimiento_vehiculo_id String
-  accion                    String // RESUELTO, VENCIDO, FRECUENCIA_ACTUALIZADA, AVISO_ENVIADO
+  accion                    String
   detalle                   String?
   km_en_momento             Int?
-  created_at                DateTime @default(now())
-
-  mantenimientoVehiculo MantenimientoVehiculo @relation(fields: [mantenimiento_vehiculo_id], references: [id])
+  created_at                DateTime              @default(now())
+  mantenimientoVehiculo     MantenimientoVehiculo @relation(fields: [mantenimiento_vehiculo_id], references: [id])
 
   @@map("seguimiento_mantenimiento")
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — AVISOS
-// ============================================
-
 model Aviso {
   id           String    @id @default(uuid())
   cliente_id   String
-  tipo         String // MANTENIMIENTO, VENCIMIENTO, ANOMALIA, SISTEMA
+  tipo         String
   titulo       String
   mensaje      String
-  entidad_tipo String? // Referencia a la entidad relacionada
+  entidad_tipo String?
   entidad_id   String?
   leido        Boolean   @default(false)
   enviado      Boolean   @default(false)
@@ -505,41 +398,29 @@ model Aviso {
   @@schema("pilotos")
 }
 
-// ============================================
-// PILOTOS — CIERRES DE PERIODO
-// Liquidaciones mensuales o por rango.
-// ============================================
-
 model CierrePeriodo {
-  id                    String   @id @default(uuid())
-  cliente_id            String
-  periodo_inicio        DateTime @db.Date
-  periodo_fin           DateTime @db.Date
-  total_bruto           Decimal  @db.Decimal(10, 2)
-  total_combustible     Decimal  @db.Decimal(10, 2)
-  total_neto            Decimal  @db.Decimal(10, 2)
-  total_gastos_fijos    Decimal  @db.Decimal(10, 2)
+  id                     String   @id @default(uuid())
+  cliente_id             String
+  periodo_inicio         DateTime @db.Date
+  periodo_fin            DateTime @db.Date
+  total_bruto            Decimal  @db.Decimal(10, 2)
+  total_combustible      Decimal  @db.Decimal(10, 2)
+  total_neto             Decimal  @db.Decimal(10, 2)
+  total_gastos_fijos     Decimal  @db.Decimal(10, 2)
   total_gastos_variables Decimal  @db.Decimal(10, 2)
-  total_conductor       Decimal  @db.Decimal(10, 2)
-  total_patron          Decimal  @db.Decimal(10, 2)
-  cuota_pilotos         Decimal  @db.Decimal(10, 2)
-  num_partes            Int
-  estado                String   @default("BORRADOR") // BORRADOR, CERRADO, PDF_GENERADO
-  pdf_url               String?
-  created_at            DateTime @default(now())
-  updated_at            DateTime @updatedAt
-
-  cliente Cliente @relation(fields: [cliente_id], references: [id])
+  total_conductor        Decimal  @db.Decimal(10, 2)
+  total_patron           Decimal  @db.Decimal(10, 2)
+  cuota_pilotos          Decimal  @db.Decimal(10, 2)
+  num_partes             Int
+  estado                 String   @default("BORRADOR")
+  pdf_url                String?
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
+  cliente                Cliente  @relation(fields: [cliente_id], references: [id])
 
   @@map("cierres_periodo")
   @@schema("pilotos")
 }
-
-// ============================================
-// PILOTOS — ONBOARDING
-// Datos temporales del flujo de registro.
-// Se usa durante el onboarding y luego se archiva.
-// ============================================
 
 model Onboarding {
   id                  String    @id @default(uuid())
@@ -549,9 +430,9 @@ model Onboarding {
   email_patron        String?
   nif_cif             String?
   nombre_comercial    String?
-  tipo_actividad      String? // TAXI, VTC
-  asalariados         Json? // [{ nombre, telefono, modelo_reparto, porcentaje_conductor }]
-  gastos_fijos        Json? // [{ descripcion, importe, periodicidad }]
+  tipo_actividad      String?
+  asalariados         Json?
+  gastos_fijos        Json?
   matricula           String?
   marca_modelo        String?
   fecha_matriculacion DateTime?
@@ -565,4 +446,20 @@ model Onboarding {
 
   @@map("onboarding")
   @@schema("pilotos")
+}
+
+model LegalAcceptances {
+  id                      Int        @id @default(autoincrement())
+  user_id                 Int?
+  product_key             String     @db.VarChar
+  accepted_pilot_terms    Boolean    @default(false)
+  accepted_privacy_policy Boolean    @default(false)
+  accepted_marketing      Boolean    @default(false)
+  ip_address              String?    @db.VarChar
+  user_agent              String?
+  accepted_at             DateTime?  @default(now()) @db.Timestamp(6)
+  Users                   MinosUser? @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_legal_acceptances_user")
+  @@schema("minos")
 }

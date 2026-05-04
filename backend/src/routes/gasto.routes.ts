@@ -99,4 +99,53 @@ router.post('/fijos', requireAuth, async (req: AuthRequest, res: Response) => {
     }
 });
 
+// PUT /api/gastos/fijos/:id — Editar gasto fijo (Solo Patrón)
+router.put('/fijos/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        if (!req.usuario?.es_patron && req.usuario?.role !== 'admin') {
+            res.status(403).json({ status: 'FAIL', error: 'forbidden', message: 'Solo el patron puede editar gastos fijos' });
+            return;
+        }
+
+        const { tipo, descripcion, importe, periodicidad, activo } = req.body;
+
+        const updated = await prisma.$transaction(async (tx) => {
+            const current = await tx.gastoFijo.findUnique({ where: { id: req.params.id } });
+            if (!current) throw new Error('not_found');
+
+            const gf = await tx.gastoFijo.update({
+                where: { id: req.params.id },
+                data: {
+                    tipo: tipo || undefined,
+                    descripcion: descripcion || undefined,
+                    importe: importe !== undefined ? importe : undefined,
+                    periodicidad: periodicidad || undefined,
+                    activo: activo !== undefined ? activo : undefined,
+                }
+            });
+
+            await tx.ledgerEvento.create({
+                data: {
+                    tipo_evento: 'GASTO_FIJO_ACTUALIZADO',
+                    source: 'PILOTOS',
+                    dedupe_key: `gf-update-${gf.id}-${Date.now()}`,
+                    datos: {
+                        gasto_fijo_id: gf.id,
+                        cambios: req.body,
+                        usuario_id: req.usuario?.id
+                    }
+                }
+            });
+
+            return gf;
+        });
+
+        res.json({ status: 'OK', data: updated });
+    } catch (err: any) {
+        if (err.message === 'not_found') return res.status(404).json({ status: 'FAIL', error: 'not_found' });
+        console.error('[GASTOS] Error actualizando fijo:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
 export default router;

@@ -106,6 +106,9 @@ export interface MantenimientoVehiculo {
   ultima_ejecucion_km: number | null;
   ultima_ejecucion_fecha: string | null;
   frecuencia_aprendida: number | null;
+  activo: boolean;
+  frecuencia_km_personalizada: number | null;
+  frecuencia_meses_personalizada: number | null;
   catalogo: {
     nombre: string;
     tipo: string;

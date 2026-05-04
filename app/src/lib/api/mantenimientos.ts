@@ -17,3 +17,7 @@ export async function resolverMantenimiento(id: string, data: {
 }): Promise<ApiResponse<MantenimientoVehiculo>> {
   return apiFetch(`/api/mantenimientos/${id}/resolver`, { method: 'POST', body: data });
 }
+
+export async function updateMantenimientoVehiculo(id: string, data: Partial<MantenimientoVehiculo>): Promise<ApiResponse<MantenimientoVehiculo>> {
+  return apiFetch(`/api/mantenimientos/${id}`, { method: 'PUT', body: data });
+}

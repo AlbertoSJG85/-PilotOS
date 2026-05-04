@@ -37,3 +37,7 @@ export async function crearGasto(data: {
 }): Promise<ApiResponse<Gasto>> {
   return apiFetch('/api/gastos', { method: 'POST', body: data });
 }
+
+export async function updateGastoFijo(id: string, data: Partial<GastoFijo>): Promise<ApiResponse<GastoFijo>> {
+  return apiFetch(`/api/gastos/fijos/${id}`, { method: 'PUT', body: data });
+}

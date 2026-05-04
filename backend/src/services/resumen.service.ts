@@ -90,6 +90,7 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
     const gastosFijosProrrateados = fijos.reduce((acc, f) => {
         let multiplier = 1;
         if (f.periodicidad === 'TRIMESTRAL') multiplier = 1 / 3;
+        else if (f.periodicidad === 'SEMESTRAL') multiplier = 1 / 6;
         else if (f.periodicidad === 'ANUAL') multiplier = 1 / 12;
         return acc + toNum(f.importe) * multiplier;
     }, 0);
