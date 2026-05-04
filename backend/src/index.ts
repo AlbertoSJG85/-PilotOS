@@ -104,6 +104,16 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
+// Protectores globales (R-SY-001: El backend nunca debe caer)
+process.on('uncaughtException', (err) => {
+    console.error('[FATAL] Uncaught Exception:', err.message, err.stack);
+    // No salimos del proceso para mantener el servicio activo en Coolify
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 app.listen(PORT, () => {
     console.log(`PilotOS Backend running on port ${PORT}`);
     iniciarScheduler();

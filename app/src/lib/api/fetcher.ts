@@ -17,6 +17,7 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message?: string,
+    public details?: any,
   ) {
     super(message || code);
     this.name = 'ApiError';
@@ -69,7 +70,7 @@ export async function apiFetch<T = unknown>(
   const json = await res.json().catch(() => ({ status: 'FAIL', error: 'invalid_response' }));
 
   if (!res.ok || json.status === 'FAIL') {
-    throw new ApiError(res.status, json.error || 'unknown_error', json.message);
+    throw new ApiError(res.status, json.error || 'unknown_error', json.message, json);
   }
 
   return json as T;

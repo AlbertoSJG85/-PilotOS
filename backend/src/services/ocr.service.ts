@@ -1,4 +1,5 @@
 import Tesseract from 'tesseract.js';
+import sharp from 'sharp';
 
 // Umbral de confianza para considerar una foto legible
 const UMBRAL_CONFIANZA = 60; // porcentaje
@@ -7,6 +8,7 @@ export interface OCRResult {
     texto: string;
     confianza: number;
     legible: boolean;
+    error_ocr?: string;
 }
 
 /**
@@ -15,6 +17,20 @@ export interface OCRResult {
  */
 export async function extraerTextoImagen(imagenPath: string): Promise<OCRResult> {
     try {
+        // 1. Validar imagen antes de pasarla a Tesseract (evita crash por imagen corrupta)
+        try {
+            await sharp(imagenPath).metadata();
+        } catch (err: any) {
+            console.warn('[OCR] Imagen corrupta o ilegible detectada por Sharp:', err.message);
+            return {
+                texto: '',
+                confianza: 0,
+                legible: false,
+                error_ocr: 'imagen_corrupta',
+            };
+        }
+
+        // 2. Ejecutar Tesseract con timeout y catch-all
         const { data } = await Tesseract.recognize(imagenPath, 'spa', {
             logger: (m) => {
                 if (m.status === 'recognizing text') {
@@ -31,12 +47,14 @@ export async function extraerTextoImagen(imagenPath: string): Promise<OCRResult>
             confianza,
             legible,
         };
-    } catch (error) {
-        console.error('Error en OCR:', error);
+    } catch (error: any) {
+        // El OCR NUNCA debe tumbar el proceso
+        console.error('[OCR] Error crítico en Tesseract:', error.message);
         return {
             texto: '',
             confianza: 0,
             legible: false,
+            error_ocr: 'tesseract_error',
         };
     }
 }

@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ':*)",
+      "Bash(npx tsx:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('scripts',{}\\), indent=2\\)\\)\")",
+      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\)\\); console.log\\(JSON.stringify\\(d.scripts,null,2\\)\\)\")",
+      "Bash(awk 'NR<=40' \"/c/Mis Documentos/NEXO STUDIOS/PilotOS/app/next.config.ts\")",
+      "Bash(awk 1:*)",
+      "Bash(awk '1' \"/c/Mis Documentos/NEXO STUDIOS/PilotOS/app/package.json\")",
+      "Bash(curl -s -H \"Authorization: Bearer 1|Hcah8iOpmoMpVOPh06CrraNI7fff1cxeZn6OPPCwa9f4ad8f\" \"http://161.97.108.106:8000/api/v1/projects/pkwk4o0kw8c4cks04k8sw84g\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s -H \"Authorization: Bearer 1|Hcah8iOpmoMpVOPh06CrraNI7fff1cxeZn6OPPCwa9f4ad8f\" \"http://161.97.108.106:8000/api/v1/applications\")",
+      "Bash(curl:*)",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(f'{e[\\\\\"key\\\\\"]}={e.get\\(\\\\\"value\\\\\",\\\\\"[hidden]\\\\\"\\)}'\\) for e in data if not e.get\\('is_preview'\\)]\")",
+      "Read(//tmp/**)",
+      "Bash(node:*)",
+      "Bash(grep -oi '\"output\":\"[^\"\\\\\\\\]*\\\\\\\\*[^\"]*\"' /tmp/backend_dep.json)",
+      "Bash(nslookup n8n.nexostudios.digital)",
+      "Bash(nslookup gloria.nexostudios.digital)",
+      "Bash(nslookup pilotos.nexostudios.digital 8.8.8.8)",
+      "Bash(nslookup api.pilotos.nexostudios.digital 8.8.8.8)",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(f'UUID: {a[\\\\\"uuid\\\\\"]} | name: {a.get\\(\\\\\"name\\\\\",\\\\\"?\\\\\"\\)} | fqdn: {a.get\\(\\\\\"fqdn\\\\\",\\\\\"NONE\\\\\"\\)} | status: {a.get\\(\\\\\"status\\\\\",\\\\\"?\\\\\"\\)}'\\) for a in data]\")",
+      "Bash(openssl s_client -connect 161.97.108.106:443 -servername pilotos.nexostudios.digital)",
+      "Bash(openssl s_client -connect 161.97.108.106:443 -servername rentos.nexostudios.digital)",
+      "Bash(openssl s_client -connect 161.97.108.106:443 -servername api.pilotos.nexostudios.digital)"
+    ]
+  }
+}

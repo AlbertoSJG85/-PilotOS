@@ -309,7 +309,17 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
         else if (err.code === 'file_too_large') msg = err.message;
         else if (err.code === 'invalid_mime') msg = err.message;
         else if (err.code === 'network_error') msg = 'Sin conexión. Reintenta cuando vuelvas.';
-        else if (err.code === 'duplicate_parte') msg = 'Ya existe un parte enviado para este vehículo y fecha.';
+        else if (err.code === 'duplicate_parte') {
+          const est = err.details?.estado;
+          if (est === 'ENVIADO' || est === 'FOTO_SUSTITUIDA') {
+            msg = 'El parte ya estaba enviado. Redirigiendo...';
+            setTimeout(() => router.push(returnPath), 2000);
+          } else if (est === 'BORRADOR') {
+            msg = 'Ya existe un borrador de otro conductor para este vehículo y fecha.';
+          } else {
+            msg = 'Ya existe un registro para este vehículo y fecha. Por favor, revisa el historial.';
+          }
+        }
         else if (err.message) msg = err.message;
       } else if (err instanceof Error) {
         msg = err.message;

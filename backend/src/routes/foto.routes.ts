@@ -86,7 +86,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                     estado,
                     ocr_texto: ocrResult.texto,
                     ocr_confianza: ocrResult.confianza,
-                    ocr_datos_extraidos: validacion as any,
+                    ocr_datos_extraidos: { ...validacion, error_ocr: ocrResult.error_ocr } as any,
                     intentos_reemplazo: 0,
                     subido_por_usuario_id: req.usuario?.id,
                 },

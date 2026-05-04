@@ -100,7 +100,15 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                 res.status(200).json({ status: 'OK', data: actualizado, evento: esBorrador ? 'E-PD-000' : 'E-PD-001' });
                 return;
             }
-            res.status(409).json({ status: 'FAIL', error: 'duplicate_parte', regla: 'R-PD-016' });
+            res.status(409).json({
+                status: 'FAIL',
+                error: 'duplicate_parte',
+                regla: 'R-PD-016',
+                parte_id: existente.id,
+                estado: existente.estado,
+                fecha_trabajada: existente.fecha_trabajada,
+                vehiculo_id: existente.vehiculo_id
+            });
             return;
         }
 
@@ -278,20 +286,14 @@ router.patch('/:id/confirmar', requireAuth, async (req: AuthRequest, res: Respon
             return p;
         });
 
-        try {
-            if (req.usuario?.cliente_id) {
-                await crearOActualizarCalculo({ parte_diario_id: updated.id, cliente_id: req.usuario.cliente_id });
-            }
-        } catch (calcErr: any) {
-            console.warn('[PARTES] Calculo de reparto fallido (no bloquea parte):', calcErr.message);
+        // Post-procesamiento en segundo plano para evitar timeouts en el cliente
+        if (req.usuario?.cliente_id) {
+            crearOActualizarCalculo({ parte_diario_id: updated.id, cliente_id: req.usuario.cliente_id })
+                .catch(calcErr => console.warn('[PARTES] Calculo de reparto fallido (bg):', calcErr.message));
         }
 
-        // Comparación OCR vs declarado (no bloquea, solo registra anomalías si hay desviación).
-        try {
-            await compararDocumentosConParte(updated.id);
-        } catch (e: any) {
-            console.warn('[PARTES] Comparación OCR fallida (no bloquea parte):', e.message);
-        }
+        compararDocumentosConParte(updated.id)
+            .catch(e => console.warn('[PARTES] Comparación OCR fallida (bg):', e.message));
 
         res.status(200).json({ status: 'OK', data: updated, evento: 'E-PD-001' });
     } catch (err: any) {
