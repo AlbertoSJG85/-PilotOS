@@ -275,6 +275,50 @@ Formato: fecha | area | problema | causa | solucion | prevencion
 - Solucion: Nuevo `ocrComparacion.service.ts` ejecutado tras `confirmarParte`. Tolerancias: taxímetro ±3 €, combustible ±0.50 € (suma de tickets). Si supera tolerancia, crea `Anomalia` tipo `NORMAL` (no bloquea el envío). Combustible permite múltiples tickets vinculados al mismo parte.
 - Prevencion: La comparación es parte del valor del OCR; sin ella el OCR es solo storage.
 
+---
+
+## 2026-05-05 · Módulo tickets/fotos/OCR/cotejo (rama fix/tickets-fotos-ocr-cotejo)
+
+### C-024 · URL de uploads era http:// en producción HTTPS
+
+- Area: Backend / Storage
+- Problema: upload.routes.ts construía la URL con req.protocol, que devuelve 'http' detrás del proxy HTTPS de Coolify sin trust proxy activado. Las URLs guardadas en Documento.url eran http:// → mixed-content en el frontend HTTPS.
+- Causa: Express no confía en cabeceras X-Forwarded-Proto sin app.set('trust proxy', true).
+- Solución: Añadido app.set('trust proxy', true) en index.ts. Añadida variable PUBLIC_BASE_URL como fuente canónica de la URL base en upload.routes.ts.
+- Prevención: Siempre activar trust proxy cuando el backend está detrás de un reverse proxy. PUBLIC_BASE_URL debe estar en el checklist de despliegue.
+
+### C-025 · Ausencia de validación de tenencia en endpoints de foto y parte
+
+- Area: Backend / Seguridad
+- Problema: GET /api/partes/:id y todos los endpoints de /api/fotos/* no verificaban que el recurso perteneciera al mismo cliente_id del usuario autenticado. Cualquier usuario autenticado podía leer partes de otro cliente usando el UUID.
+- Causa: Endpoints implementados con solo requireAuth, sin comprobación de tenencia.
+- Solución: Añadida función verificarTenencia() en foto.routes.ts. GET /api/partes/:id y DELETE /api/partes/:id comprueban vehiculo.cliente_id === req.usuario.cliente_id. Admin bypasea la restricción.
+- Prevención: Toda ruta que recibe un ID de recurso debe verificar tenencia, no solo autenticación.
+
+### C-026 · OCR de taxímetro extraía solo un número genérico
+
+- Area: Backend / OCR
+- Problema: validarTicketTaximetro usaba regex genérica "último número del texto" como importe. No extraía P Total, P Dist.Total, Borrados ni ningún campo estructurado. El cotejo comparaba el importe incorrecto.
+- Causa: Implementación inicial sin conocimiento del formato de tickets de taxímetro español.
+- Solución: Reescrito validarTicketTaximetro con detección de secciones ACUMULADOS/PARCIALES y extracción de 20+ campos. Interfaz DatosTaximetro con prefijos acum_* y parc_*. Normalización automática de distancias metros→km.
+- Prevención: Antes de implementar OCR sobre un dominio específico, estudiar el formato real del documento.
+
+### C-027 · Cotejo sin trazabilidad ni comparación de km/Borrados
+
+- Area: Backend / Cotejo
+- Problema: ocrComparacion.service.ts solo comparaba importe vs ingreso_bruto. No comparaba km, no detectaba incrementos anómalos de Borrados (manipulación del taxímetro), y las Anomalias no tenían referencia al parte ni al documento.
+- Causa: Implementación inicial mínima.
+- Solución: Añadidas comparaciones: P Dist.Total vs km (±6km), acum_borrados actual vs ticket anterior del mismo vehículo (CRITICA si diff > 1 o decrece). Anomalia ahora incluye parte_diario_id y documento_id. Nuevo campo estado_ocr en Documento.
+- Prevención: El cotejo es el valor real del OCR; sin comparación de todos los campos clave, es solo storage.
+
+### C-028 · Ausencia de endpoints de gestión documental (eliminar, reintentar OCR)
+
+- Area: Backend / API
+- Problema: No existía forma de desvincular un documento de un parte (imprescindible en BORRADOR) ni de reintentar el OCR sin sustituir el fichero físico.
+- Causa: Funcionalidad no implementada en la fase inicial.
+- Solución: Nuevos endpoints DELETE /api/fotos/:id (desvincular, solo BORRADOR) y POST /api/fotos/:id/reintentar-ocr (re-procesar OCR sin consumir intentos de reemplazo).
+- Prevención: Los flujos de corrección deben estar completos antes de activar restricciones de bloqueo.
+
 ### C-023 · Mensajes de error de upload genéricos
 - Area: Frontend / upload
 - Problema: `upload.ts` lanzaba `throw new Error('Error subiendo foto')` para todo. El usuario no podía distinguir tamaño excesivo, formato no soportado, sesión caducada o caída del servidor.

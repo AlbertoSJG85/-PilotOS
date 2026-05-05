@@ -1,13 +1,14 @@
 /**
- * Documentos/Fotos routes — Modelo documental evolucionado (DT-008).
+ * Documentos/Fotos routes — Modelo documental (DT-008).
  * Usa Documento + DocumentoEnlace en lugar del legacy FotoTicket.
- * Mantiene reglas R-FT-* para fotos de tickets.
  *
- * Cambios fase 1+2:
- *   - El hash_sha256 viene del endpoint /api/upload (sha256 del fichero real).
- *   - Si ya existe un Documento con el mismo hash, se reutiliza y se crea solo el enlace.
- *   - Si ya está vinculado a este parte, se devuelve duplicado:true sin duplicar nada.
- *   - El frontend recibe `legible` y `duplicado` para informar al usuario.
+ * Reglas R-FT-*:
+ *   R-FT-001: Foto ilegible → TareaPendiente.
+ *   R-FT-003: Máximo MAX_INTENTOS_REEMPLAZO sustituciones físicas.
+ *   R-FT-004: Tras agotar intentos → BLOQUEADO + Anomalía.
+ *   R-FT-007: reintentar-ocr no consume intentos de reemplazo.
+ *
+ * Seguridad: todos los endpoints validan tenencia (cliente_id).
  */
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
@@ -18,7 +19,39 @@ import crypto from 'crypto';
 const router = Router();
 const MAX_INTENTOS_REEMPLAZO = 2; // R-FT-003
 
+// ─────────────────────────────────────────────────────────
+// Helper de tenencia: dado un docId, devuelve el cliente_id del parte vinculado
+// ─────────────────────────────────────────────────────────
+
+async function getDocClienteId(docId: string): Promise<string | null> {
+    const enlace = await prisma.documentoEnlace.findFirst({
+        where: { documento_id: docId },
+        include: {
+            parteDiario: {
+                include: { vehiculo: { select: { cliente_id: true } } },
+            },
+        },
+    });
+    return enlace?.parteDiario?.vehiculo?.cliente_id ?? null;
+}
+
+function verificarTenencia(
+    docClienteId: string | null,
+    usuario: AuthRequest['usuario'],
+): boolean {
+    if (!usuario) return false;
+    if (usuario.role === 'admin') return true;
+    if (!docClienteId || !usuario.cliente_id) return false;
+    return docClienteId === usuario.cliente_id;
+}
+
+function estadoOcrFinal(ocrLegible: boolean, validacionValida: boolean): string {
+    return (!ocrLegible || !validacionValida) ? 'ILEGIBLE' : 'VALIDO';
+}
+
+// ─────────────────────────────────────────────────────────
 // POST /api/fotos — Subir y validar documento/foto
+// ─────────────────────────────────────────────────────────
 router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const { parte_diario_id, tipo, url, hash_sha256 } = req.body;
@@ -27,15 +60,23 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
             return;
         }
 
-        const parte = await prisma.parteDiario.findUnique({ where: { id: parte_diario_id } });
+        const parte = await prisma.parteDiario.findUnique({
+            where: { id: parte_diario_id },
+            include: { vehiculo: { select: { cliente_id: true } } },
+        });
         if (!parte) { res.status(404).json({ status: 'FAIL', error: 'parte_not_found' }); return; }
 
-        // Hash: preferimos el del upload (sha256 del fichero real). Fallback: hash de la URL.
+        // Tenancy check
+        if (!verificarTenencia(parte.vehiculo?.cliente_id ?? null, req.usuario)) {
+            res.status(403).json({ status: 'FAIL', error: 'forbidden' });
+            return;
+        }
+
         const hashFinal = hash_sha256 && /^[0-9a-f]{64}$/i.test(hash_sha256)
             ? hash_sha256
             : crypto.createHash('sha256').update(String(url)).digest('hex');
 
-        // Deduplicación: ¿ya existe un Documento con el mismo hash?
+        // Deduplicación por hash
         const existente = await prisma.documento.findFirst({
             where: { hash_sha256: hashFinal },
             include: { enlaces: true },
@@ -55,7 +96,6 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                 });
                 return;
             }
-            // Existe pero no está vinculado a este parte → reutilizamos documento, creamos enlace.
             await prisma.documentoEnlace.create({
                 data: { documento_id: existente.id, entidad_tipo: 'PARTE_DIARIO', entidad_id: parte_diario_id },
             });
@@ -69,13 +109,14 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
             return;
         }
 
-        // Documento nuevo: OCR + validación + crear documento + enlace.
+        // Documento nuevo: OCR
         const ocrResult = await extraerTextoImagen(url);
         const validacion = tipo === 'TICKET_TAXIMETRO'
             ? validarTicketTaximetro(ocrResult.texto)
             : validarTicketGasoil(ocrResult.texto);
 
-        const estado = (!ocrResult.legible || !validacion.valido) ? 'ILEGIBLE' : 'VALIDO';
+        const estado = estadoOcrFinal(ocrResult.legible, validacion.valido);
+        const estado_ocr = ocrResult.error_ocr ? 'ERROR' : 'PROCESADO';
 
         const result = await prisma.$transaction(async (tx) => {
             const documento = await tx.documento.create({
@@ -87,6 +128,8 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                     ocr_texto: ocrResult.texto,
                     ocr_confianza: ocrResult.confianza,
                     ocr_datos_extraidos: { ...validacion, error_ocr: ocrResult.error_ocr } as any,
+                    ocr_error: ocrResult.error_ocr ?? null,
+                    estado_ocr,
                     intentos_reemplazo: 0,
                     subido_por_usuario_id: req.usuario?.id,
                 },
@@ -118,7 +161,9 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
     }
 });
 
-// POST /api/fotos/:id/reemplazar — Reemplazar documento ilegible
+// ─────────────────────────────────────────────────────────
+// POST /api/fotos/:id/reemplazar — Sustituir foto ilegible (R-FT-003)
+// ─────────────────────────────────────────────────────────
 router.post('/:id/reemplazar', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const { url, hash_sha256 } = req.body;
@@ -126,6 +171,13 @@ router.post('/:id/reemplazar', requireAuth, async (req: AuthRequest, res: Respon
 
         const docActual = await prisma.documento.findUnique({ where: { id: docId } });
         if (!docActual) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
+
+        // Tenancy
+        const docClienteId = await getDocClienteId(docId);
+        if (!verificarTenencia(docClienteId, req.usuario)) {
+            res.status(403).json({ status: 'FAIL', error: 'forbidden' });
+            return;
+        }
 
         if (docActual.intentos_reemplazo >= MAX_INTENTOS_REEMPLAZO) {
             await prisma.documento.update({ where: { id: docId }, data: { estado: 'BLOQUEADO' } });
@@ -138,8 +190,11 @@ router.post('/:id/reemplazar', requireAuth, async (req: AuthRequest, res: Respon
             ? validarTicketTaximetro(ocrResult.texto)
             : validarTicketGasoil(ocrResult.texto);
 
-        const nuevoEstado = (!ocrResult.legible || !validacion.valido) ? 'ILEGIBLE' : 'REEMPLAZADO';
+        const nuevoEstado = estadoOcrFinal(ocrResult.legible, validacion.valido) === 'ILEGIBLE'
+            ? 'ILEGIBLE'
+            : 'REEMPLAZADO';
         const hashFinal = hash_sha256 && /^[0-9a-f]{64}$/i.test(hash_sha256) ? hash_sha256 : docActual.hash_sha256;
+        const estado_ocr = ocrResult.error_ocr ? 'ERROR' : 'PROCESADO';
 
         const result = await prisma.$transaction(async (tx) => {
             await tx.documentoHistorial.create({
@@ -155,6 +210,8 @@ router.post('/:id/reemplazar', requireAuth, async (req: AuthRequest, res: Respon
                     ocr_texto: ocrResult.texto,
                     ocr_confianza: ocrResult.confianza,
                     ocr_datos_extraidos: validacion as any,
+                    ocr_error: ocrResult.error_ocr ?? null,
+                    estado_ocr,
                     intentos_reemplazo: docActual.intentos_reemplazo + 1,
                 },
             });
@@ -188,11 +245,138 @@ router.post('/:id/reemplazar', requireAuth, async (req: AuthRequest, res: Respon
     }
 });
 
+// ─────────────────────────────────────────────────────────
+// POST /api/fotos/:id/reintentar-ocr — Re-procesar OCR sin sustituir fichero (R-FT-007)
+// ─────────────────────────────────────────────────────────
+router.post('/:id/reintentar-ocr', requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const docId = req.params.id;
+        const doc = await prisma.documento.findUnique({ where: { id: docId } });
+        if (!doc) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
+
+        // Tenancy
+        const docClienteId = await getDocClienteId(docId);
+        if (!verificarTenencia(docClienteId, req.usuario)) {
+            res.status(403).json({ status: 'FAIL', error: 'forbidden' });
+            return;
+        }
+
+        const ocrResult = await extraerTextoImagen(doc.url);
+        const validacion = doc.tipo === 'TICKET_TAXIMETRO'
+            ? validarTicketTaximetro(ocrResult.texto)
+            : validarTicketGasoil(ocrResult.texto);
+
+        const nuevoEstado = estadoOcrFinal(ocrResult.legible, validacion.valido);
+        const estado_ocr = ocrResult.error_ocr ? 'ERROR' : 'PROCESADO';
+
+        const updated = await prisma.$transaction(async (tx) => {
+            const u = await tx.documento.update({
+                where: { id: docId },
+                data: {
+                    estado: nuevoEstado,
+                    ocr_texto: ocrResult.texto,
+                    ocr_confianza: ocrResult.confianza,
+                    ocr_datos_extraidos: validacion as any,
+                    ocr_error: ocrResult.error_ocr ?? null,
+                    estado_ocr,
+                },
+            });
+
+            // Si ahora es legible, resolver la TareaPendiente
+            if (nuevoEstado === 'VALIDO') {
+                await tx.tareaPendiente.updateMany({
+                    where: { entidad_id: docId, tipo: 'FOTO_ILEGIBLE', resuelta: false },
+                    data: { resuelta: true, resolved_at: new Date() },
+                });
+            }
+
+            return u;
+        });
+
+        res.json({
+            status: 'OK',
+            data: updated,
+            legible: nuevoEstado === 'VALIDO',
+            evento: nuevoEstado === 'VALIDO' ? 'E-FT-002' : 'E-FT-001',
+        });
+    } catch (err: any) {
+        console.error('[FOTOS] Error reintentando OCR:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────
+// DELETE /api/fotos/:id — Desvincular documento de un parte (solo BORRADOR)
+// ─────────────────────────────────────────────────────────
+router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const docId = req.params.id;
+        const { parte_id } = req.body;
+        if (!parte_id) {
+            res.status(400).json({ status: 'FAIL', error: 'missing_parte_id' });
+            return;
+        }
+
+        const doc = await prisma.documento.findUnique({ where: { id: docId } });
+        if (!doc) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
+
+        const parte = await prisma.parteDiario.findUnique({
+            where: { id: parte_id },
+            include: { vehiculo: { select: { cliente_id: true } } },
+        });
+        if (!parte) { res.status(404).json({ status: 'FAIL', error: 'parte_not_found' }); return; }
+
+        // Solo se puede desvincular si el parte está en BORRADOR (R-PD-017)
+        if (parte.estado !== 'BORRADOR') {
+            res.status(409).json({ status: 'FAIL', error: 'parte_not_borrador', regla: 'R-PD-017' });
+            return;
+        }
+
+        // Tenancy
+        if (!verificarTenencia(parte.vehiculo?.cliente_id ?? null, req.usuario)) {
+            res.status(403).json({ status: 'FAIL', error: 'forbidden' });
+            return;
+        }
+
+        const enlace = await prisma.documentoEnlace.findFirst({
+            where: { documento_id: docId, entidad_tipo: 'PARTE_DIARIO', entidad_id: parte_id },
+        });
+        if (!enlace) {
+            res.status(404).json({ status: 'FAIL', error: 'enlace_not_found' });
+            return;
+        }
+
+        await prisma.documentoEnlace.delete({ where: { id: enlace.id } });
+
+        // Si no quedan más enlaces, marcar como huérfano (no se elimina el fichero ni el registro)
+        const restantes = await prisma.documentoEnlace.count({ where: { documento_id: docId } });
+        if (restantes === 0) {
+            console.log(`[FOTOS] Documento ${docId} sin enlaces tras desvinculación`);
+        }
+
+        res.json({ status: 'OK' });
+    } catch (err: any) {
+        console.error('[FOTOS] Error desvinculando:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────
 // GET /api/fotos/:id/historial
+// ─────────────────────────────────────────────────────────
 router.get('/:id/historial', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
+        const docId = req.params.id;
+
+        // Tenancy
+        const docClienteId = await getDocClienteId(docId);
+        if (!verificarTenencia(docClienteId, req.usuario)) {
+            res.status(403).json({ status: 'FAIL', error: 'forbidden' });
+            return;
+        }
+
         const historial = await prisma.documentoHistorial.findMany({
-            where: { documento_id: req.params.id },
+            where: { documento_id: docId },
             orderBy: { created_at: 'asc' },
         });
         res.json({ status: 'OK', data: historial });

@@ -41,6 +41,58 @@ export interface Vehiculo {
   conductores?: any[];
 }
 
+export interface DatosTaximetro {
+  fecha?: string;
+  hora?: string;
+  licencia?: string;
+  acum_num_servicios?: number;
+  acum_carreras?: number;
+  acum_suplementos?: number;
+  acum_total?: number;
+  acum_dist_total?: number;
+  acum_dist_ocupado?: number;
+  acum_dist_libre?: number;
+  acum_dist_off?: number;
+  acum_tiempo_ocupado?: number;
+  acum_tiempo_on?: number;
+  acum_borrados?: number;
+  parc_num_servicios?: number;
+  parc_carreras?: number;
+  parc_suplementos?: number;
+  parc_total?: number;
+  parc_dist_total?: number;
+  parc_dist_ocupado?: number;
+  parc_dist_libre?: number;
+  parc_dist_off?: number;
+  parc_tiempo_ocupado?: number;
+  parc_tiempo_on?: number;
+  importe?: number;
+  valido: boolean;
+  errores: string[];
+}
+
+export interface DocumentoEnlace {
+  id: string;
+  documento_id: string;
+  entidad_tipo: string;
+  entidad_id: string;
+  documento: Documento;
+}
+
+export interface Documento {
+  id: string;
+  tipo: string;
+  url: string;
+  estado: string;
+  ocr_texto?: string | null;
+  ocr_confianza?: number | null;
+  ocr_datos_extraidos?: DatosTaximetro | Record<string, any> | null;
+  ocr_error?: string | null;
+  estado_ocr?: string | null;
+  intentos_reemplazo: number;
+  created_at?: string;
+}
+
 export interface ParteDiario {
   id: string;
   conductor_id: string;
@@ -53,12 +105,13 @@ export interface ParteDiario {
   combustible: number | null;
   varios: number | null;
   concepto_varios: string | null;
-  estado: 'ENVIADO' | 'FOTO_ILEGIBLE' | 'FOTO_SUSTITUIDA' | 'VALIDADO' | 'CON_INCIDENCIA';
+  estado: 'BORRADOR' | 'ENVIADO' | 'FOTO_ILEGIBLE' | 'FOTO_SUSTITUIDA' | 'VALIDADO' | 'CON_INCIDENCIA';
   conductor?: Conductor;
   vehiculo?: Vehiculo;
   calculo?: CalculoParte;
-  documentos?: any[];
+  documentos?: DocumentoEnlace[];
   incidencias?: Incidencia[];
+  anomalias?: Anomalia[];
 }
 
 export interface CalculoParte {
@@ -133,9 +186,12 @@ export interface Incidencia {
 export interface Anomalia {
   id: string;
   conductor_id: string;
-  tipo: string;
+  tipo: 'NORMAL' | 'CRITICA';
   descripcion: string;
   notificada: boolean;
+  parte_diario_id?: string | null;
+  documento_id?: string | null;
+  estado: 'ACTIVA' | 'RESUELTA';
   created_at: string;
   conductor?: { usuario: { nombre: string } };
 }

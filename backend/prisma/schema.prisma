@@ -216,6 +216,8 @@ model Documento {
   ocr_datos_extraidos   Json?
   intentos_reemplazo    Int                  @default(0)
   subido_por_usuario_id Int?
+  ocr_error             String?
+  estado_ocr            String?              @default("PENDIENTE")
   created_at            DateTime             @default(now())
   updated_at            DateTime             @updatedAt
   enlaces               DocumentoEnlace[]
@@ -266,13 +268,16 @@ model TareaPendiente {
 }
 
 model Anomalia {
-  id           String    @id @default(uuid())
-  conductor_id String
-  tipo         String
-  descripcion  String
-  notificada   Boolean   @default(false)
-  created_at   DateTime  @default(now())
-  conductor    Conductor @relation(fields: [conductor_id], references: [id])
+  id              String    @id @default(uuid())
+  conductor_id    String
+  tipo            String
+  descripcion     String
+  notificada      Boolean   @default(false)
+  parte_diario_id String?
+  documento_id    String?
+  estado          String    @default("ACTIVA")
+  created_at      DateTime  @default(now())
+  conductor       Conductor @relation(fields: [conductor_id], references: [id])
 
   @@map("anomalias")
   @@schema("pilotos")

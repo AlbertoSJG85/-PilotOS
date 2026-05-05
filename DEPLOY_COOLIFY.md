@@ -1,80 +1,145 @@
-# 🚀 Despliegue de PilotOS en Coolify
+# Despliegue de PilotOS en Coolify
 
-Guía para desplegar PilotOS en tu servidor con Coolify y empezar con una base de datos limpia.
+Guía de referencia para desplegar PilotOS (backend + frontend) en Coolify.
 
 ---
 
 ## 1. Preparación en Coolify
 
-1.  Accede a tu panel de Coolify.
-2.  Crea un nuevo **Project** (ej: `PilotOS`).
-3.  Dentro del proyecto, crea un entorno **Production**.
+1. Accede al panel de Coolify.
+2. Crea un **Project** (ej: `PilotOS`) con un entorno **Production**.
 
 ---
 
-## 2. Base de Datos (PostgreSQL)
+## 2. Base de Datos (PostgreSQL compartida NexOS)
 
-PilotOS en producción usa **PostgreSQL**, no SQLite.
+PilotOS usa la BD compartida `nexos` con el schema `pilotos.*`.
 
-1.  En Coolify, añade un nuevo recurso: **Database** -> **PostgreSQL**.
-2.  Dale un nombre (ej: `pilotos-db`).
-3.  Una vez creada, copia la **Connection String (Internal)**. Será algo como:
-    `postgresql://postgres:password@ip:5432/postgres`
+La `DATABASE_URL` debe apuntar a la instancia PostgreSQL de Contabo:
+
+```
+postgresql://USER:PASSWORD@161.97.108.106:5433/nexos?schema=pilotos
+```
+
+No crees una BD separada para PilotOS — usa la compartida del ecosistema (DT-002).
 
 ---
 
 ## 3. Despliegue del Backend
 
-1.  En Coolify, añade un nuevo recurso: **Application** -> **Public Repository**.
-2.  Usa tu repo de GitHub (donde subirás este código).
-3.  **Build Pack**: `Dockerfile`.
-4.  **Docker Context**: `backend` (importante, apunta a la carpeta del backend).
-5.  **Dockerfile Location**: `Dockerfile`.
-6.  **Variables de Entorno**:
-    *   `DATABASE_URL`: Pega la Connection String de PostgreSQL de arriba.
-    *   `PORT`: `3001`
-7.  **Volumes** (IMPORTANTE para las fotos):
-    *   Añade un volumen: `pilotos-uploads:/app/uploads`
-    *   Esto asegura que las fotos no se pierdan al reiniciar el contenedor.
-8.  **URLs**: Configura tu dominio (ej: `https://api.pilotos.app`).
-9.  **Deploy**.
+1. En Coolify: **Application** → **Public Repository**.
+2. **Build Pack**: `Dockerfile`.
+3. **Docker Context**: `backend`.
+4. **Dockerfile Location**: `Dockerfile`.
+5. **Variables de Entorno** (obligatorias):
 
-> **Nota importante**: Al terminar el despliegue, entra en la terminal del contenedor del Backend en Coolify y ejecuta:
-> `npm run prod:setup`
-> Esto creará las tablas y cargará el catálogo de mantenimientos básicos.
+| Variable | Valor / Descripción |
+|---|---|
+| `DATABASE_URL` | Connection string PostgreSQL (ver arriba) |
+| `PORT` | `3001` |
+| `JWT_SECRET` | Secret seguro (mínimo 32 chars, nunca hardcodeado) |
+| `INTERNAL_API_TOKEN` | Token compartido con GlorIA para `/internal/*` |
+| `PUBLIC_BASE_URL` | URL pública del backend, ej: `https://api.pilotos.app` (sin barra final). Necesario para que las URLs de /uploads sean HTTPS. |
+| `ALLOWED_ORIGINS` | URL del frontend, ej: `https://pilotos.app` |
+| `NODE_ENV` | `production` |
 
----
+6. **Volume** (imprescindible para persistir fotos):
 
-## 4. Despliegue del Frontend
+```
+pilotos-uploads:/app/uploads
+```
 
-1.  En Coolify, añade otro recurso: **Application** -> **Public Repository**.
-2.  Mismo repo de GitHub.
-3.  **Build Pack**: `Dockerfile`.
-4.  **Docker Context**: `app` (carpeta del frontend).
-5.  **Dockerfile Location**: `Dockerfile`.
-6.  **Variables de Entorno**:
-    *   `NEXT_PUBLIC_BACKEND_URL`: La URL de tu backend (ej: `https://api.pilotos.app`). **Sin barra final**.
-7.  **URLs**: Configura tu dominio principal (ej: `https://pilotos.app`).
-8.  **Deploy**.
+Sin este volumen, las fotos se pierden al reiniciar el contenedor.
 
----
+7. **URLs**: configura tu dominio (ej: `https://api.pilotos.app`).
+8. **Deploy**.
 
-## 5. Primeros Pasos (Base de Datos Limpia)
-
-Al desplegar, la base de datos estará vacía.
-
-1.  Entra en la URL de tu frontend: `https://pilotos.app/onboarding`
-2.  Rellena tus datos.
-3.  El sistema creará tu usuario Patrón, vehículo y configuraciones automáticamente.
-4.  ¡Listo!
+> Tras el primer despliegue, desde la terminal del contenedor ejecuta:
+> ```
+> npm run prod:setup
+> ```
+> Esto aplica `prisma db push` y carga el catálogo de mantenimientos.
 
 ---
 
-## 6. Configuración de MinIO (Opcional por ahora)
+## 4. Migraciones de BD (cambios incrementales)
 
-Si quieres subir fotos, necesitarás un servicio S3 (como MinIO en Coolify o AWS S3).
-Configura en el Backend:
-*   `MINIO_ENDPOINT`
-*   `MINIO_ACCESS_KEY`
-*   `MINIO_SECRET_KEY`
-*   `MINIO_BUCKET`
+Cuando el schema Prisma cambia de forma aditiva (nuevas columnas), hay dos opciones:
+
+### Opción A — `prisma db push` (recomendada para cambios pequeños)
+
+Desde la terminal del contenedor en Coolify:
+
+```bash
+npx prisma db push
+```
+
+### Opción B — SQL manual
+
+Si `prisma db push` no está disponible, aplicar el fichero:
+
+```
+backend/prisma/migrations_pendientes.sql
+```
+
+Desde psql o la terminal del contenedor:
+
+```bash
+psql $DATABASE_URL -f /app/prisma/migrations_pendientes.sql
+```
+
+**Pendiente de aplicar en producción (2026-05-05):**
+
+```sql
+-- Campos OCR en documentos
+ALTER TABLE pilotos.documentos
+  ADD COLUMN IF NOT EXISTS ocr_error   VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS estado_ocr  VARCHAR(50) DEFAULT 'PENDIENTE';
+
+-- Trazabilidad en anomalías
+ALTER TABLE pilotos.anomalias
+  ADD COLUMN IF NOT EXISTS parte_diario_id UUID,
+  ADD COLUMN IF NOT EXISTS documento_id    UUID,
+  ADD COLUMN IF NOT EXISTS estado         VARCHAR(50) NOT NULL DEFAULT 'ACTIVA';
+```
+
+---
+
+## 5. Despliegue del Frontend
+
+1. En Coolify: **Application** → **Public Repository**.
+2. **Build Pack**: `Dockerfile`.
+3. **Docker Context**: `app`.
+4. **Dockerfile Location**: `Dockerfile`.
+5. **Variables de Entorno**:
+
+| Variable | Valor / Descripción |
+|---|---|
+| `API_URL` | URL interna del backend (usada en rewrites de Next.js), ej: `http://backend:3001` |
+| `NEXT_PUBLIC_API_URL` | Dejar vacío (`''`) en producción — las llamadas van por el proxy de Next.js |
+| `NEXT_PUBLIC_BACKEND_URL` | URL pública del backend (usada en links directos si los hay), ej: `https://api.pilotos.app` |
+
+> **Nota sobre variables de entorno en Next.js:**
+> - `API_URL` → solo servidor (rewrites en `next.config.ts`).
+> - `NEXT_PUBLIC_*` → inyectadas en el bundle del navegador.
+> - Mantener `NEXT_PUBLIC_API_URL=''` en producción para que las llamadas API pasen por el proxy de Next.js y evitar problemas de CORS.
+
+6. **URLs**: configura tu dominio (ej: `https://pilotos.app`).
+7. **Deploy**.
+
+---
+
+## 6. Primeros Pasos (Base de Datos Limpia)
+
+1. Abre `https://pilotos.app/onboarding`.
+2. Completa el asistente (patrón, vehículo, configuración económica).
+3. El sistema crea automáticamente el Usuario, Cliente, Conductor y Vehículo.
+
+---
+
+## 7. Notas de Arquitectura
+
+- El backend sirve `/uploads/*` como ficheros estáticos. Con el volumen `pilotos-uploads:/app/uploads` los ficheros persisten entre deploys.
+- `PUBLIC_BASE_URL` evita el problema de `req.protocol = 'http'` detrás del proxy HTTPS de Coolify. Si no se define, `app.set('trust proxy', true)` en `index.ts` intenta reconstruir la URL correcta, pero es más fiable usar la variable explícita.
+- El token interno `INTERNAL_API_TOKEN` debe coincidir en PilotOS y en GlorIA.
+- `minos.Users` y `ledger.Eventos` son tablas compartidas con RentOS y otros productos — nunca borrar en scripts de reset de PilotOS (C-023).

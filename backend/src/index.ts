@@ -41,6 +41,10 @@ if (!process.env.JWT_SECRET) {
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust HTTPS reverse proxy (Coolify/nginx) so req.protocol returns 'https'
+// and URLs stored in DB use the correct scheme.
+app.set('trust proxy', true);
+
 // Middleware
 const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())

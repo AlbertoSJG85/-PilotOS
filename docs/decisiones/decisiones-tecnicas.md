@@ -302,4 +302,44 @@ Registro de decisiones tecnicas importantes del proyecto.
 - Decision: Implementar PWA con manifest.json y service worker propio en /public/sw.js en lugar de usar la librería next-pwa.
 - Justificacion: next-pwa añade complejidad de configuración, genera service workers opacos y tiene problemas con el App Router de Next.js 16. Un SW manual de 50 líneas es más controlable y suficiente para la estrategia network-first que necesitamos en esta fase.
 - Iconos: servidos por rutas de API Next.js (/icon-192, /icon-512) como SVG temporales. En producción real, sustituir por PNG estáticos (192x192 y 512x512).
+- Impacto: La app es instalable en iOS (via "Añadir a pantalla de inicio") y Android (banner automático de Chrome).
+
+---
+
+## DT-030 · OCR estructurado para taxímetro español
+
+- Fecha: 2026-05-05
+- Area: Backend / OCR
+- Decision: Reescribir validarTicketTaximetro en ocr.service.ts para extraer campos específicos del ticket: acumulados (Num.Servicios, Carreras, Suplementos, Total, Dist.Total, Borrados, tiempos) y parciales del turno (P Total, P Dist.Total, etc.).
+- Justificacion: El OCR genérico no extraía los campos que permiten cotejo real (P Total vs ingreso_bruto, P Dist.Total vs km del parte, Borrados para detección de manipulación).
+- Estructura de datos: interfaz DatosTaximetro con prefijos acum_* para acumulados y parc_* para parciales. Campo importe mantenido para backward compat.
+- Normalización de distancias: si valor > 2000, asumir metros y convertir a km.
+- valido: true solo si se detecta P Total Y fecha.
+
+---
+
+## DT-031 · Cotejo OCR completo con trazabilidad
+
+- Fecha: 2026-05-05
+- Area: Backend / Cotejo
+- Decision: Extender ocrComparacion.service.ts con cuatro comprobaciones:
+  1. P Total vs ingreso_bruto (tolerancia ±3 €) — Anomalia NORMAL
+  2. P Dist.Total vs km_fin-km_inicio (tolerancia ±6 km) — Anomalia NORMAL
+  3. acum_borrados actual vs ticket anterior del mismo vehiculo — Anomalia CRITICA si diff > 1 o decrece
+  4. Suma OCR combustible vs combustible declarado (tolerancia ±0.50 €) — Anomalia NORMAL
+- Anomalias incluyen parte_diario_id y documento_id para trazabilidad.
+- Si OCR no extrae P Total (resultado no concluyente): sin anomalia, sin penalización al conductor.
+
+---
+
+## DT-032 · Seguridad: tenancy y trust proxy
+
+- Fecha: 2026-05-05
+- Area: Backend / Seguridad
+- Decision:
+  1. app.set('trust proxy', true) en index.ts para que req.protocol sea https detrás del proxy de Coolify.
+  2. PUBLIC_BASE_URL como variable de entorno para construir URLs absolutas de /uploads con protocolo correcto.
+  3. Validación de tenencia (cliente_id) en todos los endpoints de /api/fotos/* y /api/partes/:id (GET y DELETE).
+- Justificacion: Sin trust proxy, URLs en BD eran http:// en producción HTTPS. Sin tenancy en GET /:id, cualquier usuario autenticado podía leer partes de otro cliente.
+- Admin (role=admin) bypasea las restricciones de tenancy para soporte.
 - Impacto: La app es instalable en iOS (via "Añadir a pantalla de inicio") y Android (banner automático de Chrome). start_url apunta a /conductor para que el icono abra directamente en la experiencia del conductor.
