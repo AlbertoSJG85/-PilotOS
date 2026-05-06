@@ -62,46 +62,28 @@ Sin este volumen, las fotos se pierden al reiniciar el contenedor.
 
 ---
 
-## 4. Migraciones de BD (cambios incrementales)
+## 4. Migraciones de BD (automáticas en cada deploy)
 
-Cuando el schema Prisma cambia de forma aditiva (nuevas columnas), hay dos opciones:
+El backend aplica `prisma/migrations_pendientes.sql` automáticamente al arrancar en producción.
 
-### Opción A — `prisma db push` (recomendada para cambios pequeños)
+**No hay que hacer nada manual.** Al hacer deploy del backend en Coolify:
 
-Desde la terminal del contenedor en Coolify:
+1. El contenedor arranca con `npm run start:prod`.
+2. `start:prod` ejecuta `db:deploy` antes de iniciar el servidor.
+3. `db:deploy` comprueba si existe `prisma/migrations_pendientes.sql`:
+   - Si existe → lo aplica con `prisma db execute` y loguea el resultado.
+   - Si no existe → continúa sin hacer nada.
+4. Si la migración falla → el deploy falla con error claro. El servidor no arranca.
 
-```bash
-npx prisma db push
-```
+**El SQL en `migrations_pendientes.sql` debe ser siempre idempotente:**
+- Usar `ADD COLUMN IF NOT EXISTS`
+- Usar `CREATE INDEX IF NOT EXISTS`
+- Nunca incluir DROP, DELETE o ALTER destructivos sin avisar
 
-### Opción B — SQL manual
-
-Si `prisma db push` no está disponible, aplicar el fichero:
-
-```
-backend/prisma/migrations_pendientes.sql
-```
-
-Desde psql o la terminal del contenedor:
-
-```bash
-psql $DATABASE_URL -f /app/prisma/migrations_pendientes.sql
-```
-
-**Pendiente de aplicar en producción (2026-05-05):**
-
-```sql
--- Campos OCR en documentos
-ALTER TABLE pilotos.documentos
-  ADD COLUMN IF NOT EXISTS ocr_error   VARCHAR(100),
-  ADD COLUMN IF NOT EXISTS estado_ocr  VARCHAR(50) DEFAULT 'PENDIENTE';
-
--- Trazabilidad en anomalías
-ALTER TABLE pilotos.anomalias
-  ADD COLUMN IF NOT EXISTS parte_diario_id UUID,
-  ADD COLUMN IF NOT EXISTS documento_id    UUID,
-  ADD COLUMN IF NOT EXISTS estado         VARCHAR(50) NOT NULL DEFAULT 'ACTIVA';
-```
+**Para añadir una migración futura:**
+1. Añadir el SQL a `backend/prisma/migrations_pendientes.sql`.
+2. Hacer commit y push a main.
+3. Coolify despliega automáticamente → el SQL se aplica solo.
 
 ---
 
