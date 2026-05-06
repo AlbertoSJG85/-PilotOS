@@ -11,10 +11,18 @@
  * Seguridad: todos los endpoints validan tenencia (cliente_id).
  */
 import { Router, Response } from 'express';
+import path from 'path';
 import { prisma } from '../lib/prisma';
 import { requireAuth, AuthRequest } from '../middleware/auth.middleware';
 import { extraerTextoImagen, validarTicketTaximetro, validarTicketGasoil } from '../services/ocr.service';
 import crypto from 'crypto';
+
+// Convierte una URL pública de uploads a ruta local del disco.
+// Sharp y Tesseract necesitan rutas de fichero, no URLs HTTP.
+function urlToLocalPath(url: string): string {
+    const filename = url.split('/').pop() ?? '';
+    return path.join(process.cwd(), 'uploads', filename);
+}
 
 const router = Router();
 const MAX_INTENTOS_REEMPLAZO = 2; // R-FT-003
@@ -109,8 +117,8 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
             return;
         }
 
-        // Documento nuevo: OCR
-        const ocrResult = await extraerTextoImagen(url);
+        // Documento nuevo: OCR — usar ruta local, no URL pública
+        const ocrResult = await extraerTextoImagen(urlToLocalPath(url));
         const validacion = tipo === 'TICKET_TAXIMETRO'
             ? validarTicketTaximetro(ocrResult.texto)
             : validarTicketGasoil(ocrResult.texto);
@@ -185,7 +193,7 @@ router.post('/:id/reemplazar', requireAuth, async (req: AuthRequest, res: Respon
             return;
         }
 
-        const ocrResult = await extraerTextoImagen(url);
+        const ocrResult = await extraerTextoImagen(urlToLocalPath(url));
         const validacion = docActual.tipo === 'TICKET_TAXIMETRO'
             ? validarTicketTaximetro(ocrResult.texto)
             : validarTicketGasoil(ocrResult.texto);
@@ -261,7 +269,7 @@ router.post('/:id/reintentar-ocr', requireAuth, async (req: AuthRequest, res: Re
             return;
         }
 
-        const ocrResult = await extraerTextoImagen(doc.url);
+        const ocrResult = await extraerTextoImagen(urlToLocalPath(doc.url));
         const validacion = doc.tipo === 'TICKET_TAXIMETRO'
             ? validarTicketTaximetro(ocrResult.texto)
             : validarTicketGasoil(ocrResult.texto);
