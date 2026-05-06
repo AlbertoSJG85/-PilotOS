@@ -36,9 +36,12 @@ router.post('/', upload.single('foto'), async (req: Request, res: Response) => {
             return res.status(400).json({ status: 'FAIL', error: 'no_file', message: 'No se ha subido ninguna foto' });
         }
 
-        const protocol = req.protocol;
-        const host = req.get('host');
-        const publicUrl = `${protocol}://${host}/uploads/${req.file.filename}`;
+        // PUBLIC_BASE_URL takes priority (stable HTTPS URL behind Coolify proxy).
+        // Fallback: reconstruct from request (works locally with trust proxy set).
+        const publicBase = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+        const publicUrl = publicBase
+            ? `${publicBase}/uploads/${req.file.filename}`
+            : `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
 
         let hash_sha256: string | null = null;
         try {

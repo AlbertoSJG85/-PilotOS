@@ -307,14 +307,21 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const parte = await prisma.parteDiario.findUnique({
             where: { id: req.params.id },
-            include: { documentos: true },
+            include: {
+                documentos: true,
+                vehiculo: { select: { cliente_id: true } },
+            },
         });
         if (!parte) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
         if (parte.estado !== 'BORRADOR') {
             res.status(409).json({ status: 'FAIL', error: 'invalid_state', regla: 'R-PD-017' });
             return;
         }
-        if (parte.conductor_id !== req.usuario?.conductor_id && req.usuario?.role !== 'admin') {
+        // Tenancy: conductor can only delete own draft; patron/admin can delete any in their tenant.
+        const esCondutor = parte.conductor_id === req.usuario?.conductor_id;
+        const esMismoCliente = req.usuario?.cliente_id && parte.vehiculo?.cliente_id === req.usuario.cliente_id;
+        const esAdmin = req.usuario?.role === 'admin';
+        if (!esCondutor && !esMismoCliente && !esAdmin) {
             res.status(403).json({ status: 'FAIL', error: 'forbidden' });
             return;
         }
@@ -388,7 +395,22 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
             },
         });
         if (!parte) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
-        res.json({ status: 'OK', data: parte });
+
+        // Tenancy: admin can see all; others must belong to the same cliente.
+        if (req.usuario?.role !== 'admin' && req.usuario?.cliente_id) {
+            if (parte.vehiculo?.cliente_id !== req.usuario.cliente_id) {
+                res.status(403).json({ status: 'FAIL', error: 'forbidden' });
+                return;
+            }
+        }
+
+        // Anomalias linked to this parte (fetched separately since the FK is a soft reference)
+        const anomalias = await prisma.anomalia.findMany({
+            where: { parte_diario_id: parte.id },
+            orderBy: { created_at: 'desc' },
+        });
+
+        res.json({ status: 'OK', data: { ...parte, anomalias } });
     } catch (err: any) {
         console.error('[PARTES] Error:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });
