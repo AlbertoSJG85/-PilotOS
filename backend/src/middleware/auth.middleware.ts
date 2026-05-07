@@ -31,12 +31,22 @@ export interface AuthRequest extends Request {
 /**
  * Genera JWT token para un usuario autenticado.
  */
-export function generarToken(usuario: { id: number; telefono: string; role: string }): string {
+export function generarToken(usuario: { id: number; telefono: string; role: string; es_patron?: boolean; cliente_id?: string | null }): string {
     return jwt.sign(
-        { id: usuario.id, telefono: usuario.telefono, role: usuario.role },
+        { id: usuario.id, telefono: usuario.telefono, role: usuario.role, es_patron: !!usuario.es_patron, cliente_id: usuario.cliente_id ?? null },
         JWT_SECRET,
         { expiresIn: JWT_EXPIRATION }
     );
+}
+
+/**
+ * Verifica que un recurso pertenece al mismo tenant que el usuario autenticado.
+ * Los admins pasan siempre. Devuelve false si el tenant no coincide o no hay contexto.
+ */
+export function isSameTenant(req: AuthRequest, resourceClienteId: string | null | undefined): boolean {
+    if (req.usuario?.role === 'admin') return true;
+    if (!req.usuario?.cliente_id || !resourceClienteId) return false;
+    return req.usuario.cliente_id === resourceClienteId;
 }
 
 /**

@@ -310,7 +310,7 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
         else if (err.code === 'invalid_mime') msg = err.message;
         else if (err.code === 'network_error') msg = 'Sin conexión. Reintenta cuando vuelvas.';
         else if (err.code === 'duplicate_parte') {
-          const est = err.details?.estado;
+          const est = (err.details as Record<string, unknown>)?.estado;
           if (est === 'ENVIADO' || est === 'FOTO_SUSTITUIDA') {
             msg = 'El parte ya estaba enviado. Redirigiendo...';
             setTimeout(() => router.push(returnPath), 2000);

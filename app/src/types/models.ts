@@ -24,7 +24,8 @@ export interface Conductor {
   cliente_id: string;
   es_patron: boolean;
   activo: boolean;
-  usuario: Pick<Usuario, 'nombre' | 'telefono'>;
+  usuario: Pick<Usuario, 'nombre' | 'telefono'> & { id?: number; role?: string };
+  vehiculosAsignados?: { vehiculo: Pick<Vehiculo, 'id' | 'matricula'> }[];
 }
 
 export interface Vehiculo {
@@ -38,7 +39,7 @@ export interface Vehiculo {
   tipo_combustible?: string;
   tipo_transmision?: string;
   fecha_matriculacion?: string;
-  conductores?: any[];
+  conductores?: { conductor: { id: string; es_patron: boolean; usuario: { nombre: string } }; activo: boolean }[];
 }
 
 export interface DatosTaximetro {
@@ -86,7 +87,7 @@ export interface Documento {
   estado: string;
   ocr_texto?: string | null;
   ocr_confianza?: number | null;
-  ocr_datos_extraidos?: DatosTaximetro | Record<string, any> | null;
+  ocr_datos_extraidos?: DatosTaximetro | Record<string, unknown> | null;
   ocr_error?: string | null;
   estado_ocr?: string | null;
   intentos_reemplazo: number;
@@ -205,8 +206,8 @@ export interface Onboarding {
   nombre_comercial: string | null;
   tipo_actividad: string;
 
-  asalariados: any[] | null;  // [{ nombre, telefono, modelo_reparto, porcentaje_conductor }]
-  gastos_fijos: any[] | null; // [{ descripcion, importe, periodicidad }]
+  asalariados: { nombre: string; telefono: string; modelo_reparto?: string; porcentaje_conductor?: number }[] | null;
+  gastos_fijos: { descripcion: string; importe: number; periodicidad: string }[] | null;
 
   matricula: string | null;
   marca_modelo: string | null;

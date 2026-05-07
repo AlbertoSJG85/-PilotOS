@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -29,7 +29,9 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
                 mantenimientos: { include: { catalogo: true } },
             },
         });
-        if (!vehiculo) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
+        if (!vehiculo || !isSameTenant(req, vehiculo.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
+        }
         res.json({ status: 'OK', data: vehiculo });
     } catch (err: any) {
         console.error('[VEHICULOS] Error:', err.message);
@@ -53,6 +55,10 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
 
 router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
+        const existing = await prisma.vehiculo.findUnique({ where: { id: req.params.id }, select: { cliente_id: true } });
+        if (!existing || !isSameTenant(req, existing.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
+        }
         const { matricula, marca, modelo, tipo_combustible, tipo_transmision, activo } = req.body;
         const vehiculo = await prisma.vehiculo.update({
             where: { id: req.params.id },
@@ -75,6 +81,10 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
 router.post('/:id/conductores', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const vehiculo_id = req.params.id;
+        const existing = await prisma.vehiculo.findUnique({ where: { id: vehiculo_id }, select: { cliente_id: true } });
+        if (!existing || !isSameTenant(req, existing.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
+        }
         const { conductor_ids } = req.body;
 
         // 1. Desactivar las asignaciones actuales de este vehículo

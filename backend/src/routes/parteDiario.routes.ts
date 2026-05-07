@@ -16,7 +16,7 @@
  */
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 import { crearOActualizarCalculo } from '../services/calculo.service';
 import { compararDocumentosConParte } from '../services/ocrComparacion.service';
 
@@ -70,6 +70,22 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
         const fechaDate = new Date(data.fecha_trabajada);
         const esBorrador = data.borrador === true;
         const estadoFinal = esBorrador ? 'BORRADOR' : 'ENVIADO';
+
+        // Validar que vehiculo y conductor pertenecen al tenant del usuario
+        if (req.usuario?.role !== 'admin') {
+            const vehiculo = await prisma.vehiculo.findUnique({ where: { id: data.vehiculo_id }, select: { cliente_id: true } });
+            if (!vehiculo || !isSameTenant(req, vehiculo.cliente_id)) {
+                res.status(404).json({ status: 'FAIL', error: 'vehiculo_not_found' }); return;
+            }
+            const conductor = await prisma.conductor.findUnique({ where: { id: data.conductor_id }, select: { cliente_id: true } });
+            if (!conductor || !isSameTenant(req, conductor.cliente_id)) {
+                res.status(404).json({ status: 'FAIL', error: 'conductor_not_found' }); return;
+            }
+            // Asalariado solo puede crear partes con su propio conductor_id
+            if (!req.usuario?.es_patron && req.usuario?.conductor_id !== data.conductor_id) {
+                res.status(403).json({ status: 'FAIL', error: 'forbidden' }); return;
+            }
+        }
 
         // R-PD-016: Solo un parte por vehiculo y dia
         const existente = await prisma.parteDiario.findUnique({
@@ -424,6 +440,13 @@ router.patch('/:id/estado', requireAuth, async (req: AuthRequest, res: Response)
         if (estado !== 'FOTO_SUSTITUIDA') {
             res.status(400).json({ status: 'FAIL', error: 'invalid_state', regla: 'R-PD-017' });
             return;
+        }
+        const parteCheck = await prisma.parteDiario.findUnique({
+            where: { id: req.params.id },
+            include: { vehiculo: { select: { cliente_id: true } } },
+        });
+        if (!parteCheck || !isSameTenant(req, parteCheck.vehiculo?.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
         }
         const parte = await prisma.parteDiario.update({ where: { id: req.params.id }, data: { estado } });
         res.json({ status: 'OK', data: parte });

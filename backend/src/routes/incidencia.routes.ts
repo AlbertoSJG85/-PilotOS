@@ -3,7 +3,7 @@
  */
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, requirePatron, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -65,9 +65,11 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const incidencia = await prisma.incidencia.findUnique({
             where: { id: req.params.id },
-            include: { parteDiario: { include: { conductor: { include: { usuario: true } }, vehiculo: true, documentos: { include: { documento: true } } } } },
+            include: { parteDiario: { include: { conductor: { include: { usuario: true } }, vehiculo: { select: { cliente_id: true } }, documentos: { include: { documento: true } } } } },
         });
-        if (!incidencia) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
+        if (!incidencia || !isSameTenant(req, incidencia.parteDiario?.vehiculo?.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
+        }
         res.json({ status: 'OK', data: incidencia });
     } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
 });

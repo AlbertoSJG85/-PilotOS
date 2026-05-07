@@ -5,38 +5,28 @@ import { PageHeader } from '@/components/layout';
 import { Card, Badge, Skeleton, Button, Input } from '@/components/ui';
 import { getVehiculos, createVehiculo, updateVehiculo, assignVehiculoConductor, getUsuarios, createConductor, updateConductor } from '@/lib/api';
 import { formatKm } from '@/lib/utils';
-import type { Vehiculo } from '@/types';
+import type { Vehiculo, Conductor } from '@/types';
 
-interface ConductorInfo {
-  id: string;
-  cliente_id: string;
-  usuario_id: number;
-  es_patron: boolean;
-  activo: boolean;
-  usuario: {
-    id: number;
-    nombre: string;
-    telefono: string;
-    role: string;
-  };
-  vehiculosAsignados: {
-    vehiculo: {
-      id: string;
-      matricula: string;
-    };
-  }[];
-}
 
 export default function FlotaPage() {
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
-  const [conductores, setConductores] = useState<ConductorInfo[]>([]);
+  const [conductores, setConductores] = useState<Conductor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [showVehiculoForm, setShowVehiculoForm] = useState(false);
   const [showConductorForm, setShowConductorForm] = useState(false);
   const [formVehiculo, setFormVehiculo] = useState<Partial<Vehiculo>>({});
-  const [formConductor, setFormConductor] = useState<any>({});
+  const [formConductor, setFormConductor] = useState<{
+    id?: string;
+    nombre?: string;
+    telefono?: string;
+    email?: string;
+    vehiculo_id?: string;
+    porcentaje_conductor?: number;
+    modelo_reparto?: string;
+    activo?: boolean;
+  }>({});
 
   const loadData = () => {
     setLoading(true);
@@ -63,8 +53,8 @@ export default function FlotaPage() {
       setShowVehiculoForm(false);
       setFormVehiculo({});
       loadData();
-    } catch (e: any) {
-      alert('Error: ' + e.message);
+    } catch (e: unknown) {
+      alert('Error: ' + (e instanceof Error ? e.message : String(e)));
     }
   };
 
@@ -89,12 +79,12 @@ export default function FlotaPage() {
       setShowConductorForm(false);
       setFormConductor({});
       loadData();
-    } catch (e: any) {
-      alert('Error: ' + e.message);
+    } catch (e: unknown) {
+      alert('Error: ' + (e instanceof Error ? e.message : String(e)));
     }
   };
 
-  const handleToggleConductorActivo = async (c: ConductorInfo) => {
+  const handleToggleConductorActivo = async (c: Conductor) => {
     if (confirm(`¿Estás seguro de ${c.activo ? 'desactivar' : 'activar'} este conductor?`)) {
       try {
         await updateConductor(c.id, { activo: !c.activo });
@@ -156,7 +146,7 @@ export default function FlotaPage() {
               {!formVehiculo.id && (
                 <>
                   <Input type="number" placeholder="KM Actuales" value={formVehiculo.km_actuales || ''} onChange={(e) => setFormVehiculo({ ...formVehiculo, km_actuales: Number(e.target.value) })} />
-                  <Input type="date" placeholder="Fecha Matriculación" value={formVehiculo.fecha_matriculacion as any || ''} onChange={(e) => setFormVehiculo({ ...formVehiculo, fecha_matriculacion: e.target.value as any })} />
+                  <Input type="date" placeholder="Fecha Matriculación" value={(formVehiculo.fecha_matriculacion as string) || ''} onChange={(e) => setFormVehiculo({ ...formVehiculo, fecha_matriculacion: e.target.value })} />
                 </>
               )}
               <div className="flex gap-2">
@@ -262,9 +252,9 @@ export default function FlotaPage() {
                      <Button size="sm" variant="ghost" onClick={() => { setFormConductor({ id: c.id, nombre: c.usuario.nombre, telefono: c.usuario.telefono }); setShowConductorForm(true); }}>Edit</Button>
                      <Button size="sm" variant="ghost" onClick={() => handleToggleConductorActivo(c)}>{c.activo ? 'Desactivar' : 'Activar'}</Button>
                   </div>
-                  {c.vehiculosAsignados?.length > 0 && (
+                  {(c.vehiculosAsignados?.length ?? 0) > 0 && (
                      <div className="text-xs text-zinc-500">
-                       Vehículos asignados: {c.vehiculosAsignados.map(va => va.vehiculo.matricula).join(', ')}
+                       Vehículos asignados: {c.vehiculosAsignados?.map(va => va.vehiculo.matricula).join(', ')}
                      </div>
                   )}
                 </Card>

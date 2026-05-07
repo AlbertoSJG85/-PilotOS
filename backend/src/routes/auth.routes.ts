@@ -51,14 +51,22 @@ router.post('/login', async (req: Request, res: Response) => {
             }
         }
 
-        const token = generarToken({ id: usuario.id, telefono: usuario.telefono || '', role: usuario.role || 'user' });
-
+        // Resolver contexto PilotOS ANTES de generar el token para incluirlo en el payload.
         const conductor = await prisma.conductor.findFirst({
             where: { usuario_id: usuario.id, activo: true },
             include: { cliente: true },
         });
         const cliente = conductor?.cliente
             ?? await prisma.cliente.findFirst({ where: { patron_id: usuario.id, activo: true } });
+
+        const esPatron = conductor?.es_patron ?? (cliente ? cliente.patron_id === usuario.id : false);
+        const token = generarToken({
+            id: usuario.id,
+            telefono: usuario.telefono || '',
+            role: usuario.role || 'user',
+            es_patron: esPatron,
+            cliente_id: cliente?.id ?? null,
+        });
 
         res.json({
             status: 'OK',
@@ -67,7 +75,7 @@ router.post('/login', async (req: Request, res: Response) => {
             context: cliente ? {
                 cliente_id: cliente.id,
                 conductor_id: conductor?.id,
-                es_patron: conductor?.es_patron ?? (cliente.patron_id === usuario.id),
+                es_patron: esPatron,
                 tipo_actividad: cliente.tipo_actividad,
             } : null,
         });

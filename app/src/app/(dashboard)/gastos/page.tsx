@@ -36,7 +36,7 @@ function GastosPageContent() {
 
   // Estado para editar gasto fijo
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<any>(null);
+  const [editForm, setEditForm] = useState<Partial<GastoFijo>>({});
   const [editLoading, setEditLoading] = useState(false);
 
   const fetchData = () => {
@@ -63,7 +63,7 @@ function GastosPageContent() {
     try {
       await updateGastoFijo(editingId, editForm);
       setEditingId(null);
-      setEditForm(null);
+      setEditForm({});
       fetchData();
     } catch (err) {
       alert('Error al actualizar el gasto fijo');
@@ -180,7 +180,10 @@ function GastosPageContent() {
                           descripcion: g.descripcion,
                           importe: g.importe,
                           periodicidad: g.periodicidad,
-                          activo: g.activo
+                          activo: g.activo,
+                          id: g.id,
+                          cliente_id: g.cliente_id,
+                          vehiculo_id: g.vehiculo_id,
                         });
                       }}>
                         Editar
@@ -207,7 +210,7 @@ function GastosPageContent() {
                         <Input
                           type="number" step="0.01" className="h-8 text-xs"
                           value={editForm.importe}
-                          onChange={(e) => setEditForm({ ...editForm, importe: e.target.value })}
+                          onChange={(e) => setEditForm({ ...editForm, importe: parseFloat(e.target.value) || 0 })}
                         />
                       </div>
                     </div>

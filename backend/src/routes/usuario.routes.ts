@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -35,7 +35,9 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
                 anomalias: { orderBy: { created_at: 'desc' }, take: 20 },
             },
         });
-        if (!conductor) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
+        if (!conductor || !isSameTenant(req, conductor.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
+        }
         res.json({ status: 'OK', data: conductor });
     } catch (err: any) {
         console.error('[USUARIOS] Error:', err.message);
@@ -112,8 +114,12 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
 // PATCH /api/usuarios/:id — Editar / Desactivar
 router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
+        const existing = await prisma.conductor.findUnique({ where: { id: req.params.id }, select: { cliente_id: true } });
+        if (!existing || !isSameTenant(req, existing.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
+        }
         const { nombre, telefono, activo } = req.body;
-        
+
         const conductor = await prisma.conductor.update({
             where: { id: req.params.id },
             data: {

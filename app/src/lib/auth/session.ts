@@ -36,19 +36,16 @@ export function setSession(token: string, user: SessionUser): void {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 
-  // Set cookies for Next.js Middleware (Server-Side checking)
-  // Max-age: 30 days — alineado con expiración JWT del backend
+  // Cookie para Next.js Middleware — el rol se extrae del payload JWT, no de cookie separada
   const maxAge = 60 * 60 * 24 * 30;
   document.cookie = `pilotos_token=${token}; path=/; max-age=${maxAge}; samesite=lax`;
-  document.cookie = `pilotos_es_patron=${user.es_patron.toString()}; path=/; max-age=${maxAge}; samesite=lax`;
 }
 
 export function clearSession(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
 
-  document.cookie = "pilotos_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-  document.cookie = "pilotos_es_patron=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+  document.cookie = 'pilotos_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
 }
 
 export function isAuthenticated(): boolean {

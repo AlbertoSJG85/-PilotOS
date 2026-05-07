@@ -1,11 +1,20 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
+function parseJwtPayload(token: string): { es_patron?: boolean } | null {
+  try {
+    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(base64));
+  } catch {
+    return null;
+  }
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const token = request.cookies.get('pilotos_token')?.value;
-  const esPatron = request.cookies.get('pilotos_es_patron')?.value === 'true';
+  const esPatron = token ? (parseJwtPayload(token)?.es_patron === true) : false;
 
   // ── Archivos estáticos y rutas de infraestructura ──────────────────────────
   if (

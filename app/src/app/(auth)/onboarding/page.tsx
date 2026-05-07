@@ -160,7 +160,7 @@ export default function OnboardingPage() {
         tipo_transmision: data.tipo_transmision || undefined,
         asalariados: data.asalariados,
         gastos_fijos: data.gastos_fijos,
-      } as any);
+      });
     } catch {
       // Draft fail non-blocking
     } finally {

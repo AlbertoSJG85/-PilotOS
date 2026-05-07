@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -13,6 +13,10 @@ router.get('/catalogo', async (_req: any, res: Response) => {
 
 router.get('/vehiculo/:vehiculoId', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
+        const vehiculoCheck = await prisma.vehiculo.findUnique({ where: { id: req.params.vehiculoId }, select: { cliente_id: true } });
+        if (!vehiculoCheck || !isSameTenant(req, vehiculoCheck.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
+        }
         const { soloActivos } = req.query;
         const where: any = { vehiculo_id: req.params.vehiculoId };
         if (soloActivos === 'true') {
@@ -26,7 +30,9 @@ router.get('/vehiculo/:vehiculoId', requireAuth, async (req: AuthRequest, res: R
 router.get('/vehiculo/:vehiculoId/proximos', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const vehiculo = await prisma.vehiculo.findUnique({ where: { id: req.params.vehiculoId } });
-        if (!vehiculo) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
+        if (!vehiculo || !isSameTenant(req, vehiculo.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
+        }
 
         const kmUmbral = vehiculo.km_actuales + 1000;
         const fechaUmbral = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -43,7 +49,9 @@ router.post('/:id/resolver', requireAuth, async (req: AuthRequest, res: Response
     try {
         const { km_ejecucion, fecha_factura, url_factura, importe } = req.body;
         const mant = await prisma.mantenimientoVehiculo.findUnique({ where: { id: req.params.id }, include: { catalogo: true, vehiculo: true } });
-        if (!mant) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
+        if (!mant || !isSameTenant(req, mant.vehiculo.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
+        }
 
         const km = km_ejecucion || mant.vehiculo.km_actuales;
         const frecKm = mant.frecuencia_km_personalizada || mant.frecuencia_aprendida || mant.catalogo.frecuencia_km;
@@ -86,6 +94,10 @@ router.post('/:id/resolver', requireAuth, async (req: AuthRequest, res: Response
 router.post('/:id/aprender', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const { frecuencia_aprendida } = req.body;
+        const mantCheck = await prisma.mantenimientoVehiculo.findUnique({ where: { id: req.params.id }, include: { vehiculo: { select: { cliente_id: true } } } });
+        if (!mantCheck || !isSameTenant(req, mantCheck.vehiculo.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
+        }
         const updated = await prisma.$transaction(async (tx) => {
             const m = await tx.mantenimientoVehiculo.update({ where: { id: req.params.id }, data: { frecuencia_aprendida } });
             await tx.seguimientoMantenimiento.create({
@@ -103,6 +115,11 @@ router.put('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
         if (!req.usuario?.es_patron && req.usuario?.role !== 'admin') {
             res.status(403).json({ status: 'FAIL', error: 'forbidden', message: 'Solo el patron puede editar mantenimientos' });
             return;
+        }
+
+        const mantCheck = await prisma.mantenimientoVehiculo.findUnique({ where: { id: req.params.id }, include: { vehiculo: { select: { cliente_id: true } } } });
+        if (!mantCheck || !isSameTenant(req, mantCheck.vehiculo.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
         }
 
         const {

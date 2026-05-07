@@ -17,7 +17,7 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message?: string,
-    public details?: any,
+    public details?: unknown,
   ) {
     super(message || code);
     this.name = 'ApiError';
@@ -30,7 +30,6 @@ function handleUnauthorized(): never {
     localStorage.removeItem('pilotos_token');
     localStorage.removeItem('pilotos_user');
     document.cookie = 'pilotos_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-    document.cookie = 'pilotos_es_patron=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     window.location.href = '/login';
   }
   throw new ApiError(401, 'unauthorized', 'Sesión expirada. Inicia sesión de nuevo.');

@@ -4,7 +4,7 @@
  */
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 const UMBRAL_AVISO_PATRON = 3; // R-AN-003
@@ -15,6 +15,11 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
         if (!conductor_id || !tipo || !descripcion) {
             res.status(400).json({ status: 'FAIL', error: 'missing_fields' });
             return;
+        }
+
+        const conductorCheck = await prisma.conductor.findUnique({ where: { id: conductor_id }, select: { cliente_id: true } });
+        if (!conductorCheck || !isSameTenant(req, conductorCheck.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'conductor_not_found' }); return;
         }
 
         const anomalia = await prisma.anomalia.create({ data: { conductor_id, tipo, descripcion } });
@@ -72,7 +77,7 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
     } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
 });
 
-router.get('/conductor/:conductorId/total', async (req: any, res: Response) => {
+router.get('/conductor/:conductorId/total', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         const total = await prisma.anomalia.count({ where: { conductor_id: req.params.conductorId } });
         const proximoUmbral = Math.ceil((total + 1) / UMBRAL_AVISO_PATRON) * UMBRAL_AVISO_PATRON;

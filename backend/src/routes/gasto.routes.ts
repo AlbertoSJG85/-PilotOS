@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -12,6 +12,13 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
         if (!tipo || !descripcion || importe === undefined || !fecha) {
             res.status(400).json({ status: 'FAIL', error: 'missing_fields' });
             return;
+        }
+
+        if (vehiculo_id) {
+            const v = await prisma.vehiculo.findUnique({ where: { id: vehiculo_id }, select: { cliente_id: true } });
+            if (!v || !isSameTenant(req, v.cliente_id)) {
+                res.status(404).json({ status: 'FAIL', error: 'vehiculo_not_found' }); return;
+            }
         }
 
         const gasto = await prisma.$transaction(async (tx) => {
@@ -89,6 +96,14 @@ router.post('/fijos', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         if (!req.usuario?.cliente_id) { res.status(400).json({ status: 'FAIL', error: 'no_client_context' }); return; }
         const { vehiculo_id, tipo, descripcion, importe, periodicidad } = req.body;
+
+        if (vehiculo_id) {
+            const v = await prisma.vehiculo.findUnique({ where: { id: vehiculo_id }, select: { cliente_id: true } });
+            if (!v || !isSameTenant(req, v.cliente_id)) {
+                res.status(404).json({ status: 'FAIL', error: 'vehiculo_not_found' }); return;
+            }
+        }
+
         const gf = await prisma.gastoFijo.create({
             data: { cliente_id: req.usuario.cliente_id, vehiculo_id: vehiculo_id || null, tipo, descripcion, importe, periodicidad },
         });
@@ -112,6 +127,7 @@ router.put('/fijos/:id', requireAuth, async (req: AuthRequest, res: Response) =>
         const updated = await prisma.$transaction(async (tx) => {
             const current = await tx.gastoFijo.findUnique({ where: { id: req.params.id } });
             if (!current) throw new Error('not_found');
+            if (!isSameTenant(req, current.cliente_id)) throw new Error('forbidden');
 
             const gf = await tx.gastoFijo.update({
                 where: { id: req.params.id },
@@ -143,6 +159,7 @@ router.put('/fijos/:id', requireAuth, async (req: AuthRequest, res: Response) =>
         res.json({ status: 'OK', data: updated });
     } catch (err: any) {
         if (err.message === 'not_found') return res.status(404).json({ status: 'FAIL', error: 'not_found' });
+        if (err.message === 'forbidden') return res.status(403).json({ status: 'FAIL', error: 'forbidden' });
         console.error('[GASTOS] Error actualizando fijo:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }

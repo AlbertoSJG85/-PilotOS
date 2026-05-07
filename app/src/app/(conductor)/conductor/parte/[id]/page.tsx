@@ -144,7 +144,7 @@ export default function ParteDetalleConductor() {
           <div>
             <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-3">Tickets adjuntos</p>
             <div className="space-y-2">
-              {parte.documentos.map((enlace: any) => (
+              {parte.documentos.map((enlace: { id: string; documento?: { tipo: string; url?: string; estado?: string } }) => (
                 <div key={enlace.id} className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3">
                   {enlace.documento?.tipo === 'TICKET_TAXIMETRO' ? (
                     <Receipt className="h-4 w-4 text-pilot-lime" />

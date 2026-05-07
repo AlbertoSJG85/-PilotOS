@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import jwt from 'jsonwebtoken';
 
 // DT-011: PrismaClient singleton
 import { prisma } from './lib/prisma';
@@ -37,6 +38,10 @@ if (!process.env.JWT_SECRET) {
     console.error('FATAL: JWT_SECRET no esta definido en variables de entorno');
     process.exit(1);
 }
+if (process.env.NODE_ENV === 'production' && !process.env.ALLOWED_ORIGINS) {
+    console.error('FATAL: ALLOWED_ORIGINS no esta definido en produccion');
+    process.exit(1);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -50,7 +55,7 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
     : true; // Allow all in development
 app.use(cors({ origin: allowedOrigins, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 
 // Health check
 app.get('/health', (_req, res) => {
@@ -72,7 +77,23 @@ app.use('/api/onboarding', onboardingRoutes);
 // Uploads
 app.use('/api/upload', uploadRoutes);
 const uploadsDir = path.join(process.cwd(), 'uploads');
-app.use('/uploads', express.static(uploadsDir));
+app.use('/uploads', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const cookieHeader = req.headers.cookie || '';
+    const tokenFromCookie = cookieHeader.split(';')
+        .map((c) => c.trim())
+        .find((c) => c.startsWith('pilotos_token='))
+        ?.slice('pilotos_token='.length);
+    const authHeader = req.headers.authorization;
+    const tokenFromBearer = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : undefined;
+    const token = tokenFromBearer || tokenFromCookie;
+    if (!token) { res.status(401).json({ error: 'auth_required' }); return; }
+    try {
+        jwt.verify(token, process.env.JWT_SECRET!);
+        next();
+    } catch {
+        res.status(401).json({ error: 'invalid_token' });
+    }
+}, express.static(uploadsDir));
 
 // ============================================
 // Protected routes (auth required)
