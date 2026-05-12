@@ -28,8 +28,13 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // ── Landing pública ───────────────────────────────────────────────────────
+  if (pathname === '/' || pathname === '/demo') {
+    return NextResponse.next();
+  }
+
   // ── Rutas públicas: login y onboarding ────────────────────────────────────
-  if (pathname === '/login' || pathname === '/onboarding' || pathname === '/') {
+  if (pathname === '/login' || pathname === '/onboarding') {
     if (token) {
       // Usuario ya autenticado → /conductor es el home para todos (patrón y asalariado)
       const redirectUrl = request.nextUrl.clone();
