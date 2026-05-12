@@ -1,52 +1,59 @@
 @import "tailwindcss";
 
 /* ─────────────────────────────────────────────
-   PilotOS — Design System
-   Paleta derivada del logo oficial:
-   • Fondo navy oscuro  (#07111E → #0C1A2B)
-   • Teal de arcos      (#1E7070)
-   • Verde lima accent  (#8DC63F) ← "OS" del logo
-   • Blanco texto       (#E4EEF6)
+   PilotOS — Design System (Branding v4)
 ───────────────────────────────────────────── */
 
 @theme {
-  /* ── Zinc remapeado → navy PilotOS ── */
-  --color-zinc-950: #07111E;
-  --color-zinc-900: #0C1A2B;
-  --color-zinc-800: #122236;
-  --color-zinc-700: #1A3049;
-  --color-zinc-600: #2A4460;
-  --color-zinc-500: #4A6A8A;
-  --color-zinc-400: #7A9AB8;
-  --color-zinc-300: #A8C0D4;
-  --color-zinc-200: #C8D8E8;
-  --color-zinc-100: #E4EEF6;
-  --color-zinc-50:  #F0F6FA;
-
   /* ── Pilot brand tokens ── */
-  --color-pilot-lime:       #8DC63F;
-  --color-pilot-lime-dim:   #6FA832;
-  --color-pilot-lime-light: #A5D455;
-  --color-pilot-teal:       #1E7070;
-  --color-pilot-teal-dim:   #155555;
-  --color-pilot-navy:       #07111E;
-  --color-pilot-card:       #0C1A2B;
-  --color-pilot-surface:    #122236;
-  --color-pilot-border:     #1A3049;
-  --color-pilot-muted:      #4A6A8A;
-  --color-pilot-text:       #E4EEF6;
+  --color-pilotos-yellow: #FFB703;
+  --color-pilotos-black:  #05070B;
+  --color-pilotos-panel:  #171717;
+  --color-pilotos-line:   #2A2A2A;
+  --color-pilotos-gray:   #6B6B6B;
+  --color-pilotos-white:  #FFFFFF;
+  --color-pilotos-success:#22C55E;
+  --color-pilotos-warning:#F59E0B;
+  --color-pilotos-danger: #EF4444;
+
+  --radius-pilotos: 18px;
+
+  /* Mapeos para retrocompatibilidad con componentes antiguos */
+  --color-pilot-lime:       var(--color-pilotos-yellow);
+  --color-pilot-lime-dim:   #E0A100;
+  --color-pilot-lime-light: #FFC433;
+  --color-pilot-teal:       var(--color-pilotos-panel);
+  --color-pilot-navy:       var(--color-pilotos-black);
+  --color-pilot-card:       var(--color-pilotos-panel);
+  --color-pilot-surface:    #111111;
+  --color-pilot-border:     var(--color-pilotos-line);
+  --color-pilot-muted:      var(--color-pilotos-gray);
+  --color-pilot-text:       var(--color-pilotos-white);
+
+  /* Resetear zinc al oscuro neutro para que no sea azulado (navy) */
+  --color-zinc-950: #030303;
+  --color-zinc-900: #05070B;
+  --color-zinc-800: #171717;
+  --color-zinc-700: #2A2A2A;
+  --color-zinc-600: #3F3F3F;
+  --color-zinc-500: #6B6B6B;
+  --color-zinc-400: #9CA3AF;
+  --color-zinc-300: #D1D5DB;
+  --color-zinc-200: #E5E7EB;
+  --color-zinc-100: #F3F4F6;
+  --color-zinc-50:  #F9FAFB;
 }
 
 @theme inline {
-  --color-background: #07111E;
-  --color-foreground: #E4EEF6;
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: var(--color-pilotos-black);
+  --color-foreground: var(--color-pilotos-white);
+  --font-sans: var(--font-montserrat);
+  --font-mono: var(--font-montserrat);
 }
 
 :root {
-  --background: #07111E;
-  --foreground: #E4EEF6;
+  --background: var(--color-pilotos-black);
+  --foreground: var(--color-pilotos-white);
 }
 
 body {
@@ -77,7 +84,7 @@ input, select, textarea {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Scrollbar minimal — tono navy */
+/* Scrollbar minimal — tono dark */
 ::-webkit-scrollbar {
   width: 5px;
 }
@@ -85,7 +92,7 @@ input, select, textarea {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1A3049;
+  background: var(--color-pilotos-line);
   border-radius: 3px;
 }
 

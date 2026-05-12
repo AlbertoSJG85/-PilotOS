@@ -1,17 +1,13 @@
 import type { Metadata, Viewport } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
+import { Montserrat } from 'next/font/google';
 import './globals.css';
 import { ServiceWorkerRegistration } from '@/components/layout/sw-registration';
 import { InstallPrompt } from '@/components/layout/install-prompt';
 
-const geistSans = Geist({
-  variable: '--font-geist-sans',
+const montserrat = Montserrat({
+  variable: '--font-montserrat',
   subsets: ['latin'],
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
+  display: 'swap',
 });
 
 export const metadata: Metadata = {
@@ -41,7 +37,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: '#8DC63F',
+  themeColor: '#FFB703',
   viewportFit: 'cover',
 };
 
@@ -52,7 +48,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" className="dark">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${montserrat.variable} antialiased`}>
         <ServiceWorkerRegistration />
         <InstallPrompt />
         {children}
