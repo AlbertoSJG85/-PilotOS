@@ -343,3 +343,30 @@ Registro de decisiones tecnicas importantes del proyecto.
 - Justificacion: Sin trust proxy, URLs en BD eran http:// en producción HTTPS. Sin tenancy en GET /:id, cualquier usuario autenticado podía leer partes de otro cliente.
 - Admin (role=admin) bypasea las restricciones de tenancy para soporte.
 - Impacto: La app es instalable en iOS (via "Añadir a pantalla de inicio") y Android (banner automático de Chrome). start_url apunta a /conductor para que el icono abra directamente en la experiencia del conductor.
+
+---
+
+## DT-033 · Estado PENDIENTE_REVISION para OCR parcial en imagen procesable
+
+- Fecha: 2026-05-19
+- Area: Backend / OCR / modelo documental
+- Decision: Los documentos (`pilotos.documentos.estado`) pueden tomar tres estados de procesado, no dos:
+  1. `VALIDO` — imagen procesable, OCR útil (texto no vacío, sin error) y validación estructurada correcta (todos los campos clave detectados).
+  2. `PENDIENTE_REVISION` — imagen procesable, pero OCR parcial o roto. La foto se ve bien para un humano; el sistema simplemente no la entiende del todo. NO bloquea. NO genera `TareaPendiente`. La UI muestra aviso ámbar informativo.
+  3. `ILEGIBLE` — imagen no procesable. **Solo** lo declara `analizarImagen()` (Sharp metadata + stdev de luminancia, umbrales `MIN_LADO_PX=200`, `MIN_STDEV_LUMINANCIA=8`). Genera `TareaPendiente FOTO_ILEGIBLE`.
+- Justificacion:
+  - Tickets térmicos reales generan confianzas Tesseract bajas (~35–55) aunque sean perfectamente legibles. Anclar `ILEGIBLE` a la confianza castigaba fotos correctas (ver [C-029](../learning/correcciones.md#c-029--fotos-legibles-se-marcaban-como-ilegible-punto-1)).
+  - Distinguir "imagen ilegible" de "OCR insuficiente" desbloquea la UX: el usuario solo es interpelado a re-subir cuando la foto está realmente rota, no cuando el OCR fue mediocre.
+- Implicación operativa: si la dedupe por hash encuentra un documento legacy en `ILEGIBLE` (creado antes de esta decisión), se reprocesa con la pipeline nueva antes de reutilizarlo. Sin migración manual.
+- Tests: `backend/scripts/smoke-analizar-imagen.ts` (6 casos sintéticos).
+
+---
+
+## DT-034 · Flag tiene_asalariados en context de login para UI condicional
+
+- Fecha: 2026-05-19
+- Area: Backend `/auth/login` + Frontend (SessionUser)
+- Decision: `POST /api/auth/login` calcula `context.tiene_asalariados: boolean = COUNT(conductor WHERE cliente_id=X AND es_patron=false AND activo=true) > 0` y lo devuelve junto al resto del context. El frontend lo persiste en `SessionUser` (localStorage) y lo lee desde cualquier pantalla vía `getSessionUser()?.tiene_asalariados`. Pantallas con copy/tarjetas específicas de asalariados (StatCard "A Conductor", reparto en detalle del parte, CTA admin) se condicionan al flag.
+- Justificacion: Un patrón que trabaja solo veía referencias a asalariados/conductor/liquidación sin tener empleados. Confunde y sugiere que falta un dato. Resolver vía lectura de la estructura de la sesión es 10 LOC de backend y evita inferencias frágiles en frontend (vacío != ausencia).
+- Limitación conocida (V1): el flag se calcula al login y se cachea hasta logout/login. Si el patrón añade un asalariado desde `/flota` durante una sesión activa, la UI sigue mostrando modo "solo propietario" hasta cerrar y volver a abrir sesión. Aceptable para V1. Para V2: extender `/auth/me` para refrescar.
+- Cálculo económico (`calculo.service.ts`, `resumen.service.ts`, `compararDocumentosConParte`) **no** depende de este flag: solo controla copy y visibilidad de tarjetas. La lógica de reparto sigue calculada por configuración económica del cliente.

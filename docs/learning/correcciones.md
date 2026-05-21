@@ -325,3 +325,57 @@ Formato: fecha | area | problema | causa | solucion | prevencion
 - Causa: Implementación mínima sin diferenciar códigos HTTP.
 - Solucion: Mapping explícito de 413 (file_too_large), 415 (invalid_mime), 401 (sesión expirada con redirect), errores de red, fallo del servidor. Backend `upload.routes.ts` añade middleware multer-error que traduce `LIMIT_FILE_SIZE` y MIME inválido a 413/415 con mensaje claro.
 - Prevencion: Diferenciar mensajes según código HTTP. El usuario debe saber si puede arreglarlo (foto más pequeña) o necesita ayuda técnica.
+
+---
+
+## 2026-05-19 · V1 ajustes (rama `work/pilotos-v1-ajustes-2026-05-19`, mergeada a `main` el 2026-05-21)
+
+Tres ajustes funcionales + una incidencia de despliegue documentada al final.
+
+### C-029 · Fotos legibles se marcaban como ILEGIBLE (Punto 1)
+- Area: Backend / OCR
+- Problema: Fotos reales de tickets de taxímetro nítidas (ej. licencia 562 S. CRUZ, P Total 113,40 €) acababan en `estado='ILEGIBLE'`. El frontend mostraba al usuario "foto dañada" y le obligaba a reemplazar.
+- Causa: `estadoOcrFinal()` declaraba `ILEGIBLE` si la confianza de Tesseract (`UMBRAL_CONFIANZA = 60`) o la validación estructurada caían por debajo del umbral. Tickets térmicos reales bajan a ~35–55 de confianza aunque sean legibles a ojo. Además solo había dos estados (`ILEGIBLE` / `VALIDO`) — no existía un punto medio.
+- Solucion: Separación estricta entre "imagen procesable" y "OCR concluyente". Nueva función `analizarImagen()` (Sharp: metadata + stdev luminancia) es la única que puede declarar `ILEGIBLE` — solo si Sharp no abre el fichero, las dimensiones son <200 px o la imagen es prácticamente monocromática. Nuevo estado intermedio `PENDIENTE_REVISION` cuando la imagen es procesable pero el OCR es parcial o roto. Tesseract puede fallar sin que la foto se considere ilegible. Decisión cristalizada en [DT-033](../decisiones/decisiones-tecnicas.md#dt-033--estado-pendiente_revision-para-ocr-parcial-en-imagen-procesable).
+- Prevencion: La pipeline de OCR debe distinguir "no puedo abrir esto" de "la imagen está bien pero no le saco datos". Smoke test sintético en `backend/scripts/smoke-analizar-imagen.ts` con 6 casos (foto normal, negra, blanca, miniatura, archivo corrupto, patrón tipo ticket). Refactores futuros deben mantener `analizarImagen()` como puerta única a `ILEGIBLE`.
+
+### C-030 · Documentos legacy en ILEGIBLE bloqueaban re-subida (Punto 1)
+- Area: Backend / dedupe documental
+- Problema: Tras arreglar C-029 en local, las fotos seguían apareciendo como ILEGIBLE al re-subirlas. La pipeline nueva (`analizarImagen`) nunca llegaba a ejecutarse.
+- Causa: La deduplicación por SHA-256 en `POST /api/fotos` encontraba el documento previo (subido con la lógica vieja, estado `ILEGIBLE`) y devolvía ese tal cual. Sin re-procesamiento.
+- Solucion: En el camino de dedupe, si el documento existente está en `ILEGIBLE` se re-ejecuta la pipeline (`analizarImagen` + OCR + `estadoOcrFinal`) antes de devolverlo. Si pasa a `VALIDO` o `PENDIENTE_REVISION`, se actualiza el documento y se cierra cualquier `TareaPendiente FOTO_ILEGIBLE` residual. No consume intentos de reemplazo (es el mismo fichero).
+- Prevencion: La dedupe documental no puede ser un atajo que evite re-validar cuando el estado anterior es de fallo. Si el estado heredado es ILEGIBLE/BLOQUEADO/ERROR, recalcular antes de reutilizar.
+
+### C-031 · Comparación parte↔ticket silenciosa y nunca disparada para patrones (Punto 1)
+- Area: Backend / OCR + UX
+- Problema: El servicio `ocrComparacion.service.ts` extraía P Total, km, fecha, etc., pero las discrepancias se escribían solo como `Anomalia` en BD — invisibles al usuario. Además, el trigger vivía exclusivamente en `PATCH /api/partes/:id/confirmar` (camino asalariado). Los patrones crean el parte directamente en `ENVIADO` vía `POST /api/partes` y suben fotos después, así que la comparación nunca corría para ellos.
+- Causa: Implementación inicial pensada solo para flujo asalariado. Faltaba persistencia visible al usuario.
+- Solucion:
+  - `compararDocumentosConParte()` devuelve `ResultadoComparacion` con `Discrepancia[]` estructurada por documento y persiste en `documento.ocr_datos_extraidos.discrepancias`.
+  - Añadida comparación de fecha (±1 día, tolera turnos nocturnos). `validarTicketGasoil` ahora extrae fecha.
+  - Idempotencia: `deleteMany({ where: { parte_diario_id } })` sobre `Anomalia` al inicio del cálculo. Recalcular nunca duplica.
+  - Helper `recompararSiEnviado()` en `foto.routes.ts` dispara la comparación al final de `POST /api/fotos`, `/:id/reemplazar` y `/:id/reintentar-ocr` cuando el parte ya está enviado. Cubre el camino patrón.
+  - Frontend: banner ámbar específico de discrepancia en `partes/[id]/page.tsx`. Toast post-confirmar incluye contador. Tolerancias documentadas en [DT-031](../decisiones/decisiones-tecnicas.md#dt-031--cotejo-ocr-completo-con-trazabilidad).
+- Prevencion: Cualquier servicio que cree señales para el usuario tiene que tener camino de visualización (no solo `Anomalia` en BD). Si dos flujos crean un parte (asalariado vs patrón), los servicios post-procesado deben dispararse en ambos.
+
+### C-032 · Panel sin desglose datáfono vs efectivo estimado (Punto 2)
+- Area: Backend `resumen.service.ts` + Frontend `admin/page.tsx`, `informes/page.tsx`
+- Problema: El panel ya sumaba `ingreso_bruto` y `ingreso_datafono` pero no exponía el complementario (efectivo estimado). En informes se calculaba inline (`bruto - datafono`), riesgo de divergencia.
+- Causa: Métrica obvia derivable, simplemente no expuesta.
+- Solucion: Campo derivado `efectivo_estimado = max(0, bruto - datafono)` en el output de `calcularResumen()`. `max(0, …)` defensivo por si algún parte tiene datáfono > bruto (input erróneo). Card "Desglose de cobros del periodo" en `/admin` con cifras grandes, porcentajes y barra proporcional azul/verde, etiqueta "todo en efectivo" cuando datáfono=0. Informes consume el campo en lugar de calcular inline.
+- Prevencion: Métricas derivables que aparezcan en >1 pantalla deben vivir en backend (servicio común) y no en cálculos UI inline.
+
+### C-033 · UI mostraba referencias a asalariado sin asalariados (Punto 3)
+- Area: Frontend / multi-pantalla
+- Problema: Para un patrón que trabaja solo aparecían textos y tarjetas pensados para asalariado: StatCard "A Conductor — Liquidación asalariado" en informes, 3 columnas de reparto en detalle del parte, "Conductor desconocido" como fallback en header, CTA "Gestionar Flota y Conductores" en admin.
+- Causa: La app se diseñó originalmente asumiendo siempre asalariado. No había señal en la sesión para diferenciar casos.
+- Solucion: `/auth/login` calcula `context.tiene_asalariados = (COUNT(conductor WHERE cliente_id=X AND es_patron=false AND activo) > 0)`. `SessionUser` persiste el flag. Pantallas con copy/tarjetas específicas se condicionan a él. Cálculo económico intacto. Decisión técnica en [DT-034](../decisiones/decisiones-tecnicas.md#dt-034--flag-tiene_asalariados-en-context-de-login-para-ui-condicional).
+- Prevencion: Cuando el dominio tiene casos cualitativos (con/sin asalariados, con/sin combustible, etc.), exponer la señal explícitamente desde el backend al cargar sesión. No hacer que el frontend la infiera de datos parciales (vacío != ausencia).
+
+### C-034 · Coolify no rebuild el frontend automáticamente tras push a main
+- Area: Despliegue / Coolify
+- Problema: Tras mergear los 3 puntos a `main` y hacer `git push`, el backend redeployó solo pero el frontend no. El usuario veía cambios parciales (Punto 1 backend) pero no las cards/banners visuales (Puntos 2 y 3).
+- Diagnóstico: Comparé los hashes de los 12 chunks JS de `pilotos.nexostudios.digital` antes y después del push — idénticos. Confirmado: Coolify no había rebuild el servicio frontend. `Cache-Control: s-maxage=31536000` y `X-Nextjs-Cache: HIT` en los headers de respuesta.
+- Causa: Coolify tiene servicios separados para backend y frontend de PilotOS. El webhook GitHub solo disparó rebuild de uno (o el del frontend tardó/falló silenciosamente).
+- Solucion: Redeploy manual del servicio frontend en Coolify. Tras eso, los chunks JS cambiaron de hash y las strings nuevas (`tiene_asalariados`, `efectivo_estimado`, `Desglose`, etc.) aparecieron.
+- Prevencion: Tras un deploy a `main`, **verificar visualmente AMBOS servicios** (backend y frontend) en Coolify. Si Coolify no dispara rebuild de uno en ~3 minutos, redeploy manual. Para diagnosticar rápido: `curl -sI https://pilotos.nexostudios.digital/ | grep Etag` antes y después del push — si el ETag no cambia, no hay rebuild.
