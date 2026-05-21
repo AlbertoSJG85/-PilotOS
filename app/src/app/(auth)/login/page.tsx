@@ -35,6 +35,7 @@ export default function LoginPage() {
           cliente_id: res.context?.cliente_id ?? null,
           conductor_id: res.context?.conductor_id ?? null,
           es_patron: res.context?.es_patron ?? false,
+          tiene_asalariados: res.context?.tiene_asalariados ?? false,
         });
         router.replace('/conductor');
       }

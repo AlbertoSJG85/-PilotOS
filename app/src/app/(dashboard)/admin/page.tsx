@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/layout';
 import { StatCard, Card, Badge, Skeleton, Button } from '@/components/ui';
 import { getPartes, getResumenDashboard, getVehiculos, getAnomalias, getMantenimientosProximos } from '@/lib/api';
+import { getSessionUser } from '@/lib/auth';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { DollarSign, Fuel, TrendingUp, Wrench, AlertTriangle, ArrowRight, Activity, CalendarDays, FileText, Car, CreditCard, Banknote } from 'lucide-react';
 import type { ParteDiario, Vehiculo, Anomalia, MantenimientoVehiculo } from '@/types';
@@ -66,6 +67,7 @@ function AdminDashboardContent() {
   const beneficioEstimado = resumen?.beneficio_estimado ?? 0;
   const totalDatafono = resumen?.datafono ?? 0;
   const totalEfectivo = resumen?.efectivo_estimado ?? 0;
+  const tieneAsalariados = getSessionUser()?.tiene_asalariados ?? false;
   // Porcentajes para la barra proporcional. Si no hay bruto, dejamos 50/50
   // sin pintar nada (la card mostrará 0/0).
   const pctDatafono = totalBruto > 0 ? Math.round((totalDatafono / totalBruto) * 100) : 0;
@@ -263,7 +265,7 @@ function AdminDashboardContent() {
             <h3 className="text-3xl font-bold text-zinc-100">{vehiculos.length}</h3>
             <p className="text-sm text-zinc-500 mt-1">Vehículos en la Flota</p>
             <Link href="/flota" className="mt-4 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-sm font-medium text-zinc-300 rounded-lg transition-colors w-full">
-              Gestionar Flota y Conductores
+              {tieneAsalariados ? 'Gestionar Flota y Conductores' : 'Gestionar mi flota'}
             </Link>
           </Card>
         </div>

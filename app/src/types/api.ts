@@ -31,6 +31,9 @@ export interface LoginResponse {
     conductor_id: string | null;
     es_patron: boolean;
     tipo_actividad: string;
+    /** True si el cliente tiene ≥1 conductor asalariado activo.
+     *  Controla la visibilidad de UI específica de asalariados. */
+    tiene_asalariados: boolean;
   } | null;
   error?: string;
   message?: string;

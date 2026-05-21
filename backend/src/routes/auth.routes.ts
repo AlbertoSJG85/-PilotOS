@@ -60,6 +60,16 @@ router.post('/login', async (req: Request, res: Response) => {
             ?? await prisma.cliente.findFirst({ where: { patron_id: usuario.id, activo: true } });
 
         const esPatron = conductor?.es_patron ?? (cliente ? cliente.patron_id === usuario.id : false);
+
+        // ¿Hay al menos un conductor asalariado activo en este cliente?
+        // Esto permite al frontend ocultar UI de "asalariado/conductor/liquidación"
+        // cuando el cliente trabaja solo como propietario.
+        const tieneAsalariados = cliente
+            ? (await prisma.conductor.count({
+                where: { cliente_id: cliente.id, es_patron: false, activo: true },
+            })) > 0
+            : false;
+
         const token = generarToken({
             id: usuario.id,
             telefono: usuario.telefono || '',
@@ -77,6 +87,7 @@ router.post('/login', async (req: Request, res: Response) => {
                 conductor_id: conductor?.id,
                 es_patron: esPatron,
                 tipo_actividad: cliente.tipo_actividad,
+                tiene_asalariados: tieneAsalariados,
             } : null,
         });
     } catch (err: any) {

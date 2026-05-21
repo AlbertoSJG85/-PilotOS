@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/layout';
 import { Card, Badge, Skeleton, Button } from '@/components/ui';
 import { getParte, uploadFoto, reemplazarFoto, reintentarOcr, eliminarFoto } from '@/lib/api';
 import { formatCurrency, formatDate, formatKm } from '@/lib/utils';
+import { getSessionUser } from '@/lib/auth';
 import type { ParteDiario, Documento, Anomalia } from '@/types';
 import {
     ChevronLeft, Camera, RefreshCw, AlertCircle, FileX,
@@ -45,6 +46,7 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
     const [retryingId, setRetryingId] = useState<string | null>(null);
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [imgErrors, setImgErrors] = useState<Set<string>>(new Set());
+    const tieneAsalariados = getSessionUser()?.tiene_asalariados ?? false;
 
     const refresh = () => {
         setLoading(true);
@@ -156,7 +158,7 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
 
             <PageHeader
                 title={`Parte del ${formatDate(parte.fecha_trabajada)}`}
-                description={parte.conductor?.usuario?.nombre || 'Conductor desconocido'}
+                description={parte.conductor?.usuario?.nombre || (tieneAsalariados ? 'Conductor desconocido' : '')}
             >
                 <Badge variant={ESTADO_BADGE[parte.estado] || 'default'} className="text-sm px-3 py-1">
                     {parte.estado}
@@ -214,28 +216,44 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                     </div>
                 </Card>
 
-                {/* Reparto */}
+                {/* Reparto / Beneficio del día */}
                 {parte.calculo && (
                     <Card className="p-6 md:col-span-2 bg-zinc-900/50 border-pilot-lime/20">
-                        <h3 className="text-sm font-semibold text-pilot-lime mb-4 uppercase tracking-wider">Reparto Económico (Neto)</h3>
-                        <div className="grid gap-6 sm:grid-cols-3">
-                            <div className="flex flex-col">
-                                <span className="text-xs text-zinc-400 mb-1">Beneficio Neto Diario</span>
-                                <span className="text-2xl font-bold text-zinc-100">{formatCurrency(parte.calculo.neto_diario)}</span>
+                        <h3 className="text-sm font-semibold text-pilot-lime mb-4 uppercase tracking-wider">
+                            {tieneAsalariados ? 'Reparto Económico (Neto)' : 'Resultado del día'}
+                        </h3>
+                        {tieneAsalariados ? (
+                            <div className="grid gap-6 sm:grid-cols-3">
+                                <div className="flex flex-col">
+                                    <span className="text-xs text-zinc-400 mb-1">Beneficio Neto Diario</span>
+                                    <span className="text-2xl font-bold text-zinc-100">{formatCurrency(parte.calculo.neto_diario)}</span>
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-xs text-zinc-400 mb-1">Parte Conductor</span>
+                                    <span className="text-2xl font-bold border-l-2 border-emerald-500 pl-3 text-zinc-100">
+                                        {formatCurrency(parte.calculo.parte_conductor)}
+                                    </span>
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-xs text-zinc-400 mb-1">Parte Propietario</span>
+                                    <span className="text-2xl font-bold border-l-2 border-pilot-lime pl-3 text-zinc-100">
+                                        {formatCurrency(parte.calculo.parte_patron)}
+                                    </span>
+                                </div>
                             </div>
-                            <div className="flex flex-col">
-                                <span className="text-xs text-zinc-400 mb-1">Parte Conductor</span>
-                                <span className="text-2xl font-bold border-l-2 border-emerald-500 pl-3 text-zinc-100">
-                                    {formatCurrency(parte.calculo.parte_conductor)}
+                        ) : (
+                            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+                                <div className="flex flex-col">
+                                    <span className="text-xs text-zinc-400 mb-1">Beneficio neto del día</span>
+                                    <span className="text-3xl font-bold text-zinc-100 border-l-4 border-pilot-lime pl-4">
+                                        {formatCurrency(parte.calculo.neto_diario)}
+                                    </span>
+                                </div>
+                                <span className="text-xs text-zinc-500">
+                                    Bruto − combustible − varios. Antes de gastos fijos del periodo.
                                 </span>
                             </div>
-                            <div className="flex flex-col">
-                                <span className="text-xs text-zinc-400 mb-1">Parte Propietario</span>
-                                <span className="text-2xl font-bold border-l-2 border-pilot-lime pl-3 text-zinc-100">
-                                    {formatCurrency(parte.calculo.parte_patron)}
-                                </span>
-                            </div>
-                        </div>
+                        )}
                     </Card>
                 )}
 

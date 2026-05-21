@@ -7,6 +7,7 @@ import { Card, StatCard, Skeleton, Button } from '@/components/ui';
 import { getResumenDashboard } from '@/lib/api';
 import type { ResumenDashboard } from '@/lib/api/dashboard';
 import { formatCurrency } from '@/lib/utils';
+import { getSessionUser } from '@/lib/auth';
 import { FileDown, Calculator, DollarSign, Fuel, Users, Wallet } from 'lucide-react';
 
 interface Props {
@@ -17,6 +18,8 @@ function InformesContent({ searchParams }: { searchParams: { desde?: string; has
     const { desde, hasta } = searchParams;
     const [resumen, setResumen] = useState<ResumenDashboard | null>(null);
     const [loading, setLoading] = useState(true);
+    const user = getSessionUser();
+    const tieneAsalariados = user?.tiene_asalariados ?? false;
 
     useEffect(() => {
         setLoading(true);
@@ -47,10 +50,18 @@ function InformesContent({ searchParams }: { searchParams: { desde?: string; has
                 </Button>
             </div>
 
-            <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+            <div className={`grid gap-4 grid-cols-2 ${tieneAsalariados ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
                 <StatCard title="Ingreso Bruto" value={formatCurrency(resumen.bruto)} subtitle={`${resumen.partes_count} partes procesados`} icon={DollarSign} />
-                <StatCard title="A Conductor" value={formatCurrency(resumen.parte_conductor)} subtitle="Liquidación asalariado" variant="warning" icon={Users} />
-                <StatCard title="A Propietario (Bruto)" value={formatCurrency(resumen.parte_patron)} subtitle="Antes de gastos" variant="success" icon={Wallet} />
+                {tieneAsalariados && (
+                    <StatCard title="A Conductor" value={formatCurrency(resumen.parte_conductor)} subtitle="Liquidación asalariado" variant="warning" icon={Users} />
+                )}
+                <StatCard
+                    title={tieneAsalariados ? 'A Propietario (Bruto)' : 'Para el Propietario'}
+                    value={formatCurrency(resumen.parte_patron)}
+                    subtitle="Antes de gastos"
+                    variant="success"
+                    icon={Wallet}
+                />
                 <StatCard title="Combustible" value={formatCurrency(resumen.combustible)} subtitle="Descontado en partes" variant="danger" icon={Fuel} />
             </div>
 
@@ -62,7 +73,7 @@ function InformesContent({ searchParams }: { searchParams: { desde?: string; has
                     </h3>
                     <div className="space-y-3 text-sm">
                         <div className="flex justify-between border-b border-zinc-800 pb-2">
-                            <span className="text-zinc-400">Ingresos (Parte Patrón)</span>
+                            <span className="text-zinc-400">{tieneAsalariados ? 'Ingresos (Parte Patrón)' : 'Ingresos (Facturación)'}</span>
                             <span className="font-medium text-emerald-400">+{formatCurrency(resumen.parte_patron)}</span>
                         </div>
                         <div className="flex justify-between border-b border-zinc-800 pb-2">
@@ -115,7 +126,7 @@ export default function InformesPage({ searchParams }: Props) {
         <>
             <PageHeader
                 title="Informes y Cierres"
-                description="Liquidaciones, balances y estado financiero del periodo seleccionado."
+                description="Balances y estado financiero del periodo seleccionado."
             >
                 <PeriodFilter />
             </PageHeader>

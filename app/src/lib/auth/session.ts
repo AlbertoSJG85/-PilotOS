@@ -14,6 +14,8 @@ export interface SessionUser {
   cliente_id: string | null;
   conductor_id: string | null;
   es_patron: boolean;
+  /** True si el cliente tiene ≥1 conductor asalariado activo. */
+  tiene_asalariados: boolean;
 }
 
 export function getToken(): string | null {
