@@ -3,6 +3,8 @@ import { apiFetch } from './fetcher';
 export interface ResumenDashboard {
     bruto: number;
     datafono: number;
+    /** bruto - datafono. Estimación de cobros en efectivo del periodo. */
+    efectivo_estimado: number;
     combustible: number;
     neto: number;
     parte_conductor: number;

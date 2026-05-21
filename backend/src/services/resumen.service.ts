@@ -25,6 +25,10 @@ export interface ResumenInput {
 export interface ResumenOutput {
     bruto: number;
     datafono: number;
+    /** Estimación de cobros en efectivo del periodo: bruto - datafono.
+     *  Es una derivación, no un campo nuevo de negocio: solo formaliza
+     *  el complementario del datáfono sobre el bruto declarado. */
+    efectivo_estimado: number;
     combustible: number;
     neto: number;
     parte_conductor: number;
@@ -97,9 +101,14 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
 
     const beneficio = partePatron - gastosVariables - gastosFijosProrrateados;
 
+    // Efectivo estimado = bruto - datafono. Clampamos a 0 por seguridad
+    // si en algún parte se introduce datafono > bruto (input incorrecto).
+    const efectivoEstimado = Math.max(0, bruto - datafono);
+
     return {
         bruto,
         datafono,
+        efectivo_estimado: efectivoEstimado,
         combustible,
         neto,
         parte_conductor: parteConductor,

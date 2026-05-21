@@ -93,8 +93,8 @@ function InformesContent({ searchParams }: { searchParams: { desde?: string; has
                             <span className="font-medium text-zinc-300">{formatCurrency(resumen.datafono)}</span>
                         </div>
                         <div className="flex justify-between border-b border-zinc-800 pb-2">
-                            <span className="text-zinc-400">Total Efectivo (Metálico)</span>
-                            <span className="font-medium text-zinc-300">{formatCurrency(resumen.bruto - resumen.datafono)}</span>
+                            <span className="text-zinc-400">Total Efectivo Estimado (Metálico)</span>
+                            <span className="font-medium text-zinc-300">{formatCurrency(resumen.efectivo_estimado)}</span>
                         </div>
                         <div className="flex justify-between border-b border-zinc-800 pb-2">
                             <span className="text-zinc-400">Combustible Pagado</span>

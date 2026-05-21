@@ -7,7 +7,7 @@ import { PageHeader } from '@/components/layout';
 import { StatCard, Card, Badge, Skeleton, Button } from '@/components/ui';
 import { getPartes, getResumenDashboard, getVehiculos, getAnomalias, getMantenimientosProximos } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { DollarSign, Fuel, TrendingUp, Wrench, AlertTriangle, ArrowRight, Activity, CalendarDays, FileText, Car } from 'lucide-react';
+import { DollarSign, Fuel, TrendingUp, Wrench, AlertTriangle, ArrowRight, Activity, CalendarDays, FileText, Car, CreditCard, Banknote } from 'lucide-react';
 import type { ParteDiario, Vehiculo, Anomalia, MantenimientoVehiculo } from '@/types';
 import type { ResumenDashboard } from '@/lib/api/dashboard';
 import { PeriodFilter } from '@/components/features/period-filter';
@@ -64,6 +64,13 @@ function AdminDashboardContent() {
   const totalNeto = resumen?.neto ?? 0;
   const gastosTotal = (resumen?.gastos_variables ?? 0) + (resumen?.gastos_fijos_prorrateados ?? 0);
   const beneficioEstimado = resumen?.beneficio_estimado ?? 0;
+  const totalDatafono = resumen?.datafono ?? 0;
+  const totalEfectivo = resumen?.efectivo_estimado ?? 0;
+  // Porcentajes para la barra proporcional. Si no hay bruto, dejamos 50/50
+  // sin pintar nada (la card mostrará 0/0).
+  const pctDatafono = totalBruto > 0 ? Math.round((totalDatafono / totalBruto) * 100) : 0;
+  const pctEfectivo = totalBruto > 0 ? Math.max(0, 100 - pctDatafono) : 0;
+  const soloEfectivo = totalBruto > 0 && totalDatafono === 0;
 
   const recentPartes = partes.slice(0, 4);
   const pendingAnomalias = anomalias.filter(a => !a.notificada).slice(0, 4);
@@ -95,6 +102,69 @@ function AdminDashboardContent() {
         <StatCard title="Combustible"         value={formatCurrency(totalCombustible)}    subtitle="Descontado en Turnos"             icon={Fuel}        variant="warning" />
         <StatCard title="Gastos del periodo"  value={formatCurrency(gastosTotal)}         subtitle="Variables + fijos prorrateados"  icon={Wrench}      variant="danger" />
       </div>
+
+      {/* Desglose datáfono vs efectivo estimado del periodo */}
+      <Card className="p-5 mb-8">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4 border-b border-zinc-800 pb-3">
+          <h2 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider">
+            Desglose de cobros del periodo
+          </h2>
+          <span className="text-xs text-zinc-500">
+            Total bruto: <span className="text-zinc-200 font-medium">{formatCurrency(totalBruto)}</span>
+          </span>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-500/10 flex-shrink-0">
+              <CreditCard className="w-5 h-5 text-sky-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs text-zinc-500 uppercase tracking-wider">Datáfono</p>
+              <p className="text-2xl font-bold text-zinc-100">{formatCurrency(totalDatafono)}</p>
+              <p className="text-[11px] text-zinc-500">{pctDatafono}% del bruto</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/10 flex-shrink-0">
+              <Banknote className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs text-zinc-500 uppercase tracking-wider">Efectivo estimado</p>
+              <p className="text-2xl font-bold text-zinc-100">{formatCurrency(totalEfectivo)}</p>
+              <p className="text-[11px] text-zinc-500">
+                {pctEfectivo}% del bruto
+                {soloEfectivo && <span className="ml-1 text-emerald-400">· todo en efectivo</span>}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Barra proporcional */}
+        {totalBruto > 0 && (
+          <div className="mt-4">
+            <div className="flex h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+              <div
+                className="bg-sky-500 transition-all"
+                style={{ width: `${pctDatafono}%` }}
+                title={`Datáfono: ${pctDatafono}%`}
+              />
+              <div
+                className="bg-emerald-500 transition-all"
+                style={{ width: `${pctEfectivo}%` }}
+                title={`Efectivo: ${pctEfectivo}%`}
+              />
+            </div>
+            <p className="mt-2 text-[11px] text-zinc-500">
+              Efectivo estimado se calcula como <span className="text-zinc-400">bruto − datáfono</span>. No cambia ningún otro cálculo.
+            </p>
+          </div>
+        )}
+        {totalBruto === 0 && (
+          <p className="text-xs text-zinc-500 mt-2">Sin partes en este periodo.</p>
+        )}
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-6">
