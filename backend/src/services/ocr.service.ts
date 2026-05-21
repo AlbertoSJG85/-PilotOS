@@ -3,6 +3,14 @@ import sharp from 'sharp';
 
 const UMBRAL_CONFIANZA = 60;
 
+// Umbrales para considerar que una imagen es "visualmente procesable".
+// Una foto de móvil real de un ticket está siempre muy por encima de estos límites.
+// Lo que rechazamos aquí es: archivos corruptos, capturas vacías, fotos casi
+// completamente negras o blancas, miniaturas absurdas. NO rechazamos en función
+// del OCR — eso lo decide el flujo posterior.
+const MIN_LADO_PX = 200;        // ningún ticket realista mide menos que esto
+const MIN_STDEV_LUMINANCIA = 8; // por debajo de esto la imagen es prácticamente uniforme
+
 export interface OCRResult {
     texto: string;
     confianza: number;
@@ -10,15 +18,100 @@ export interface OCRResult {
     error_ocr?: string;
 }
 
-export async function extraerTextoImagen(imagenPath: string): Promise<OCRResult> {
+export type MotivoImagenNoProcesable =
+    | 'imagen_corrupta'
+    | 'demasiado_pequena'
+    | 'sin_contenido_visual';
+
+export interface ImagenAnalisis {
+    procesable: boolean;
+    motivo?: MotivoImagenNoProcesable;
+    width?: number;
+    height?: number;
+    luminancia_media?: number;
+    luminancia_stdev?: number;
+}
+
+/**
+ * Decide si una imagen es VISUALMENTE procesable, independientemente del OCR.
+ *
+ * Esta es la única función que puede marcar un documento como ILEGIBLE.
+ * Si Sharp no abre el archivo, las dimensiones son ridículas o la imagen
+ * es prácticamente monocromática (foto negra, blanca, totalmente borrosa),
+ * la imagen NO es procesable.
+ *
+ * Una foto real de un ticket de móvil pasa siempre este filtro. Aunque el
+ * OCR posterior falle por completo, la decisión de ILEGIBLE NO depende de él.
+ */
+export async function analizarImagen(imagenPath: string): Promise<ImagenAnalisis> {
     try {
-        try {
-            await sharp(imagenPath).metadata();
-        } catch (err: any) {
-            console.warn('[OCR] Imagen corrupta detectada por Sharp:', err.message);
-            return { texto: '', confianza: 0, legible: false, error_ocr: 'imagen_corrupta' };
+        const img = sharp(imagenPath, { failOn: 'none' });
+        const meta = await img.metadata();
+
+        if (!meta.width || !meta.height) {
+            return { procesable: false, motivo: 'imagen_corrupta' };
+        }
+        if (meta.width < MIN_LADO_PX || meta.height < MIN_LADO_PX) {
+            return {
+                procesable: false,
+                motivo: 'demasiado_pequena',
+                width: meta.width,
+                height: meta.height,
+            };
         }
 
+        // Convertir a luminancia y medir desviación estándar.
+        // Una imagen con contenido real (texto sobre papel, ticket) tiene
+        // stdev típica entre 30 y 80. Por debajo de 8 es casi uniforme:
+        // foto negra, foto blanca, foto completamente desenfocada en un color.
+        let stdev = 999;
+        let mean = 0;
+        try {
+            const stats = await sharp(imagenPath, { failOn: 'none' }).greyscale().stats();
+            const ch = stats.channels?.[0];
+            if (ch) {
+                stdev = ch.stdev;
+                mean = ch.mean;
+            }
+        } catch (err: any) {
+            // Si Sharp puede leer metadatos pero no stats, mejor no descartar
+            // la imagen: confiamos en metadata y dejamos pasar como procesable.
+            console.warn('[IMG] No se pudieron calcular stats:', err.message);
+        }
+
+        if (stdev < MIN_STDEV_LUMINANCIA) {
+            return {
+                procesable: false,
+                motivo: 'sin_contenido_visual',
+                width: meta.width,
+                height: meta.height,
+                luminancia_media: mean,
+                luminancia_stdev: stdev,
+            };
+        }
+
+        return {
+            procesable: true,
+            width: meta.width,
+            height: meta.height,
+            luminancia_media: mean,
+            luminancia_stdev: stdev,
+        };
+    } catch (err: any) {
+        console.warn('[IMG] Imagen no abrible por Sharp:', err?.message);
+        return { procesable: false, motivo: 'imagen_corrupta' };
+    }
+}
+
+/**
+ * Ejecuta Tesseract.js sobre la imagen. SIEMPRE devuelve un resultado:
+ * si Tesseract falla por completo (timeout, idioma no disponible, etc.)
+ * devuelve texto vacío con `error_ocr` marcado. La decisión de qué hacer
+ * con ese fallo es responsabilidad del caller — esta función NO declara
+ * que la imagen es "ilegible". Eso lo decide analizarImagen().
+ */
+export async function extraerTextoImagen(imagenPath: string): Promise<OCRResult> {
+    try {
         const { data } = await Tesseract.recognize(imagenPath, 'spa', {
             logger: (m) => {
                 if (m.status === 'recognizing text') {
@@ -30,7 +123,7 @@ export async function extraerTextoImagen(imagenPath: string): Promise<OCRResult>
         const confianza = data.confidence;
         return { texto: data.text, confianza, legible: confianza >= UMBRAL_CONFIANZA };
     } catch (error: any) {
-        console.error('[OCR] Error crítico en Tesseract:', error.message);
+        console.error('[OCR] Error en Tesseract (no implica imagen ilegible):', error.message);
         return { texto: '', confianza: 0, legible: false, error_ocr: 'tesseract_error' };
     }
 }
@@ -339,12 +432,15 @@ export function validarTicketTaximetro(texto: string): DatosTaximetro {
  */
 export function validarTicketGasoil(texto: string): {
     valido: boolean;
+    fecha?: string;
     importe?: number;
     litros?: number;
     errores: string[];
 } {
     const errores: string[] = [];
     const t = texto.normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+    const fecha = extractDate(t) || undefined;
 
     const importe = extractNumCurrency(t, [
         /(?:total|importe)\s*[:.]?\s*([\d]+[.,][\d]{2})\s*(?:€|eur)?/gi,
@@ -362,5 +458,5 @@ export function validarTicketGasoil(texto: string): {
     if (!importe) errores.push('No se detectó importe');
     if (!tienePalabraCombustible && !litros) errores.push('No parece ser un ticket de combustible');
 
-    return { valido: errores.length === 0, importe, litros, errores };
+    return { valido: errores.length === 0, fecha, importe, litros, errores };
 }

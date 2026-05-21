@@ -308,10 +308,23 @@ router.patch('/:id/confirmar', requireAuth, async (req: AuthRequest, res: Respon
                 .catch(calcErr => console.warn('[PARTES] Calculo de reparto fallido (bg):', calcErr.message));
         }
 
-        compararDocumentosConParte(updated.id)
-            .catch(e => console.warn('[PARTES] Comparación OCR fallida (bg):', e.message));
+        // Comparación parte↔ticket: queremos sus resultados en la respuesta para
+        // que el frontend pueda avisar al usuario tras confirmar. Es solo lectura
+        // + un puñado de UPDATEs, no es lento.
+        let resumenComparacion = { total_discrepancias: 0 };
+        try {
+            const r = await compararDocumentosConParte(updated.id);
+            resumenComparacion = { total_discrepancias: r.total_discrepancias };
+        } catch (e: any) {
+            console.warn('[PARTES] Comparación OCR fallida:', e.message);
+        }
 
-        res.status(200).json({ status: 'OK', data: updated, evento: 'E-PD-001' });
+        res.status(200).json({
+            status: 'OK',
+            data: updated,
+            discrepancias: resumenComparacion.total_discrepancias,
+            evento: 'E-PD-001',
+        });
     } catch (err: any) {
         console.error('[PARTES] Error confirmando parte:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });

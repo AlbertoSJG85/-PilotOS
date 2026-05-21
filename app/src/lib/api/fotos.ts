@@ -1,9 +1,19 @@
 import { apiFetch } from './fetcher';
 
+export type EstadoDocumento =
+  | 'VALIDO'
+  | 'PENDIENTE_REVISION'
+  | 'ILEGIBLE'
+  | 'REEMPLAZADO'
+  | 'BLOQUEADO';
+
 export interface VincularFotoResponse {
   status: string;
   data: { id: string; estado: string; tipo: string };
+  /** true cuando la foto se puede aprovechar (VALIDO o PENDIENTE_REVISION). */
   legible: boolean;
+  /** Estado final del documento (más fino que el booleano legible). */
+  estado?: EstadoDocumento | string;
   duplicado?: boolean;
   motivo?: string;
 }

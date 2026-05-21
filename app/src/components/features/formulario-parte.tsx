@@ -12,6 +12,7 @@ import {
   vincularFoto,
 } from '@/lib/api';
 import { ApiError } from '@/lib/api/fetcher';
+import type { VincularFotoResponse } from '@/lib/api/fotos';
 import { getSessionUser } from '@/lib/auth';
 import { Camera, ChevronLeft, ChevronRight, Check, AlertTriangle, Loader2 } from 'lucide-react';
 import type { Vehiculo } from '@/types';
@@ -51,6 +52,37 @@ const uploadLabel: Record<UploadStep, string> = {
   gasoil: 'Subiendo ticket combustible...',
   confirmar: 'Confirmando parte...',
 };
+
+/**
+ * Devuelve avisos a mostrar al usuario tras subir una foto.
+ * Diferencia los tres casos del backend:
+ *   - VALIDO              → sin aviso (todo correcto).
+ *   - PENDIENTE_REVISION  → aviso informativo: la foto se recibió bien
+ *                            pero el OCR no leyó todos los datos.
+ *   - ILEGIBLE            → aviso fuerte: la foto no se pudo procesar.
+ *
+ * Se usa el campo `estado` cuando lo devuelve el backend; si no,
+ * cae al booleano `legible` para mantener compatibilidad.
+ */
+function mensajesFoto(
+  v: VincularFotoResponse,
+  tipo: 'taximetro' | 'combustible',
+): string[] {
+  const etiqueta = tipo === 'taximetro' ? 'taxímetro' : 'combustible';
+  const estado = (v.estado ?? '').toString().toUpperCase();
+
+  if (estado === 'ILEGIBLE' || (!estado && !v.legible)) {
+    return [
+      `El ticket de ${etiqueta} no se pudo procesar. La foto puede estar borrosa o dañada. Puedes reemplazarla desde el detalle del parte.`,
+    ];
+  }
+  if (estado === 'PENDIENTE_REVISION') {
+    return [
+      `Ticket de ${etiqueta} recibido. La lectura automática no captó todos los datos; revísalos manualmente si lo necesitas. No es necesario volver a subir la foto.`,
+    ];
+  }
+  return [];
+}
 
 export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
   const router = useRouter();
@@ -245,14 +277,14 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
           setUploadStep('taxi');
           const up = await uploadFoto(ticketTaxi);
           const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_TAXIMETRO', url: up.url, hash_sha256: up.hash_sha256 });
-          if (!v.legible) avisos.push('El ticket de taxímetro se ha subido pero no se ha leído bien. Puedes reemplazarlo desde el detalle del parte.');
+          avisos.push(...mensajesFoto(v, 'taximetro'));
         }
         if (ticketsGasoil.length > 0 && Number(form.combustible) > 0) {
           for (const file of ticketsGasoil) {
             setUploadStep('gasoil');
             const up = await uploadFoto(file);
             const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_GASOIL', url: up.url, hash_sha256: up.hash_sha256 });
-            if (!v.legible) avisos.push('Un ticket de combustible se ha subido pero no se ha leído bien. Puedes reemplazarlo desde el detalle del parte.');
+            avisos.push(...mensajesFoto(v, 'combustible'));
           }
         }
         if (avisos.length > 0) {
@@ -278,7 +310,7 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
         const up = await uploadFoto(ticketTaxi);
         const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_TAXIMETRO', url: up.url, hash_sha256: up.hash_sha256 });
         setTaxiUploaded(true);
-        if (!v.legible) avisos.push('El ticket de taxímetro está poco legible. El parte se enviará igualmente; podrás reemplazarlo después si quieres.');
+        avisos.push(...mensajesFoto(v, 'taximetro'));
       }
 
       if (ticketsGasoil.length > 0 && Number(form.combustible) > 0) {
@@ -286,13 +318,21 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
           setUploadStep('gasoil');
           const up = await uploadFoto(file);
           const v = await vincularFoto({ parte_diario_id: parteId, tipo: 'TICKET_GASOIL', url: up.url, hash_sha256: up.hash_sha256 });
-          if (!v.legible) avisos.push('Un ticket de combustible está poco legible. El parte se enviará igualmente; podrás reemplazarlo después si quieres.');
+          avisos.push(...mensajesFoto(v, 'combustible'));
         }
         setGasoilUploaded(true);
       }
 
       setUploadStep('confirmar');
-      await confirmarParte(parteId);
+      const confirmRes = await confirmarParte(parteId);
+      const nDisc = confirmRes.discrepancias ?? 0;
+      if (nDisc > 0) {
+        avisos.push(
+          nDisc === 1
+            ? 'Se detectó una discrepancia entre los datos del parte y los del ticket. Revísala en el detalle del parte.'
+            : `Se detectaron ${nDisc} discrepancias entre los datos del parte y los tickets. Revísalas en el detalle del parte.`
+        );
+      }
 
       if (avisos.length > 0) {
         setWarningIlegible(avisos);

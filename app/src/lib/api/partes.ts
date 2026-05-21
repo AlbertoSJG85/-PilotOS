@@ -42,8 +42,14 @@ export async function crearParte(data: CrearParteInput): Promise<ApiResponse<Par
   return apiFetch('/api/partes', { method: 'POST', body: data });
 }
 
+/** Respuesta de /confirmar — incluye contador de discrepancias detectadas. */
+export interface ConfirmarParteResponse extends ApiResponse<ParteDiario> {
+  /** Total de discrepancias parte↔ticket detectadas. 0 si todo coincide. */
+  discrepancias?: number;
+}
+
 /** PATCH /api/partes/:id/confirmar — Asalariado confirma BORRADOR. Backend valida fotos. */
-export async function confirmarParte(id: string): Promise<ApiResponse<ParteDiario>> {
+export async function confirmarParte(id: string): Promise<ConfirmarParteResponse> {
   return apiFetch(`/api/partes/${id}/confirmar`, { method: 'PATCH', body: {} });
 }
 

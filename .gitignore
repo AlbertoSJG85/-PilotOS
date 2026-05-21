@@ -42,3 +42,9 @@ uploads/
 
 # OS
 Thumbs.db
+
+# Tesseract trained data (auto-downloaded on first OCR run)
+*.traineddata
+
+# Local tsc output / scratchpads
+tsc_out.txt

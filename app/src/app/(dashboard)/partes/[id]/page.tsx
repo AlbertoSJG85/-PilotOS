@@ -16,6 +16,10 @@ import {
 const ESTADO_BADGE: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'default'> = {
     ENVIADO: 'info',
     VALIDADO: 'success',
+    VALIDO: 'success',
+    PENDIENTE_REVISION: 'warning',
+    REEMPLAZADO: 'info',
+    BLOQUEADO: 'danger',
     ILEGIBLE: 'danger',
     FOTO_ILEGIBLE: 'danger',
     FOTO_SUSTITUIDA: 'warning',
@@ -303,6 +307,7 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                             {parte.documentos.map((dLink) => {
                                 const doc: Documento = dLink.documento;
                                 const isIlegible = doc.estado === 'ILEGIBLE' || doc.estado === 'BLOQUEADO';
+                                const isPendienteRevision = doc.estado === 'PENDIENTE_REVISION';
                                 const isReplacing = replacingId === doc.id;
                                 const isRetrying = retryingId === doc.id;
                                 const isDeleting = deletingId === doc.id;
@@ -312,6 +317,10 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                                 const pTotal = datos?.parc_total ?? datos?.importe;
                                 const pDist = datos?.parc_dist_total;
                                 const borrados = datos?.acum_borrados;
+                                const discrepancias: Array<{ campo: string; severidad: 'NORMAL' | 'CRITICA'; mensaje: string }> =
+                                    Array.isArray(datos?.discrepancias) ? datos.discrepancias : [];
+                                const tieneDiscrepancia = discrepancias.length > 0;
+                                const tieneCritica = discrepancias.some((d) => d.severidad === 'CRITICA');
 
                                 return (
                                     <div
@@ -346,10 +355,12 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
 
                                             {/* Estado OCR */}
                                             <div className="flex items-center gap-1.5">
-                                                {doc.estado_ocr === 'ERROR' ? (
+                                                {doc.estado_ocr === 'ERROR' || isIlegible ? (
                                                     <AlertCircle className="w-3 h-3 text-rose-400 flex-shrink-0" />
-                                                ) : doc.estado_ocr === 'PROCESADO' && doc.estado === 'VALIDO' ? (
+                                                ) : doc.estado === 'VALIDO' || doc.estado === 'REEMPLAZADO' ? (
                                                     <CheckCircle2 className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                                                ) : isPendienteRevision ? (
+                                                    <AlertTriangle className="w-3 h-3 text-amber-400 flex-shrink-0" />
                                                 ) : (
                                                     <Clock className="w-3 h-3 text-zinc-500 flex-shrink-0" />
                                                 )}
@@ -392,8 +403,39 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                                                     <span>
                                                         {doc.estado === 'BLOQUEADO'
                                                             ? 'Bloqueado — máximo de intentos agotado.'
-                                                            : 'No se pudo procesar. Sube una foto más nítida.'}
+                                                            : 'No se pudo procesar la imagen. Sube una foto más nítida.'}
                                                     </span>
+                                                </div>
+                                            )}
+
+                                            {/* Aviso suave: foto recibida pero OCR insuficiente */}
+                                            {isPendienteRevision && (
+                                                <div className="flex items-start gap-2 p-2 bg-amber-950/20 border border-amber-900/30 rounded text-[10px] text-amber-300">
+                                                    <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                                                    <span>
+                                                        Foto recibida correctamente. La lectura automática no captó todos los datos; revísalos manualmente si lo necesitas. No hace falta volver a subir la foto.
+                                                    </span>
+                                                </div>
+                                            )}
+
+                                            {/* Aviso suave: el OCR sí leyó datos pero no coinciden con el parte */}
+                                            {!isIlegible && tieneDiscrepancia && (
+                                                <div className={`flex items-start gap-2 p-2 rounded text-[10px] ${
+                                                    tieneCritica
+                                                        ? 'bg-rose-950/20 border border-rose-900/30 text-rose-300'
+                                                        : 'bg-amber-950/20 border border-amber-900/30 text-amber-300'
+                                                }`}>
+                                                    <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className="font-semibold">
+                                                            {tieneCritica
+                                                                ? 'Discrepancia crítica detectada:'
+                                                                : 'Revisión sugerida — los datos del ticket no coinciden con el parte:'}
+                                                        </span>
+                                                        {discrepancias.map((d, i) => (
+                                                            <span key={i}>· {d.mensaje}</span>
+                                                        ))}
+                                                    </div>
                                                 </div>
                                             )}
 
@@ -431,7 +473,7 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                                                     </div>
                                                 )}
 
-                                                {(isIlegible || doc.estado_ocr === 'ERROR') && (
+                                                {(isIlegible || isPendienteRevision || doc.estado_ocr === 'ERROR') && (
                                                     <Button
                                                         variant="outline"
                                                         className="w-full text-xs gap-1.5 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
