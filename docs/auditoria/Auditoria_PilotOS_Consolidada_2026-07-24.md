@@ -130,5 +130,23 @@ Todo el trabajo en `fix/pilotos-seguridad-2026-07-24` (o ramas hijas). Cada fase
 
 ## 8. Estado de este documento
 
-- Fase 0: **en curso** (rama creada, scaffold de tests + higiene).
-- Fases 1–7: **pendientes de luz verde por fase**.
+Todas las fases (0–7) se ejecutaron y verificaron en la rama
+`fix/pilotos-seguridad-2026-07-24` el 2026-07-24. Cada fase tiene su commit
+propio, con tests (51/51 al cierre de la Fase 7), `tsc --noEmit` limpio y
+build verificado antes de pasar a la siguiente. Detalle y pendientes de cada
+fase en los mensajes de commit correspondientes:
+
+| Fase | Commit | Resumen |
+|---|---|---|
+| 0 | `chore(fase-0)` | Rama, scaffold de tests, higiene de repo |
+| 1 | `fix(fase-1)` | Auth real con bcrypt |
+| 2 | `fix(fase-2)` | Cerrar IDOR y fugas cross-tenant |
+| 3 | `fix(fase-3)` | RBAC basado en es_patron |
+| 4 | `fix(fase-4)` | Exactitud economica (calculo, prorrateo, cierres) |
+| 5 | `fix(fase-5)` | Kilometraje maestro no retrocede |
+| 6 | `fix(fase-6)` | Mantenimientos e2e en backend (sin n8n) |
+| 7 | `fix(fase-7)` | Timing-safe token, encaje NexOS Pay |
+
+**No se ha hecho merge a `main`**, ni push al remoto. Pendiente de revision
+y decision de Alberto (ver lista de pendientes entregada al cierre de la
+sesion).
