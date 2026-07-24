@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import jwt from 'jsonwebtoken';
+import helmet from 'helmet';
 
 // DT-011: PrismaClient singleton
 import { prisma } from './lib/prisma';
@@ -45,6 +46,16 @@ if (process.env.NODE_ENV === 'production' && !process.env.ALLOWED_ORIGINS) {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Fase 1 (seguridad): cabeceras HTTP endurecidas. crossOriginResourcePolicy se
+// relaja a 'cross-origin' porque el frontend (Next.js, otro origen) carga
+// imagenes desde /uploads directamente en <img>; con el default 'same-origin'
+// el navegador las bloquearia. crossOriginEmbedderPolicy se desactiva por la
+// misma razon (esto es una API, no una pagina que empotre recursos de terceros).
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginEmbedderPolicy: false,
+}));
 
 // Trust HTTPS reverse proxy (Coolify/nginx) so req.protocol returns 'https'
 // and URLs stored in DB use the correct scheme.

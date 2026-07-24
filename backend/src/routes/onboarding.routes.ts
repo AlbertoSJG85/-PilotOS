@@ -8,6 +8,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
 
 const router = Router();
 
@@ -145,7 +146,7 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
                         email,
                         nombre: onboarding.nombre_patron || 'Propietario',
                         telefono,
-                        password_hash: 'ONBOARDING_INITIAL_STEP',
+                        password_hash: PLACEHOLDER_PASSWORD_HASHES[1], // 'ONBOARDING_INITIAL_STEP'
                         role: 'user',
                         estado_pago: 'AL DIA',
                     },
@@ -190,7 +191,7 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
                         nombre: asala.nombre || 'Conductor',
                         telefono: asala.telefono,
                         email: asalaEmail,
-                        password_hash: 'ONBOARDING_ASALARIADO_INITIAL',
+                        password_hash: PLACEHOLDER_PASSWORD_HASHES[2], // 'ONBOARDING_ASALARIADO_INITIAL'
                         role: 'user',
                         estado_pago: 'AL DIA',
                     },

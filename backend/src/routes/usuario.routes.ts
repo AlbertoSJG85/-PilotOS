@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
 
 const router = Router();
 
@@ -65,7 +66,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                     nombre: nombre || 'Conductor',
                     telefono,
                     email: asalaEmail,
-                    password_hash: 'CONDUCTOR_NUEVO',
+                    password_hash: PLACEHOLDER_PASSWORD_HASHES[0], // 'CONDUCTOR_NUEVO'
                     role: 'user',
                     estado_pago: 'AL DIA',
                 },

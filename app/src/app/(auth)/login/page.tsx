@@ -4,43 +4,83 @@ import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Button, Input } from '@/components/ui';
-import { login } from '@/lib/api';
+import { login, establecerPassword, ApiError } from '@/lib/api';
 import { setSession } from '@/lib/auth';
+import type { LoginResponse } from '@/types';
+
+function aplicarSesion(res: LoginResponse) {
+  if (!res.token || !res.user) return;
+  setSession(res.token, {
+    id: res.user.id,
+    nombre: res.user.nombre,
+    telefono: res.user.telefono,
+    role: res.user.role,
+    cliente_id: res.context?.cliente_id ?? null,
+    conductor_id: res.context?.conductor_id ?? null,
+    es_patron: res.context?.es_patron ?? false,
+    tiene_asalariados: res.context?.tiene_asalariados ?? false,
+  });
+}
 
 export default function LoginPage() {
   const router = useRouter();
   const [telefono, setTelefono] = useState('');
+  const [password, setPassword] = useState('');
+  const [password2, setPassword2] = useState('');
+  // 'login': formulario normal. 'set-password': cuenta sin contrasena todavia
+  // (creada antes de la Fase 1 de seguridad), hay que fijarla antes de entrar.
+  const [modo, setModo] = useState<'login' | 'set-password'>('login');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: FormEvent) {
+  async function handleLogin(e: FormEvent) {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      const res = await login(telefono.trim());
+      const res = await login(telefono.trim(), password);
 
       if (res.action === 'REDIRECT_ONBOARDING') {
         router.replace('/onboarding');
         return;
       }
 
-      if (res.token && res.user) {
-        setSession(res.token, {
-          id: res.user.id,
-          nombre: res.user.nombre,
-          telefono: res.user.telefono,
-          role: res.user.role,
-          cliente_id: res.context?.cliente_id ?? null,
-          conductor_id: res.context?.conductor_id ?? null,
-          es_patron: res.context?.es_patron ?? false,
-          tiene_asalariados: res.context?.tiene_asalariados ?? false,
-        });
-        router.replace('/conductor');
-      }
+      aplicarSesion(res);
+      router.replace('/conductor');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error al iniciar sesion';
+      if (err instanceof ApiError && err.code === 'password_not_set') {
+        setModo('set-password');
+        setError('');
+        return;
+      }
+      const msg = err instanceof ApiError ? err.message : 'Error al iniciar sesion';
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSetPassword(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+
+    if (password.length < 8) {
+      setError('La contrasena debe tener al menos 8 caracteres');
+      return;
+    }
+    if (password !== password2) {
+      setError('Las contrasenas no coinciden');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await establecerPassword(telefono.trim(), password);
+      aplicarSesion(res);
+      router.replace('/conductor');
+    } catch (err: unknown) {
+      const msg = err instanceof ApiError ? err.message : 'Error al establecer la contrasena';
       setError(msg);
     } finally {
       setLoading(false);
@@ -73,31 +113,87 @@ export default function LoginPage() {
 
         {/* Formulario */}
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-8 shadow-xl">
-          <p className="mb-6 text-sm text-zinc-400 text-center">
-            Introduce tu numero de telefono para acceder
-          </p>
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <Input
-              label="Telefono"
-              type="tel"
-              placeholder="34600000001"
-              value={telefono}
-              onChange={(e) => setTelefono(e.target.value)}
-              required
-              autoComplete="tel"
-            />
-
-            {error && (
-              <p className="rounded-lg bg-red-900/30 border border-red-800/50 px-3 py-2 text-sm text-red-400">
-                {error}
+          {modo === 'login' ? (
+            <>
+              <p className="mb-6 text-sm text-zinc-400 text-center">
+                Introduce tu telefono y contrasena para acceder
               </p>
-            )}
 
-            <Button type="submit" className="w-full" size="lg" disabled={loading}>
-              {loading ? 'Entrando...' : 'Entrar'}
-            </Button>
-          </form>
+              <form onSubmit={handleLogin} className="space-y-5">
+                <Input
+                  label="Telefono"
+                  type="tel"
+                  placeholder="34600000001"
+                  value={telefono}
+                  onChange={(e) => setTelefono(e.target.value)}
+                  required
+                  autoComplete="tel"
+                />
+                <Input
+                  label="Contrasena"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  autoComplete="current-password"
+                />
+
+                {error && (
+                  <p className="rounded-lg bg-red-900/30 border border-red-800/50 px-3 py-2 text-sm text-red-400">
+                    {error}
+                  </p>
+                )}
+
+                <Button type="submit" className="w-full" size="lg" disabled={loading}>
+                  {loading ? 'Entrando...' : 'Entrar'}
+                </Button>
+              </form>
+            </>
+          ) : (
+            <>
+              <p className="mb-6 text-sm text-zinc-400 text-center">
+                Tu cuenta todavia no tiene contrasena. Crea una para continuar.
+              </p>
+
+              <form onSubmit={handleSetPassword} className="space-y-5">
+                <Input
+                  label="Nueva contrasena"
+                  type="password"
+                  placeholder="Minimo 8 caracteres"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  autoComplete="new-password"
+                />
+                <Input
+                  label="Repite la contrasena"
+                  type="password"
+                  value={password2}
+                  onChange={(e) => setPassword2(e.target.value)}
+                  required
+                  autoComplete="new-password"
+                />
+
+                {error && (
+                  <p className="rounded-lg bg-red-900/30 border border-red-800/50 px-3 py-2 text-sm text-red-400">
+                    {error}
+                  </p>
+                )}
+
+                <Button type="submit" className="w-full" size="lg" disabled={loading}>
+                  {loading ? 'Guardando...' : 'Establecer contrasena y entrar'}
+                </Button>
+
+                <button
+                  type="button"
+                  className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300"
+                  onClick={() => { setModo('login'); setError(''); setPassword(''); setPassword2(''); }}
+                >
+                  Volver
+                </button>
+              </form>
+            </>
+          )}
         </div>
 
         <p className="mt-6 text-center text-xs text-zinc-600">

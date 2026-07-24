@@ -3,35 +3,116 @@
  * Conecta con minos.Users (DT-011 singleton, DT-010 sin fallback).
  */
 import { Router, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import { prisma } from '../lib/prisma';
 import { generarToken, requireAuth, AuthRequest } from '../middleware/auth.middleware';
+import { esPlaceholder, hashPassword, validarFortalezaPassword, verificarPassword } from '../lib/password';
 
 const router = Router();
 
+// Fase 1 (seguridad): limitar intentos de login/establecimiento de contrasena
+// por IP para dificultar fuerza bruta y enumeracion de telefonos.
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { status: 'FAIL', error: 'too_many_requests', message: 'Demasiados intentos. Intentalo mas tarde.' },
+});
+
+/**
+ * Busca todos los candidatos minos.Users para un telefono (dual-format +34/34)
+ * y selecciona el que tenga contexto PilotOS (conductor o patron), igual que
+ * hacia el login original. Puede haber varios usuarios NexOS con el mismo numero.
+ */
+async function resolverCandidatoPilotOS(telefono: string) {
+    const phoneVariants = [telefono];
+    if (telefono.startsWith('+')) phoneVariants.push(telefono.substring(1));
+    else phoneVariants.push('+' + telefono);
+
+    const candidatos = await prisma.minosUser.findMany({
+        where: { telefono: { in: phoneVariants } },
+    });
+
+    if (candidatos.length === 0) return null;
+
+    let usuario = candidatos[0];
+    if (candidatos.length > 1) {
+        for (const candidato of candidatos) {
+            const tienePilotos = await prisma.conductor.findFirst({ where: { usuario_id: candidato.id, activo: true } })
+                ?? await prisma.cliente.findFirst({ where: { patron_id: candidato.id, activo: true } });
+            if (tienePilotos) { usuario = candidato; break; }
+        }
+    }
+    return usuario;
+}
+
+/**
+ * Resuelve el contexto PilotOS (cliente/conductor) de un usuario ya autenticado
+ * y arma el payload de sesion (token + user + context). Compartido por login
+ * y por establecer-password (que tambien inicia sesion tras fijar la contrasena).
+ */
+async function emitirSesion(usuario: { id: number; telefono: string | null; nombre: string | null; role: string | null }) {
+    const conductor = await prisma.conductor.findFirst({
+        where: { usuario_id: usuario.id, activo: true },
+        include: { cliente: true },
+    });
+    const cliente = conductor?.cliente
+        ?? await prisma.cliente.findFirst({ where: { patron_id: usuario.id, activo: true } });
+
+    const esPatron = conductor?.es_patron ?? (cliente ? cliente.patron_id === usuario.id : false);
+
+    // ¿Hay al menos un conductor asalariado activo en este cliente?
+    // Esto permite al frontend ocultar UI de "asalariado/conductor/liquidación"
+    // cuando el cliente trabaja solo como propietario.
+    const tieneAsalariados = cliente
+        ? (await prisma.conductor.count({
+            where: { cliente_id: cliente.id, es_patron: false, activo: true },
+        })) > 0
+        : false;
+
+    const token = generarToken({
+        id: usuario.id,
+        telefono: usuario.telefono || '',
+        role: usuario.role || 'user',
+        es_patron: esPatron,
+        cliente_id: cliente?.id ?? null,
+    });
+
+    return {
+        status: 'OK' as const,
+        token,
+        user: { id: usuario.id, nombre: usuario.nombre || '', telefono: usuario.telefono || '', role: usuario.role || 'user' },
+        context: cliente ? {
+            cliente_id: cliente.id,
+            conductor_id: conductor?.id,
+            es_patron: esPatron,
+            tipo_actividad: cliente.tipo_actividad,
+            tiene_asalariados: tieneAsalariados,
+        } : null,
+    };
+}
+
 /**
  * POST /api/auth/login
- * Autenticacion por telefono. Dual-format (+34.../34...).
+ * Autenticacion por telefono + contrasena (bcrypt). Dual-format (+34.../34...).
+ *
+ * Fase 1 (2026-07-24): antes de esta fase el login autenticaba solo con el
+ * telefono, sin contrasena. Las cuentas creadas antes de esta fase tienen un
+ * marcador en password_hash (ver lib/password.ts) y deben pasar primero por
+ * POST /api/auth/establecer-password.
  */
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', authLimiter, async (req: Request, res: Response) => {
     try {
-        const { telefono } = req.body;
-        if (!telefono) {
-            res.status(400).json({ status: 'FAIL', error: 'missing_telefono' });
+        const { telefono, password } = req.body;
+        if (!telefono || !password) {
+            res.status(400).json({ status: 'FAIL', error: 'missing_credentials', message: 'Telefono y contrasena son obligatorios' });
             return;
         }
 
-        const phoneVariants = [telefono];
-        if (telefono.startsWith('+')) phoneVariants.push(telefono.substring(1));
-        else phoneVariants.push('+' + telefono);
+        const usuario = await resolverCandidatoPilotOS(telefono);
 
-        // Buscar todos los usuarios con ese teléfono (puede haber varios en el ecosistema NexOS,
-        // ej. un usuario de RentOS y uno de PilotOS con el mismo número).
-        // Preferir el usuario que tenga contexto PilotOS (conductor o patrón).
-        const candidatos = await prisma.minosUser.findMany({
-            where: { telefono: { in: phoneVariants } },
-        });
-
-        if (candidatos.length === 0) {
+        if (!usuario) {
             res.status(404).json({
                 status: 'FAIL',
                 error: 'user_not_found',
@@ -41,57 +122,118 @@ router.post('/login', async (req: Request, res: Response) => {
             return;
         }
 
-        // Seleccionar el usuario con contexto PilotOS; si ninguno lo tiene, usar el primero.
-        let usuario = candidatos[0];
-        if (candidatos.length > 1) {
-            for (const candidato of candidatos) {
-                const tienePilotos = await prisma.conductor.findFirst({ where: { usuario_id: candidato.id, activo: true } })
-                    ?? await prisma.cliente.findFirst({ where: { patron_id: candidato.id, activo: true } });
-                if (tienePilotos) { usuario = candidato; break; }
-            }
+        if (esPlaceholder(usuario.password_hash)) {
+            res.status(400).json({
+                status: 'FAIL',
+                error: 'password_not_set',
+                message: 'Esta cuenta todavia no tiene contrasena. Establece una para continuar.',
+                action: 'SET_PASSWORD',
+            });
+            return;
         }
 
-        // Resolver contexto PilotOS ANTES de generar el token para incluirlo en el payload.
-        const conductor = await prisma.conductor.findFirst({
-            where: { usuario_id: usuario.id, activo: true },
-            include: { cliente: true },
-        });
-        const cliente = conductor?.cliente
-            ?? await prisma.cliente.findFirst({ where: { patron_id: usuario.id, activo: true } });
+        const passwordValida = await verificarPassword(password, usuario.password_hash);
+        if (!passwordValida) {
+            // Mensaje generico: no revelar si el telefono existe o si fallo la contrasena.
+            res.status(401).json({ status: 'FAIL', error: 'invalid_credentials', message: 'Telefono o contrasena incorrectos' });
+            return;
+        }
 
-        const esPatron = conductor?.es_patron ?? (cliente ? cliente.patron_id === usuario.id : false);
-
-        // ¿Hay al menos un conductor asalariado activo en este cliente?
-        // Esto permite al frontend ocultar UI de "asalariado/conductor/liquidación"
-        // cuando el cliente trabaja solo como propietario.
-        const tieneAsalariados = cliente
-            ? (await prisma.conductor.count({
-                where: { cliente_id: cliente.id, es_patron: false, activo: true },
-            })) > 0
-            : false;
-
-        const token = generarToken({
-            id: usuario.id,
-            telefono: usuario.telefono || '',
-            role: usuario.role || 'user',
-            es_patron: esPatron,
-            cliente_id: cliente?.id ?? null,
-        });
-
-        res.json({
-            status: 'OK',
-            token,
-            user: { id: usuario.id, nombre: usuario.nombre || '', telefono: usuario.telefono || '', role: usuario.role || 'user' },
-            context: cliente ? {
-                cliente_id: cliente.id,
-                conductor_id: conductor?.id,
-                es_patron: esPatron,
-                tipo_actividad: cliente.tipo_actividad,
-                tiene_asalariados: tieneAsalariados,
-            } : null,
-        });
+        res.json(await emitirSesion(usuario));
     } catch (err: any) {
         console.error('[AUTH] login error:', err.message);
+        const isDev = process.env.NODE_ENV === 'development';
+        res.status(500).json({ status: 'FAIL', error: 'server_error', message: isDev ? err.message : 'Error interno' });
+    }
+});
+
+/**
+ * POST /api/auth/establecer-password
+ * Fija la contrasena inicial de una cuenta que todavia tiene el marcador
+ * placeholder (creada en onboarding o por el patron antes de esta fase).
+ *
+ * NOTA DE SEGURIDAD (pendiente de decision de negocio, ver auditoria Fase 1):
+ * este endpoint solo exige "conocer el telefono" para fijar la PRIMERA
+ * contrasena — la misma superficie de exposicion que tenia el login antiguo,
+ * pero acotada a una unica vez por cuenta (en cuanto hay contrasena real,
+ * esta ruta deja de aceptar esa cuenta y solo sirve /cambiar-password con
+ * la contrasena anterior). Es un cierre parcial: ideal seria verificar
+ * posesion del telefono (OTP WhatsApp via GlorIA) antes de fijarla. Queda
+ * pendiente de que Alberto decida el canal de verificacion del bootstrap.
+ */
+router.post('/establecer-password', authLimiter, async (req: Request, res: Response) => {
+    try {
+        const { telefono, password } = req.body;
+        if (!telefono || !password) {
+            res.status(400).json({ status: 'FAIL', error: 'missing_fields', message: 'Telefono y contrasena son obligatorios' });
+            return;
+        }
+
+        const fortaleza = validarFortalezaPassword(password);
+        if (!fortaleza.valid) {
+            res.status(400).json({ status: 'FAIL', error: 'weak_password', message: fortaleza.error });
+            return;
+        }
+
+        const usuario = await resolverCandidatoPilotOS(telefono);
+        if (!usuario) {
+            res.status(404).json({ status: 'FAIL', error: 'user_not_found', message: 'Usuario no registrado', action: 'REDIRECT_ONBOARDING' });
+            return;
+        }
+
+        if (!esPlaceholder(usuario.password_hash)) {
+            res.status(409).json({
+                status: 'FAIL',
+                error: 'password_already_set',
+                message: 'Esta cuenta ya tiene contrasena. Usa el cambio de contrasena si necesitas actualizarla.',
+            });
+            return;
+        }
+
+        const nuevoHash = await hashPassword(password);
+        await prisma.minosUser.update({ where: { id: usuario.id }, data: { password_hash: nuevoHash } });
+
+        res.json(await emitirSesion(usuario));
+    } catch (err: any) {
+        console.error('[AUTH] establecer-password error:', err.message);
+        const isDev = process.env.NODE_ENV === 'development';
+        res.status(500).json({ status: 'FAIL', error: 'server_error', message: isDev ? err.message : 'Error interno' });
+    }
+});
+
+/**
+ * POST /api/auth/cambiar-password
+ * Cambia la contrasena de la cuenta autenticada. Exige la contrasena actual.
+ */
+router.post('/cambiar-password', requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const { password_actual, password_nueva } = req.body;
+        if (!password_actual || !password_nueva) {
+            res.status(400).json({ status: 'FAIL', error: 'missing_fields', message: 'password_actual y password_nueva son obligatorios' });
+            return;
+        }
+
+        const fortaleza = validarFortalezaPassword(password_nueva);
+        if (!fortaleza.valid) {
+            res.status(400).json({ status: 'FAIL', error: 'weak_password', message: fortaleza.error });
+            return;
+        }
+
+        const usuario = await prisma.minosUser.findUnique({ where: { id: req.usuario!.id } });
+        if (!usuario) { res.status(404).json({ status: 'FAIL', error: 'user_not_found' }); return; }
+
+        const passwordValida = await verificarPassword(password_actual, usuario.password_hash);
+        if (!passwordValida) {
+            res.status(401).json({ status: 'FAIL', error: 'invalid_credentials', message: 'La contrasena actual no es correcta' });
+            return;
+        }
+
+        const nuevoHash = await hashPassword(password_nueva);
+        await prisma.minosUser.update({ where: { id: usuario.id }, data: { password_hash: nuevoHash } });
+
+        res.json({ status: 'OK', message: 'Contrasena actualizada' });
+    } catch (err: any) {
+        console.error('[AUTH] cambiar-password error:', err.message);
         const isDev = process.env.NODE_ENV === 'development';
         res.status(500).json({ status: 'FAIL', error: 'server_error', message: isDev ? err.message : 'Error interno' });
     }
