@@ -52,3 +52,9 @@ ALTER TABLE pilotos.avisos
   ADD COLUMN IF NOT EXISTS canal VARCHAR(20) NOT NULL DEFAULT 'whatsapp',
   ADD COLUMN IF NOT EXISTS intentos INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS error_envio VARCHAR(500);
+
+-- ========================================================
+-- 2026-07-24 · M8 (preferencias de aviso de mantenimiento por cliente)
+-- ========================================================
+ALTER TABLE pilotos.clientes
+  ADD COLUMN IF NOT EXISTS preferencias_avisos JSONB;

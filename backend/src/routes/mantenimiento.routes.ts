@@ -1,7 +1,8 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requirePatron, requireClienteContext, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 import { sumarMeses } from '../lib/fechas';
+import { resolverPreferenciasAvisos } from '../services/mantenimientoAlertas.service';
 
 const router = Router();
 
@@ -9,6 +10,28 @@ router.get('/catalogo', async (_req: any, res: Response) => {
     try {
         const catalogo = await prisma.mantenimientoCatalogo.findMany({ where: { activo: true }, orderBy: { tipo: 'asc' } });
         res.json({ status: 'OK', data: catalogo });
+    } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
+});
+
+// GET /api/mantenimientos/preferencias-avisos — Fase 6 M8 (2026-07-24).
+// Devuelve las preferencias efectivas (ya con los valores por defecto
+// aplicados) del cliente del usuario autenticado.
+router.get('/preferencias-avisos', requireAuth, requireClienteContext, async (req: AuthRequest, res: Response) => {
+    try {
+        const cliente = await prisma.cliente.findUnique({ where: { id: req.usuario!.cliente_id! }, select: { preferencias_avisos: true } });
+        res.json({ status: 'OK', data: resolverPreferenciasAvisos(cliente?.preferencias_avisos) });
+    } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
+});
+
+// PUT /api/mantenimientos/preferencias-avisos — Solo patron.
+router.put('/preferencias-avisos', requireAuth, requireClienteContext, requirePatron, async (req: AuthRequest, res: Response) => {
+    try {
+        const resueltas = resolverPreferenciasAvisos(req.body);
+        await prisma.cliente.update({
+            where: { id: req.usuario!.cliente_id! },
+            data: { preferencias_avisos: resueltas as any },
+        });
+        res.json({ status: 'OK', data: resueltas });
     } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
 });
 

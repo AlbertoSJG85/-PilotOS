@@ -8,7 +8,7 @@
  * pendiente de un test de integracion (ver seccion final del informe).
  */
 import { describe, it, expect } from 'vitest';
-import { calcularNivelKm, calcularNivelDias, esMasUrgente } from '../src/services/mantenimientoAlertas.service';
+import { calcularNivelKm, calcularNivelDias, esMasUrgente, resolverPreferenciasAvisos } from '../src/services/mantenimientoAlertas.service';
 
 describe('calcularNivelKm', () => {
     it('mas de 1000 km de margen → sin aviso (null)', () => {
@@ -86,5 +86,70 @@ describe('esMasUrgente (dedupe)', () => {
 
     it('nivel MENOS urgente que el ultimo notificado → no deberia avisar (no retrocede)', () => {
         expect(esMasUrgente(1000, 500)).toBe(false);
+    });
+});
+
+describe('calcularNivelKm/Dias con umbrales personalizados (M8, preferencias por cliente)', () => {
+    it('un cliente puede pedir un unico aviso mas cercano al vencimiento, p.ej. solo 300 km antes', () => {
+        expect(calcularNivelKm(500, { umbralesProximo: [300] })).toBeNull();
+        expect(calcularNivelKm(300, { umbralesProximo: [300] })).toBe(300);
+        expect(calcularNivelKm(1, { umbralesProximo: [300] })).toBe(300);
+        expect(calcularNivelKm(0, { umbralesProximo: [300] })).toBe(0);
+    });
+
+    it('el intervalo de vencido tambien es configurable', () => {
+        expect(calcularNivelKm(-100, { umbralesProximo: [1000, 500, 250], intervaloVencido: 100 })).toBe(-100);
+        expect(calcularNivelKm(-250, { umbralesProximo: [1000, 500, 250], intervaloVencido: 100 })).toBe(-200);
+    });
+
+    it('calcularNivelDias respeta un umbral e intervalo personalizados', () => {
+        expect(calcularNivelDias(10, { umbralProximo: 7 })).toBeNull();
+        expect(calcularNivelDias(7, { umbralProximo: 7 })).toBe(7);
+        expect(calcularNivelDias(-5, { umbralProximo: 7, intervaloVencido: 5 })).toBe(-5);
+    });
+});
+
+describe('resolverPreferenciasAvisos (M8)', () => {
+    it('sin datos (null/undefined/no-objeto) devuelve los valores por defecto de siempre', () => {
+        for (const raw of [null, undefined, 'texto', 42]) {
+            const prefs = resolverPreferenciasAvisos(raw);
+            expect(prefs.canal).toBe('whatsapp');
+            expect(prefs.umbralesKmProximo).toEqual([1000, 500, 250]);
+            expect(prefs.intervaloKmVencido).toBe(250);
+            expect(prefs.umbralDiasProximo).toBe(30);
+            expect(prefs.intervaloDiasVencido).toBe(15);
+        }
+    });
+
+    it('CRITICO: canal "ninguno" se respeta para silenciar avisos', () => {
+        expect(resolverPreferenciasAvisos({ canal: 'ninguno' }).canal).toBe('ninguno');
+    });
+
+    it('cualquier otro valor de canal cae a "whatsapp" (no se inventan canales)', () => {
+        expect(resolverPreferenciasAvisos({ canal: 'email' }).canal).toBe('whatsapp');
+    });
+
+    it('umbrales personalizados validos se aceptan y se ordenan de mayor a menor', () => {
+        const prefs = resolverPreferenciasAvisos({ umbralesKmProximo: [200, 500] });
+        expect(prefs.umbralesKmProximo).toEqual([500, 200]);
+    });
+
+    it('umbrales invalidos (negativos, no numericos, vacios) se descartan y caen al default', () => {
+        expect(resolverPreferenciasAvisos({ umbralesKmProximo: [-10, 'x', 0] }).umbralesKmProximo).toEqual([1000, 500, 250]);
+        expect(resolverPreferenciasAvisos({ umbralesKmProximo: [] }).umbralesKmProximo).toEqual([1000, 500, 250]);
+    });
+
+    it('CRITICO: valores fuera de rango o no enteros para los intervalos/umbral de dias caen al default (sin lanzar)', () => {
+        expect(resolverPreferenciasAvisos({ intervaloKmVencido: -5 }).intervaloKmVencido).toBe(250);
+        expect(resolverPreferenciasAvisos({ intervaloKmVencido: 12.5 }).intervaloKmVencido).toBe(250);
+        expect(resolverPreferenciasAvisos({ umbralDiasProximo: 99999 }).umbralDiasProximo).toBe(30);
+        expect(resolverPreferenciasAvisos({ intervaloDiasVencido: 'sabotaje' }).intervaloDiasVencido).toBe(15);
+    });
+
+    it('valores validos dentro de rango se respetan tal cual', () => {
+        const prefs = resolverPreferenciasAvisos({ intervaloKmVencido: 500, umbralDiasProximo: 45, intervaloDiasVencido: 7 });
+        expect(prefs.intervaloKmVencido).toBe(500);
+        expect(prefs.umbralDiasProximo).toBe(45);
+        expect(prefs.intervaloDiasVencido).toBe(7);
     });
 });

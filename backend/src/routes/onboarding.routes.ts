@@ -11,6 +11,7 @@ import { prisma } from '../lib/prisma';
 import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
 import { requireAuth, requireRol, AuthRequest } from '../middleware/auth.middleware';
 import { sumarMeses } from '../lib/fechas';
+import { resolverPreferenciasAvisos } from '../services/mantenimientoAlertas.service';
 
 const router = Router();
 
@@ -156,11 +157,18 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
             }
 
             // 2. Crear Cliente (DT-005: tenant key de PilotOS)
+            // M8 (2026-07-24): preferencias_avisos se valida con
+            // resolverPreferenciasAvisos antes de guardar, para que lo que
+            // quede en BD siempre tenga la forma esperada por el scheduler
+            // (nunca el JSON crudo sin validar que mande el cliente).
             const cliente = await tx.cliente.create({
                 data: {
                     patron_id: patronUser.id,
                     nombre_comercial: onboarding.nombre_comercial,
                     tipo_actividad: onboarding.tipo_actividad || 'TAXI',
+                    ...(onboarding.preferencias_avisos
+                        ? { preferencias_avisos: resolverPreferenciasAvisos(onboarding.preferencias_avisos) as any }
+                        : {}),
                 },
             });
 

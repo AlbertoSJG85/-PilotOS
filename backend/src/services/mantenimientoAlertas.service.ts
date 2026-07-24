@@ -12,47 +12,117 @@
  * Este modulo expone funciones PURAS de calculo de nivel (testeables sin BD)
  * y una funcion de orquestacion que lee vehiculos/mantenimientos, decide si
  * hay que avisar, y llama a notificacion.service.ts para el envio real.
+ *
+ * M8 (2026-07-24): las preferencias de aviso ahora se leen de verdad desde
+ * Cliente.preferencias_avisos (ver resolverPreferenciasAvisos). Antes ese
+ * campo solo existia, sin forma definida, en Onboarding, y ningun sitio del
+ * codigo lo leia ni lo escribia.
  */
 import { PrismaClient } from '@prisma/client';
 import { enviarAvisoGloria } from './notificacion.service';
 
-// ── Escalones ────────────────────────────────────────────────────────────
+// ── Escalones por defecto ───────────────────────────────────────────────
 // Km: 1000/500/250 antes de vencer (explicitos en el informe), y cada 250km
-// de mas una vez vencido.
-const UMBRALES_KM_PROXIMO = [1000, 500, 250];
-const INTERVALO_KM_VENCIDO = 250;
+// de mas una vez vencido. Dias: 30 antes de vencer (el unico umbral
+// explicito del informe para fechas); el intervalo de recordatorio tras
+// vencer (15 dias) es un valor por defecto razonable. Ambos son ahora
+// sobreescribibles por cliente via preferencias_avisos.
+const UMBRALES_KM_PROXIMO_DEFAULT = [1000, 500, 250];
+const INTERVALO_KM_VENCIDO_DEFAULT = 250;
+const UMBRAL_DIAS_PROXIMO_DEFAULT = 30;
+const INTERVALO_DIAS_VENCIDO_DEFAULT = 15;
 
-// Dias: 30 antes de vencer (el unico umbral explicito en el informe para
-// fechas). El intervalo de recordatorio tras vencer (15 dias) es un valor
-// por defecto razonable, PENDIENTE de que Alberto confirme la cadencia
-// exacta que quiere para vencimientos por fecha (ITV, seguro...).
-const UMBRAL_DIAS_PROXIMO = 30;
-const INTERVALO_DIAS_VENCIDO = 15;
+export interface PreferenciasAvisos {
+    /** 'ninguno' silencia el envio real pero sigue actualizando estado/dedupe internamente. */
+    canal: 'whatsapp' | 'ninguno';
+    /** Milestones descendentes, p.ej. [1000, 500, 250]. El primero es el umbral "aviso lejano". */
+    umbralesKmProximo: number[];
+    intervaloKmVencido: number;
+    umbralDiasProximo: number;
+    intervaloDiasVencido: number;
+}
+
+const DEFAULT_PREFERENCIAS: PreferenciasAvisos = {
+    canal: 'whatsapp',
+    umbralesKmProximo: UMBRALES_KM_PROXIMO_DEFAULT,
+    intervaloKmVencido: INTERVALO_KM_VENCIDO_DEFAULT,
+    umbralDiasProximo: UMBRAL_DIAS_PROXIMO_DEFAULT,
+    intervaloDiasVencido: INTERVALO_DIAS_VENCIDO_DEFAULT,
+};
+
+function clampEntero(valor: unknown, min: number, max: number, fallback: number): number {
+    const n = Number(valor);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < min || n > max) return fallback;
+    return n;
+}
+
+/**
+ * Convierte el Json crudo de Cliente.preferencias_avisos en preferencias
+ * validas, con valores por defecto para cualquier campo ausente o
+ * invalido. Nunca lanza: un JSON corrupto o con tipos raros simplemente
+ * cae a los valores por defecto (los mismos que se usaban antes de M8).
+ */
+export function resolverPreferenciasAvisos(raw: unknown): PreferenciasAvisos {
+    if (!raw || typeof raw !== 'object') return DEFAULT_PREFERENCIAS;
+    const r = raw as Record<string, unknown>;
+
+    const canal: PreferenciasAvisos['canal'] = r.canal === 'ninguno' ? 'ninguno' : 'whatsapp';
+
+    let umbralesKmProximo = DEFAULT_PREFERENCIAS.umbralesKmProximo;
+    if (Array.isArray(r.umbralesKmProximo) && r.umbralesKmProximo.length > 0) {
+        const limpio = r.umbralesKmProximo
+            .map((v) => Number(v))
+            .filter((n) => Number.isFinite(n) && Number.isInteger(n) && n > 0)
+            .sort((a, b) => b - a);
+        if (limpio.length > 0) umbralesKmProximo = limpio;
+    }
+
+    return {
+        canal,
+        umbralesKmProximo,
+        intervaloKmVencido: clampEntero(r.intervaloKmVencido, 1, 100000, DEFAULT_PREFERENCIAS.intervaloKmVencido),
+        umbralDiasProximo: clampEntero(r.umbralDiasProximo, 1, 3650, DEFAULT_PREFERENCIAS.umbralDiasProximo),
+        intervaloDiasVencido: clampEntero(r.intervaloDiasVencido, 1, 3650, DEFAULT_PREFERENCIAS.intervaloDiasVencido),
+    };
+}
 
 /**
  * Nivel de urgencia por kilometraje. deltaKm = proximo_km - km_actuales
  * (positivo = km que faltan; 0 o negativo = km de exceso sobre el vencimiento).
  * Nivel mas alto = menos urgente; null = todavia no hay que avisar.
- * Los niveles de "vencido" son 0, -250, -500... (multiplos de 250, nunca
- * positivos), por lo que siempre comparan como "mas urgentes" que 250.
+ * Los niveles de "vencido" son 0, -250, -500... (multiplos del intervalo,
+ * nunca positivos), por lo que siempre comparan como "mas urgentes" que
+ * cualquier milestone positivo.
  */
-export function calcularNivelKm(deltaKm: number): number | null {
-    const [primero, segundo, tercero] = UMBRALES_KM_PROXIMO; // 1000, 500, 250
-    if (deltaKm > primero) return null;
-    if (deltaKm > segundo) return primero;
-    if (deltaKm > tercero) return segundo;
-    if (deltaKm > 0) return tercero;
-    // Vencido: bucket de INTERVALO_KM_VENCIDO en INTERVALO_KM_VENCIDO (0, -250, -500...)
+export function calcularNivelKm(
+    deltaKm: number,
+    opts: { umbralesProximo?: number[]; intervaloVencido?: number } = {},
+): number | null {
+    const umbrales = opts.umbralesProximo ?? UMBRALES_KM_PROXIMO_DEFAULT;
+    const intervalo = opts.intervaloVencido ?? INTERVALO_KM_VENCIDO_DEFAULT;
+
+    if (deltaKm > umbrales[0]) return null;
+    for (let i = 0; i < umbrales.length; i++) {
+        const siguienteMenor = umbrales[i + 1] ?? 0;
+        if (deltaKm > siguienteMenor) return umbrales[i];
+    }
+    // Vencido: bucket de `intervalo` en `intervalo` (0, -intervalo, -2*intervalo...)
     // "|| 0" normaliza -0 a 0 (-0 es falsy en JS): mismo valor numerico, pero
     // evita que un mensaje o comparacion muestre "-0" de forma confusa.
-    return (-Math.floor(-deltaKm / INTERVALO_KM_VENCIDO) * INTERVALO_KM_VENCIDO) || 0;
+    return (-Math.floor(-deltaKm / intervalo) * intervalo) || 0;
 }
 
-/** Igual que calcularNivelKm pero para dias restantes hasta la fecha de vencimiento. */
-export function calcularNivelDias(deltaDias: number): number | null {
-    if (deltaDias > UMBRAL_DIAS_PROXIMO) return null;
-    if (deltaDias > 0) return UMBRAL_DIAS_PROXIMO;
-    return (-Math.floor(-deltaDias / INTERVALO_DIAS_VENCIDO) * INTERVALO_DIAS_VENCIDO) || 0;
+/** Igual que calcularNivelKm pero para dias restantes hasta la fecha de vencimiento (un solo milestone "proximo"). */
+export function calcularNivelDias(
+    deltaDias: number,
+    opts: { umbralProximo?: number; intervaloVencido?: number } = {},
+): number | null {
+    const umbral = opts.umbralProximo ?? UMBRAL_DIAS_PROXIMO_DEFAULT;
+    const intervalo = opts.intervaloVencido ?? INTERVALO_DIAS_VENCIDO_DEFAULT;
+
+    if (deltaDias > umbral) return null;
+    if (deltaDias > 0) return umbral;
+    return (-Math.floor(-deltaDias / intervalo) * intervalo) || 0;
 }
 
 /** true si un nivel recien calculado es mas urgente que el ultimo notificado (o si nunca se notifico). */
@@ -67,6 +137,7 @@ interface ProcesarResultado {
     avisosCreados: number;
     avisosEnviados: number;
     avisosFallidos: number;
+    avisosSilenciados: number;
 }
 
 /**
@@ -76,12 +147,15 @@ interface ProcesarResultado {
  *      leidos) — si otra instancia del backend ya proceso este mismo
  *      mantenimiento en paralelo, el update afecta 0 filas y se salta sin
  *      duplicar el aviso. Sustituye a un lock distribuido explicito (M7).
- *   2. Crea un registro Aviso (trazabilidad, M12).
- *   3. Intenta el envio real via GlorIA y actualiza el Aviso con el resultado.
+ *   2. Si el cliente no ha silenciado los avisos (canal !== 'ninguno'),
+ *      crea un registro Aviso (trazabilidad, M12) e intenta el envio real
+ *      via GlorIA. Si esta silenciado, el nivel se registra igualmente
+ *      (para no acumular una avalancha de avisos atrasados si el cliente
+ *      reactiva el canal despues) pero no se crea Aviso ni se envia nada.
  */
 export async function procesarMantenimientos(prisma: PrismaClient): Promise<ProcesarResultado> {
     const ahora = new Date();
-    const resultado: ProcesarResultado = { evaluados: 0, avisosCreados: 0, avisosEnviados: 0, avisosFallidos: 0 };
+    const resultado: ProcesarResultado = { evaluados: 0, avisosCreados: 0, avisosEnviados: 0, avisosFallidos: 0, avisosSilenciados: 0 };
 
     const vehiculos = await prisma.vehiculo.findMany({
         where: { activo: true },
@@ -98,6 +172,8 @@ export async function procesarMantenimientos(prisma: PrismaClient): Promise<Proc
         const patron = vehiculo.cliente?.patron;
         if (!patron?.telefono) continue;
 
+        const prefs = resolverPreferenciasAvisos(vehiculo.cliente?.preferencias_avisos);
+
         for (const mant of vehiculo.mantenimientos) {
             resultado.evaluados++;
 
@@ -109,8 +185,12 @@ export async function procesarMantenimientos(prisma: PrismaClient): Promise<Proc
             const vencido = (deltaKm !== null && deltaKm <= 0) || (deltaDias !== null && deltaDias <= 0);
             const nuevoEstado = vencido ? 'VENCIDO' : mant.estado;
 
-            const nivelKm = deltaKm !== null ? calcularNivelKm(deltaKm) : null;
-            const nivelDias = deltaDias !== null ? calcularNivelDias(deltaDias) : null;
+            const nivelKm = deltaKm !== null
+                ? calcularNivelKm(deltaKm, { umbralesProximo: prefs.umbralesKmProximo, intervaloVencido: prefs.intervaloKmVencido })
+                : null;
+            const nivelDias = deltaDias !== null
+                ? calcularNivelDias(deltaDias, { umbralProximo: prefs.umbralDiasProximo, intervaloVencido: prefs.intervaloDiasVencido })
+                : null;
 
             const avisarKm = esMasUrgente(nivelKm, mant.ultimo_nivel_aviso_km);
             const avisarDias = esMasUrgente(nivelDias, mant.ultimo_nivel_aviso_dias);
@@ -137,6 +217,14 @@ export async function procesarMantenimientos(prisma: PrismaClient): Promise<Proc
             if (reserva.count === 0) continue; // otra instancia ya lo proceso
 
             if (!avisarKm && !avisarDias) continue; // solo cambio de estado, sin aviso nuevo
+
+            if (prefs.canal === 'ninguno') {
+                // El cliente ha silenciado los avisos: el nivel ya quedo
+                // reservado arriba (para no acumular escalones perdidos si
+                // reactiva el canal), pero no se crea Aviso ni se envia nada.
+                resultado.avisosSilenciados++;
+                continue;
+            }
 
             const motivoKm = avisarKm
                 ? (nivelKm! > 0 ? `Quedan ${nivelKm} km o menos` : `Vencido por km (exceso ≥ ${-nivelKm!} km)`)

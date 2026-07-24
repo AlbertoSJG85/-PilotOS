@@ -29,7 +29,7 @@ async function verificarMantenimientos(): Promise<void> {
         const resultado = await procesarMantenimientos(prisma);
         console.log(
             `⏰ [Scheduler] Verificacion completada. ${resultado.evaluados} evaluados, ` +
-            `${resultado.avisosCreados} avisos creados (${resultado.avisosEnviados} enviados, ${resultado.avisosFallidos} fallidos).`
+            `${resultado.avisosCreados} avisos creados (${resultado.avisosEnviados} enviados, ${resultado.avisosFallidos} fallidos, ${resultado.avisosSilenciados} silenciados por preferencias).`
         );
     } catch (error) {
         console.error('❌ [Scheduler] Error verificando mantenimientos:', error);

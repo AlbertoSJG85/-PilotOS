@@ -63,6 +63,11 @@ model Cliente {
   nombre_comercial       String?
   tipo_actividad         String                   @default("TAXI")
   activo                 Boolean                  @default(true)
+  // M8 (auditoria seguridad 2026-07-24): preferencias de aviso de mantenimiento
+  // por cliente. Antes existia un campo homonimo en Onboarding sin forma
+  // definida ni consumidor; ver services/mantenimientoAlertas.service.ts
+  // (resolverPreferenciasAvisos) para el esquema y los valores por defecto.
+  preferencias_avisos    Json?
   created_at             DateTime                 @default(now())
   updated_at             DateTime                 @updatedAt
   cierresPeriodo         CierrePeriodo[]
