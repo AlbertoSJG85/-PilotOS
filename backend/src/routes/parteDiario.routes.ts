@@ -15,12 +15,55 @@
  *   - POST /api/partes sin flag → directo a ENVIADO (compat con frontend antiguo)
  */
 import { Router, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 import { crearOActualizarCalculo } from '../services/calculo.service';
 import { compararDocumentosConParte } from '../services/ocrComparacion.service';
 
 const router = Router();
+
+/**
+ * Actualiza vehiculo.km_actuales SOLO si el km_fin del parte es mayor que el
+ * km oficial actual. Fase 5 (2026-07-24): antes se sobrescribia siempre con
+ * `km_actuales: data.km_fin`, sin comparar. Si hoy se registraba un parte
+ * ATRASADO (de una fecha anterior, con km inferiores a los ya registrados
+ * despues), el kilometraje oficial del vehiculo RETROCEDIA — lo que rompe
+ * los avisos de mantenimiento por km y cualquier calculo que dependa de un
+ * contador siempre creciente.
+ *
+ * Si el km del parte es menor o igual al oficial, no se toca km_actuales y
+ * se registra una Anomalia (R-AN-001: se acumulan, nunca se resetean) para
+ * que el patron pueda revisar el caso — puede ser un parte atrasado legitimo
+ * o un error de tecleo.
+ */
+export async function actualizarKmSiAvanza(
+    tx: Prisma.TransactionClient,
+    vehiculo_id: string,
+    km_fin: number,
+    parte_diario_id: string,
+    conductor_id: string,
+): Promise<void> {
+    const vehiculo = await tx.vehiculo.findUnique({ where: { id: vehiculo_id }, select: { km_actuales: true } });
+    if (!vehiculo) return;
+
+    if (km_fin > vehiculo.km_actuales) {
+        await tx.vehiculo.update({ where: { id: vehiculo_id }, data: { km_actuales: km_fin } });
+        return;
+    }
+
+    if (km_fin < vehiculo.km_actuales) {
+        await tx.anomalia.create({
+            data: {
+                conductor_id,
+                parte_diario_id,
+                tipo: 'KM_RETROCESO',
+                descripcion: `Parte ${parte_diario_id} registra km_fin=${km_fin}, inferior al km oficial actual del vehiculo (${vehiculo.km_actuales}). No se ha actualizado el kilometraje maestro.`,
+            },
+        });
+    }
+    // km_fin === km_actuales: sin cambio, sin anomalia (parte del mismo punto exacto).
+}
 
 interface ParteDiarioInput {
     fecha_trabajada: string;
@@ -166,7 +209,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                     estado: estadoFinal,
                 },
             });
-            await tx.vehiculo.update({ where: { id: data.vehiculo_id }, data: { km_actuales: data.km_fin } });
+            await actualizarKmSiAvanza(tx, data.vehiculo_id, data.km_fin, parte.id, data.conductor_id);
             await tx.ledgerEvento.create({
                 data: {
                     tipo_evento: 'PARTE_ENVIADO',
@@ -201,7 +244,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
 
 async function actualizarKmYLedger(parteId: string, data: ParteDiarioInput, cliente_id?: string) {
     await prisma.$transaction(async (tx) => {
-        await tx.vehiculo.update({ where: { id: data.vehiculo_id }, data: { km_actuales: data.km_fin } });
+        await actualizarKmSiAvanza(tx, data.vehiculo_id, data.km_fin, parteId, data.conductor_id);
         await tx.ledgerEvento.create({
             data: {
                 tipo_evento: 'PARTE_ENVIADO',
@@ -299,7 +342,7 @@ router.patch('/:id/confirmar', requireAuth, async (req: AuthRequest, res: Respon
                 where: { id: parte.id },
                 data: { estado: 'ENVIADO' },
             });
-            await tx.vehiculo.update({ where: { id: p.vehiculo_id }, data: { km_actuales: p.km_fin } });
+            await actualizarKmSiAvanza(tx, p.vehiculo_id, p.km_fin, p.id, p.conductor_id);
             await tx.ledgerEvento.create({
                 data: {
                     tipo_evento: 'PARTE_ENVIADO',
