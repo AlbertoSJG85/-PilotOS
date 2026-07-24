@@ -189,10 +189,18 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
-// Protectores globales (R-SY-001: El backend nunca debe caer)
+// Protectores globales (R-SY-001: El backend nunca debe caer).
+// 2026-07-25: antes NO se salia del proceso tras una excepcion no capturada,
+// para "mantener el servicio activo". Verificado en el contenedor real de
+// produccion: RestartPolicy=unless-stopped — Docker/Coolify reinicia el
+// proceso automaticamente si termina, en segundos. Mantener vivo un proceso
+// con estado potencialmente corrupto (conexiones a medio abrir, listeners
+// duplicados, memoria en estado desconocido) es mas peligroso que dejar que
+// el orquestador lo reinicie limpio. Esto SIGUE cumpliendo R-SY-001 en su
+// intencion (el servicio no queda caido) sin arrastrar estado corrupto.
 process.on('uncaughtException', (err) => {
     console.error('[FATAL] Uncaught Exception:', err.message, err.stack);
-    // No salimos del proceso para mantener el servicio activo en Coolify
+    process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {

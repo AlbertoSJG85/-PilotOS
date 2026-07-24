@@ -379,3 +379,21 @@ Tres ajustes funcionales + una incidencia de despliegue documentada al final.
 - Causa: Coolify tiene servicios separados para backend y frontend de PilotOS. El webhook GitHub solo disparó rebuild de uno (o el del frontend tardó/falló silenciosamente).
 - Solucion: Redeploy manual del servicio frontend en Coolify. Tras eso, los chunks JS cambiaron de hash y las strings nuevas (`tiene_asalariados`, `efectivo_estimado`, `Desglose`, etc.) aparecieron.
 - Prevencion: Tras un deploy a `main`, **verificar visualmente AMBOS servicios** (backend y frontend) en Coolify. Si Coolify no dispara rebuild de uno en ~3 minutos, redeploy manual. Para diagnosticar rápido: `curl -sI https://pilotos.nexostudios.digital/ | grep Etag` antes y después del push — si el ETag no cambia, no hay rebuild.
+
+## 2026-07-25 · Auditoria de seguridad, cierre de pendientes
+
+### C-035 · uncaughtException mantenia el proceso vivo "a ciegas" (R-SY-001 sin verificar)
+- Area: Backend `index.ts`
+- Problema: El handler de `process.on('uncaughtException', ...)` solo logueaba y NO salia del proceso, con el comentario "R-SY-001: El backend nunca debe caer". Decision tomada sin verificar si el orquestador (Coolify/Docker) reinicia el contenedor si el proceso muere — mantener vivo un proceso tras una excepcion no capturada arrastra estado potencialmente corrupto (conexiones a medio abrir, listeners duplicados).
+- Diagnostico: Con acceso SSH real al servidor de Coolify, `docker inspect` sobre el contenedor de PilotOS backend en produccion confirmo `RestartPolicy: unless-stopped`. Docker reinicia automaticamente el proceso si termina, en segundos.
+- Causa: La regla R-SY-001 se aplico literalmente ("nunca caer" = "nunca salir del proceso") sin comprobar que el objetivo real (disponibilidad del servicio) ya estaba cubierto por la politica de reinicio del orquestador.
+- Solucion: `process.on('uncaughtException')` ahora loguea y hace `process.exit(1)`. Verificado con un script aislado (proceso hijo) que confirma exit code 1. R-SY-001 se sigue cumpliendo en su intencion: el servicio no queda caido, solo se reinicia limpio en vez de seguir corriendo con estado desconocido.
+- Prevencion: Antes de descartar una recomendacion de "mejores practicas" (aqui: salir del proceso tras uncaughtException) por contradecir una regla de negocio documentada, comprobar si la regla y la practica realmente entran en conflicto en producción, no solo en el codigo. Aqui no entraban en conflicto: la regla hablaba de disponibilidad, la practica de limpieza de estado; el orquestador ya resolvia la disponibilidad.
+
+### C-036 · GlorIA (y NexOS Pay) con fqdn `http://` en Coolify — sin router HTTPS
+- Area: Infraestructura / Coolify
+- Problema: `https://iswss8gk8kwckwgwo4wkc0k0.161.97.108.106.sslip.io` (URL publica de GlorIA) devolvia 503 "no available server". Bloqueaba la integracion PilotOS→GlorIA (avisos de mantenimiento) por HTTPS.
+- Diagnostico: Consultando `applications.fqdn` en la BD de Coolify (`coolify-db`), GlorIA (id=3) y Nexos_Pay (id=9) son las UNICAS 2 apps de 11 con `fqdn` guardado como `http://` en vez de `https://` — comparacion directa con las otras 9, todas `https://`. Corregido el campo (`https://...`) y redeployado GlorIA: la app sigue sirviendo solo por HTTP, Traefik no genera el router HTTPS. Rastreado hasta `fqdnLabelsForTraefik()` en el codigo de Coolify (bootstrap/helpers/shared.php), que depende de una ruta de generacion de labels distinta para recursos con `com.docker.compose.*` (como GlorIA) — no resuelto, requeria seguir modificando logica interna de Coolify en produccion sin garantia de no romper otras apps.
+- Causa: Configuracion original de GlorIA (y separadamente NexOS Pay) con el scheme equivocado en el campo `fqdn`, probablemente desde su alta inicial en Coolify.
+- Solucion aplicada: `GLORIA_API_URL` en PilotOS usa `http://` (funciona, verificado extremo a extremo con redeploy y healthcheck). El `fqdn` de GlorIA quedo corregido en BD aunque el router HTTPS no se genera todavia.
+- Prevencion / pendiente: Revisar en el panel de Coolify (no via SSH) la configuracion de dominio de GlorIA y NexOS Pay — puede que "Regenerar SSL" desde la UI resuelva lo que la regeneracion automatica de labels no hizo. No es bloqueante para PilotOS mientras siga usando `http://` internamente.
