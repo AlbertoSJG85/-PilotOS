@@ -2,8 +2,12 @@
 /**
  * apply-pending-sql.js
  *
+ * DEPRECADO (2026-07-25): `npm run db:deploy` ya NO llama a este script —
+ * usa `prisma migrate deploy` (migraciones versionadas en prisma/migrations/).
+ * Se conserva por si hiciera falta aplicar SQL suelto manualmente alguna vez,
+ * pero no forma parte del pipeline de deploy automatico.
+ *
  * Aplica prisma/migrations_pendientes.sql si existe.
- * Ejecutado automáticamente en cada deploy via `npm run start:prod`.
  *
  * Comportamiento:
  *   - Si el archivo no existe → continúa silenciosamente (exit 0).

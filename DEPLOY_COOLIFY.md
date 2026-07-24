@@ -64,26 +64,29 @@ Sin este volumen, las fotos se pierden al reiniciar el contenedor.
 
 ## 4. Migraciones de BD (automáticas en cada deploy)
 
-El backend aplica `prisma/migrations_pendientes.sql` automáticamente al arrancar en producción.
+**Actualizado 2026-07-25:** el backend ya no usa `migrations_pendientes.sql`
+(archivo deprecado, contenido histórico conservado en
+`backend/prisma/_historico/`). Ahora usa **migraciones versionadas de
+Prisma** (`prisma/migrations/`), con un baseline (`0_baseline`) generado por
+introspección de la BD real de producción y marcado como ya aplicado.
 
 **No hay que hacer nada manual.** Al hacer deploy del backend en Coolify:
 
 1. El contenedor arranca con `npm run start:prod`.
-2. `start:prod` ejecuta `db:deploy` antes de iniciar el servidor.
-3. `db:deploy` comprueba si existe `prisma/migrations_pendientes.sql`:
-   - Si existe → lo aplica con `prisma db execute` y loguea el resultado.
-   - Si no existe → continúa sin hacer nada.
-4. Si la migración falla → el deploy falla con error claro. El servidor no arranca.
-
-**El SQL en `migrations_pendientes.sql` debe ser siempre idempotente:**
-- Usar `ADD COLUMN IF NOT EXISTS`
-- Usar `CREATE INDEX IF NOT EXISTS`
-- Nunca incluir DROP, DELETE o ALTER destructivos sin avisar
+2. `start:prod` ejecuta `db:deploy` (= `prisma migrate deploy`) antes de
+   iniciar el servidor.
+3. `prisma migrate deploy` aplica solo las migraciones de
+   `prisma/migrations/` que todavía no estén registradas en la tabla
+   `pilotos._prisma_migrations` — idempotente por diseño, con historial
+   verificable (qué se aplicó y cuándo).
+4. Si una migración falla → el deploy falla con error claro. El servidor no arranca.
 
 **Para añadir una migración futura:**
-1. Añadir el SQL a `backend/prisma/migrations_pendientes.sql`.
-2. Hacer commit y push a main.
-3. Coolify despliega automáticamente → el SQL se aplica solo.
+1. Editar `backend/prisma/schema.prisma`.
+2. En local: `npx prisma migrate dev --name <descripcion>` — genera una
+   carpeta nueva en `prisma/migrations/` y la aplica a tu BD local/dev.
+3. Commitear la carpeta de migración generada junto al cambio de schema.
+4. Push a main → Coolify despliega → `prisma migrate deploy` la aplica sola.
 
 ---
 
