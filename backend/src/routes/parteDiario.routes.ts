@@ -377,7 +377,14 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
         const { vehiculo_id, conductor_id, desde, hasta, incluir_borrador } = req.query;
         const where: any = {};
 
-        if (req.usuario?.cliente_id) {
+        // Fase 2 (seguridad): deny-by-default. Antes, un usuario sin cliente_id
+        // (minos user sin contexto PilotOS) no recibia filtro alguno y veia
+        // partes de TODOS los clientes.
+        if (req.usuario?.role !== 'admin') {
+            if (!req.usuario?.cliente_id) {
+                res.status(403).json({ status: 'FAIL', error: 'no_client_context' });
+                return;
+            }
             where.vehiculo = { cliente_id: req.usuario.cliente_id };
         }
         if (vehiculo_id) where.vehiculo_id = vehiculo_id;
@@ -426,8 +433,12 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
         if (!parte) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }
 
         // Tenancy: admin can see all; others must belong to the same cliente.
-        if (req.usuario?.role !== 'admin' && req.usuario?.cliente_id) {
-            if (parte.vehiculo?.cliente_id !== req.usuario.cliente_id) {
+        // Fase 2 (seguridad): la guarda original solo comprobaba la tenencia
+        // cuando el usuario SI tenia cliente_id; si no lo tenia, el chequeo se
+        // saltaba por completo y cualquier parte era visible (IDOR). Ahora, sin
+        // cliente_id y sin ser admin, se deniega directamente.
+        if (req.usuario?.role !== 'admin') {
+            if (!req.usuario?.cliente_id || parte.vehiculo?.cliente_id !== req.usuario.cliente_id) {
                 res.status(403).json({ status: 'FAIL', error: 'forbidden' });
                 return;
             }

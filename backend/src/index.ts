@@ -88,7 +88,34 @@ app.use('/api/onboarding', onboardingRoutes);
 // Uploads
 app.use('/api/upload', uploadRoutes);
 const uploadsDir = path.join(process.cwd(), 'uploads');
-app.use('/uploads', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+
+/**
+ * Fase 2 (seguridad, 2026-07-24): resuelve el cliente_id propietario de un
+ * fichero de /uploads a partir de su nombre, siguiendo Documento -> enlace ->
+ * ParteDiario -> vehiculo. Antes de esta fase, /uploads solo comprobaba que
+ * el JWT fuera valido: cualquier usuario autenticado de CUALQUIER cliente
+ * podia leer fotos/tickets de otro cliente si conocia (o adivinaba) el
+ * nombre del fichero.
+ */
+async function resolverClienteIdDeArchivo(filename: string): Promise<string | null> {
+    if (!filename) return null;
+    const documento = await prisma.documento.findFirst({
+        where: { url: { endsWith: filename } },
+        include: {
+            enlaces: {
+                include: { parteDiario: { include: { vehiculo: { select: { cliente_id: true } } } } },
+            },
+        },
+    });
+    if (!documento) return null;
+    for (const enlace of documento.enlaces) {
+        const clienteId = enlace.parteDiario?.vehiculo?.cliente_id;
+        if (clienteId) return clienteId;
+    }
+    return null;
+}
+
+app.use('/uploads', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const cookieHeader = req.headers.cookie || '';
     const tokenFromCookie = cookieHeader.split(';')
         .map((c) => c.trim())
@@ -98,11 +125,33 @@ app.use('/uploads', (req: express.Request, res: express.Response, next: express.
     const tokenFromBearer = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : undefined;
     const token = tokenFromBearer || tokenFromCookie;
     if (!token) { res.status(401).json({ error: 'auth_required' }); return; }
+
+    let decoded: { role?: string; cliente_id?: string | null };
     try {
-        jwt.verify(token, process.env.JWT_SECRET!);
-        next();
+        decoded = jwt.verify(token, process.env.JWT_SECRET!) as typeof decoded;
     } catch {
         res.status(401).json({ error: 'invalid_token' });
+        return;
+    }
+
+    if (decoded.role === 'admin') { next(); return; }
+
+    if (!decoded.cliente_id) {
+        res.status(403).json({ error: 'forbidden' });
+        return;
+    }
+
+    try {
+        const filename = decodeURIComponent(req.path).replace(/^\/+/, '').split('/').pop() || '';
+        const clienteIdArchivo = await resolverClienteIdDeArchivo(filename);
+        if (!clienteIdArchivo || clienteIdArchivo !== decoded.cliente_id) {
+            res.status(403).json({ error: 'forbidden' });
+            return;
+        }
+        next();
+    } catch (err) {
+        console.error('[UPLOADS] Error verificando tenencia:', (err as Error).message);
+        res.status(500).json({ error: 'server_error' });
     }
 }, express.static(uploadsDir));
 

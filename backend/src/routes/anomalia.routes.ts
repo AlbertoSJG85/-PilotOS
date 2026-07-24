@@ -4,7 +4,7 @@
  */
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requireClienteContext, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 const UMBRAL_AVISO_PATRON = 3; // R-AN-003
@@ -61,12 +61,24 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
     }
 });
 
-router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
+router.get('/', requireAuth, requireClienteContext, async (req: AuthRequest, res: Response) => {
     try {
         const { conductor_id } = req.query;
+
+        // Fase 2 (seguridad): si se filtra por conductor_id, ese conductor debe
+        // pertenecer al mismo cliente que el usuario autenticado. Antes, pasar
+        // un conductor_id de OTRO cliente devolvia sus anomalias sin comprobar
+        // tenencia (bypass total del filtro por cliente_id).
+        if (conductor_id && req.usuario?.role !== 'admin') {
+            const conductorCheck = await prisma.conductor.findUnique({ where: { id: conductor_id as string }, select: { cliente_id: true } });
+            if (!conductorCheck || !isSameTenant(req, conductorCheck.cliente_id)) {
+                res.status(404).json({ status: 'FAIL', error: 'conductor_not_found' }); return;
+            }
+        }
+
         const where: any = {};
         if (conductor_id) where.conductor_id = conductor_id;
-        else if (req.usuario?.cliente_id) where.conductor = { cliente_id: req.usuario.cliente_id };
+        else if (req.usuario?.role !== 'admin') where.conductor = { cliente_id: req.usuario!.cliente_id };
 
         const anomalias = await prisma.anomalia.findMany({
             where,
@@ -79,6 +91,12 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
 
 router.get('/conductor/:conductorId/total', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
+        // Fase 2 (seguridad): antes no se comprobaba tenencia en absoluto.
+        const conductorCheck = await prisma.conductor.findUnique({ where: { id: req.params.conductorId }, select: { cliente_id: true } });
+        if (!conductorCheck || !isSameTenant(req, conductorCheck.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'conductor_not_found' }); return;
+        }
+
         const total = await prisma.anomalia.count({ where: { conductor_id: req.params.conductorId } });
         const proximoUmbral = Math.ceil((total + 1) / UMBRAL_AVISO_PATRON) * UMBRAL_AVISO_PATRON;
         res.json({ status: 'OK', conductor_id: req.params.conductorId, total_anomalias: total, proximo_umbral: proximoUmbral, faltan_para_aviso: proximoUmbral - total });

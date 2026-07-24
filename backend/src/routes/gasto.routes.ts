@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requireClienteContext, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -39,11 +39,11 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/gastos
-router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
+router.get('/', requireAuth, requireClienteContext, async (req: AuthRequest, res: Response) => {
     try {
         const { vehiculo_id, tipo, desde, hasta } = req.query;
         const where: any = {};
-        if (req.usuario?.cliente_id) where.cliente_id = req.usuario.cliente_id;
+        if (req.usuario?.role !== 'admin') where.cliente_id = req.usuario!.cliente_id;
         if (vehiculo_id) where.vehiculo_id = vehiculo_id;
         if (tipo) where.tipo = tipo;
         if (desde || hasta) {
@@ -63,10 +63,10 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/gastos/resumen
-router.get('/resumen', requireAuth, async (req: AuthRequest, res: Response) => {
+router.get('/resumen', requireAuth, requireClienteContext, async (req: AuthRequest, res: Response) => {
     try {
         const where: any = {};
-        if (req.usuario?.cliente_id) where.cliente_id = req.usuario.cliente_id;
+        if (req.usuario?.role !== 'admin') where.cliente_id = req.usuario!.cliente_id;
 
         const porTipo = await prisma.gasto.groupBy({ by: ['tipo'], _sum: { importe: true }, _count: { id: true }, where });
         const total = await prisma.gasto.aggregate({ _sum: { importe: true }, _count: { id: true }, where });
@@ -79,10 +79,10 @@ router.get('/resumen', requireAuth, async (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/gastos/fijos
-router.get('/fijos', requireAuth, async (req: AuthRequest, res: Response) => {
+router.get('/fijos', requireAuth, requireClienteContext, async (req: AuthRequest, res: Response) => {
     try {
         const where: any = { activo: true };
-        if (req.usuario?.cliente_id) where.cliente_id = req.usuario.cliente_id;
+        if (req.usuario?.role !== 'admin') where.cliente_id = req.usuario!.cliente_id;
         const gastosFijos = await prisma.gastoFijo.findMany({ where, include: { vehiculo: { select: { matricula: true } } } });
         res.json({ status: 'OK', data: gastosFijos });
     } catch (err: any) {

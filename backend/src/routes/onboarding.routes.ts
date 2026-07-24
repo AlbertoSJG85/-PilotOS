@@ -9,6 +9,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
+import { requireAuth, requireRol, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -339,8 +340,15 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
     }
 });
 
-// GET /api/onboarding/:telefono
-router.get('/:telefono', async (req: Request, res: Response) => {
+/**
+ * GET /api/onboarding/:telefono
+ *
+ * Fase 2 (seguridad, 2026-07-24): este endpoint era publico y devolvia email,
+ * NIF/CIF, nombre y matricula de CUALQUIER telefono sin autenticacion
+ * (enumeracion de PII). El frontend no lo consume en ningun flujo activo
+ * (import muerto en onboarding/page.tsx), asi que se restringe a admin.
+ */
+router.get('/:telefono', requireAuth, requireRol('admin'), async (req: AuthRequest, res: Response) => {
     try {
         const onboarding = await prisma.onboarding.findUnique({ where: { telefono: req.params.telefono } });
         if (!onboarding) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }

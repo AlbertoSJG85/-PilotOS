@@ -1,15 +1,15 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requireClienteContext, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
 
 const router = Router();
 
 // GET /api/usuarios — Listar conductores del cliente
-router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
+router.get('/', requireAuth, requireClienteContext, async (req: AuthRequest, res: Response) => {
     try {
         const where: any = { activo: true };
-        if (req.usuario?.cliente_id) where.cliente_id = req.usuario.cliente_id;
+        if (req.usuario?.role !== 'admin') where.cliente_id = req.usuario!.cliente_id;
 
         const conductores = await prisma.conductor.findMany({
             where,

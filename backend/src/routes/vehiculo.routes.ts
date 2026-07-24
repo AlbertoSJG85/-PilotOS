@@ -1,13 +1,13 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requireClienteContext, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 
-router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
+router.get('/', requireAuth, requireClienteContext, async (req: AuthRequest, res: Response) => {
     try {
         const where: any = { activo: true };
-        if (req.usuario?.cliente_id) where.cliente_id = req.usuario.cliente_id;
+        if (req.usuario?.role !== 'admin') where.cliente_id = req.usuario!.cliente_id;
 
         const vehiculos = await prisma.vehiculo.findMany({
             where,
@@ -86,6 +86,20 @@ router.post('/:id/conductores', requireAuth, async (req: AuthRequest, res: Respo
             res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
         }
         const { conductor_ids } = req.body;
+
+        // Fase 2 (seguridad): los conductor_ids deben pertenecer al mismo cliente
+        // que el vehiculo. Sin esta comprobacion, un patron podia enganchar
+        // conductores de OTRO cliente al asignar por id directamente.
+        if (conductor_ids && Array.isArray(conductor_ids) && conductor_ids.length > 0) {
+            const conductoresValidos = await prisma.conductor.findMany({
+                where: { id: { in: conductor_ids }, cliente_id: existing.cliente_id },
+                select: { id: true },
+            });
+            if (conductoresValidos.length !== conductor_ids.length) {
+                res.status(403).json({ status: 'FAIL', error: 'conductor_cross_tenant', message: 'Uno o mas conductores no pertenecen a tu cliente' });
+                return;
+            }
+        }
 
         // 1. Desactivar las asignaciones actuales de este vehículo
         await prisma.vehiculoConductor.updateMany({
