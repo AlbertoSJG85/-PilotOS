@@ -175,16 +175,21 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                     datos: { parte_id: parte.id, conductor_id: data.conductor_id, vehiculo_id: data.vehiculo_id },
                 },
             });
+
+            // Fase 4 (2026-07-24): el calculo de reparto se ejecuta DENTRO de
+            // la misma transaccion que crea el parte. Antes se llamaba fuera,
+            // envuelto en un try/catch que solo avisaba por consola: un parte
+            // podia quedar ENVIADO sin ningun CalculoParte asociado si fallaba
+            // (p.ej. sin ConfiguracionEconomica vigente), y dashboards/cierres
+            // lo trataban con el fallback "todo el bruto al patron". Ahora, si
+            // el calculo falla, el parte tampoco se crea: se rechaza la
+            // peticion con un error claro en vez de aceptar datos incompletos.
+            if (req.usuario?.cliente_id) {
+                await crearOActualizarCalculo({ parte_diario_id: parte.id, cliente_id: req.usuario.cliente_id }, tx);
+            }
+
             return parte;
         });
-
-        try {
-            if (req.usuario?.cliente_id) {
-                await crearOActualizarCalculo({ parte_diario_id: result.id, cliente_id: req.usuario.cliente_id });
-            }
-        } catch (calcErr: any) {
-            console.warn('[PARTES] Calculo de reparto fallido (no bloquea parte):', calcErr.message);
-        }
 
         res.status(201).json({ status: 'OK', data: result, evento: 'E-PD-001' });
     } catch (err: any) {
@@ -205,14 +210,12 @@ async function actualizarKmYLedger(parteId: string, data: ParteDiarioInput, clie
                 datos: { parte_id: parteId, conductor_id: data.conductor_id, vehiculo_id: data.vehiculo_id },
             },
         });
-    });
-    if (cliente_id) {
-        try {
-            await crearOActualizarCalculo({ parte_diario_id: parteId, cliente_id });
-        } catch (calcErr: any) {
-            console.warn('[PARTES] Calculo de reparto fallido (no bloquea parte):', calcErr.message);
+        // Fase 4 (2026-07-24): calculo dentro de la misma transaccion (ver
+        // comentario equivalente en POST / mas arriba).
+        if (cliente_id) {
+            await crearOActualizarCalculo({ parte_diario_id: parteId, cliente_id }, tx);
         }
-    }
+    });
 }
 
 // GET /api/partes/borrador/actual?vehiculo_id=&fecha=YYYY-MM-DD
@@ -284,7 +287,13 @@ router.patch('/:id/confirmar', requireAuth, async (req: AuthRequest, res: Respon
             }
         }
 
-        // Promover a ENVIADO + actualizar km + ledger
+        // Promover a ENVIADO + actualizar km + ledger + calculo (Fase 4,
+        // 2026-07-24: el calculo ya no se dispara en segundo plano tras la
+        // transaccion. Antes, si fallaba —p.ej. sin ConfiguracionEconomica—,
+        // el parte quedaba ENVIADO sin CalculoParte, y el warning solo se veia
+        // en logs; dashboards/cierres lo trataban con el fallback "todo el
+        // bruto al patron" sin que nadie se enterara. Ahora forma parte de la
+        // misma transaccion: si el calculo falla, la confirmacion tambien.
         const updated = await prisma.$transaction(async (tx) => {
             const p = await tx.parteDiario.update({
                 where: { id: parte.id },
@@ -299,14 +308,11 @@ router.patch('/:id/confirmar', requireAuth, async (req: AuthRequest, res: Respon
                     datos: { parte_id: p.id, conductor_id: p.conductor_id, vehiculo_id: p.vehiculo_id },
                 },
             });
+            if (req.usuario?.cliente_id) {
+                await crearOActualizarCalculo({ parte_diario_id: p.id, cliente_id: req.usuario.cliente_id }, tx);
+            }
             return p;
         });
-
-        // Post-procesamiento en segundo plano para evitar timeouts en el cliente
-        if (req.usuario?.cliente_id) {
-            crearOActualizarCalculo({ parte_diario_id: updated.id, cliente_id: req.usuario.cliente_id })
-                .catch(calcErr => console.warn('[PARTES] Calculo de reparto fallido (bg):', calcErr.message));
-        }
 
         // Comparación parte↔ticket: queremos sus resultados en la respuesta para
         // que el frontend pueda avisar al usuario tras confirmar. Es solo lectura

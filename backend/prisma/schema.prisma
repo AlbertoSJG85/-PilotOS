@@ -190,6 +190,7 @@ model CalculoParte {
   bruto_diario                  Decimal                @db.Decimal(10, 2)
   combustible                   Decimal                @default(0) @db.Decimal(10, 2)
   neto_diario                   Decimal                @db.Decimal(10, 2)
+  base_reparto                  Decimal                @default(0) @db.Decimal(10, 2)
   varios                        Decimal                @default(0) @db.Decimal(10, 2)
   parte_conductor               Decimal                @db.Decimal(10, 2)
   parte_patron                  Decimal                @db.Decimal(10, 2)
@@ -423,6 +424,9 @@ model CierrePeriodo {
   updated_at             DateTime @updatedAt
   cliente                Cliente  @relation(fields: [cliente_id], references: [id])
 
+  // Fase 4 (2026-07-24): antes no habia ninguna restriccion que impidiera
+  // generar dos cierres para el mismo cliente y el mismo rango de fechas.
+  @@unique([cliente_id, periodo_inicio, periodo_fin], map: "cierres_periodo_cliente_periodo_key")
   @@map("cierres_periodo")
   @@schema("pilotos")
 }
