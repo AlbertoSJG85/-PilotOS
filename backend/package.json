@@ -8,6 +8,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "start": "node dist/index.js",
     "db:deploy": "node scripts/apply-pending-sql.js",
     "start:prod": "npm run db:deploy && node dist/index.js",
