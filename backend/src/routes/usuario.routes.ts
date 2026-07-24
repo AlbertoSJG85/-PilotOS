@@ -1,14 +1,15 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requireClienteContext, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
 
 const router = Router();
 
 // GET /api/usuarios — Listar conductores del cliente
-router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
+router.get('/', requireAuth, requireClienteContext, async (req: AuthRequest, res: Response) => {
     try {
         const where: any = { activo: true };
-        if (req.usuario?.cliente_id) where.cliente_id = req.usuario.cliente_id;
+        if (req.usuario?.role !== 'admin') where.cliente_id = req.usuario!.cliente_id;
 
         const conductores = await prisma.conductor.findMany({
             where,
@@ -45,8 +46,8 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     }
 });
 
-// POST /api/usuarios — Crear conductor
-router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
+// POST /api/usuarios — Crear conductor (Fase 3 RBAC: solo el patron puede dar de alta conductores)
+router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         if (!req.usuario?.cliente_id) { res.status(400).json({ status: 'FAIL', error: 'no_client_context' }); return; }
         
@@ -65,7 +66,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                     nombre: nombre || 'Conductor',
                     telefono,
                     email: asalaEmail,
-                    password_hash: 'CONDUCTOR_NUEVO',
+                    password_hash: PLACEHOLDER_PASSWORD_HASHES[0], // 'CONDUCTOR_NUEVO'
                     role: 'user',
                     estado_pago: 'AL DIA',
                 },
@@ -111,8 +112,8 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
     }
 });
 
-// PATCH /api/usuarios/:id — Editar / Desactivar
-router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+// PATCH /api/usuarios/:id — Editar/Desactivar (Fase 3 RBAC: solo patron)
+router.patch('/:id', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         const existing = await prisma.conductor.findUnique({ where: { id: req.params.id }, select: { cliente_id: true } });
         if (!existing || !isSameTenant(req, existing.cliente_id)) {

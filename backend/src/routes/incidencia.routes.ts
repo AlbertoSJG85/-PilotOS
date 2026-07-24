@@ -7,7 +7,8 @@ import { requireAuth, requirePatron, isSameTenant, AuthRequest } from '../middle
 
 const router = Router();
 
-router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
+// Fase 3 RBAC: R-IN-002 dice "solo patron autoriza"; antes solo pedia requireAuth.
+router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         const { parte_diario_id, que_ocurrio, decision_tomada, justificacion } = req.body;
         if (!parte_diario_id || !que_ocurrio || !decision_tomada || !justificacion) {
@@ -15,8 +16,18 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
             return;
         }
 
-        const parte = await prisma.parteDiario.findUnique({ where: { id: parte_diario_id } });
+        const parte = await prisma.parteDiario.findUnique({
+            where: { id: parte_diario_id },
+            include: { vehiculo: { select: { cliente_id: true } } },
+        });
         if (!parte) { res.status(404).json({ status: 'FAIL', error: 'parte_not_found' }); return; }
+
+        // Fase 2 (seguridad): antes no se comprobaba que el parte perteneciera
+        // al cliente del usuario autenticado (cualquiera podia crear una
+        // incidencia sobre un parte de OTRO cliente).
+        if (!isSameTenant(req, parte.vehiculo?.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'parte_not_found' }); return;
+        }
 
         // Encontrar el conductor patron que autoriza
         if (!req.usuario?.conductor_id) {
@@ -48,6 +59,11 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
             where.autorizador_id = req.usuario.conductor_id;
         } else if (req.usuario?.conductor_id) {
             where.parteDiario = { conductor_id: req.usuario.conductor_id };
+        } else if (req.usuario?.role !== 'admin') {
+            // Fase 2 (seguridad): sin conductor_id y sin ser admin, antes esto
+            // devolvia TODAS las incidencias de TODOS los clientes.
+            res.status(403).json({ status: 'FAIL', error: 'no_conductor_context' });
+            return;
         }
 
         const incidencias = await prisma.incidencia.findMany({

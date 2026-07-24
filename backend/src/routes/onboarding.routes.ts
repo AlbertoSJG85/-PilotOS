@@ -8,6 +8,10 @@
  */
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
+import { requireAuth, requireRol, AuthRequest } from '../middleware/auth.middleware';
+import { sumarMeses } from '../lib/fechas';
+import { resolverPreferenciasAvisos } from '../services/mantenimientoAlertas.service';
 
 const router = Router();
 
@@ -145,7 +149,7 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
                         email,
                         nombre: onboarding.nombre_patron || 'Propietario',
                         telefono,
-                        password_hash: 'ONBOARDING_INITIAL_STEP',
+                        password_hash: PLACEHOLDER_PASSWORD_HASHES[1], // 'ONBOARDING_INITIAL_STEP'
                         role: 'user',
                         estado_pago: 'AL DIA',
                     },
@@ -153,11 +157,18 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
             }
 
             // 2. Crear Cliente (DT-005: tenant key de PilotOS)
+            // M8 (2026-07-24): preferencias_avisos se valida con
+            // resolverPreferenciasAvisos antes de guardar, para que lo que
+            // quede en BD siempre tenga la forma esperada por el scheduler
+            // (nunca el JSON crudo sin validar que mande el cliente).
             const cliente = await tx.cliente.create({
                 data: {
                     patron_id: patronUser.id,
                     nombre_comercial: onboarding.nombre_comercial,
                     tipo_actividad: onboarding.tipo_actividad || 'TAXI',
+                    ...(onboarding.preferencias_avisos
+                        ? { preferencias_avisos: resolverPreferenciasAvisos(onboarding.preferencias_avisos) as any }
+                        : {}),
                 },
             });
 
@@ -190,7 +201,7 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
                         nombre: asala.nombre || 'Conductor',
                         telefono: asala.telefono,
                         email: asalaEmail,
-                        password_hash: 'ONBOARDING_ASALARIADO_INITIAL',
+                        password_hash: PLACEHOLDER_PASSWORD_HASHES[2], // 'ONBOARDING_ASALARIADO_INITIAL'
                         role: 'user',
                         estado_pago: 'AL DIA',
                     },
@@ -272,6 +283,11 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
             }
 
             // 9. Inicializar mantenimientos del vehículo
+            // Fase 6 (2026-07-24), M9: calendario real (sumarMeses) en vez de
+            // meses*30 dias. M10 (pendiente, ver informe): esto sigue
+            // calculando desde "ahora" y los km actuales del alta, no desde
+            // la fecha real de la ultima ITV/revision/seguro — requeriria
+            // pedir esos datos en el formulario de onboarding.
             const catalogo = await tx.mantenimientoCatalogo.findMany();
             for (const item of catalogo) {
                 await tx.mantenimientoVehiculo.create({
@@ -280,7 +296,7 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
                         catalogo_id: item.id,
                         proximo_km: item.frecuencia_km ? vehiculo.km_actuales + item.frecuencia_km : null,
                         proxima_fecha: item.frecuencia_meses
-                            ? new Date(Date.now() + item.frecuencia_meses * 30 * 24 * 60 * 60 * 1000)
+                            ? sumarMeses(new Date(), item.frecuencia_meses)
                             : null,
                     },
                 });
@@ -338,8 +354,15 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
     }
 });
 
-// GET /api/onboarding/:telefono
-router.get('/:telefono', async (req: Request, res: Response) => {
+/**
+ * GET /api/onboarding/:telefono
+ *
+ * Fase 2 (seguridad, 2026-07-24): este endpoint era publico y devolvia email,
+ * NIF/CIF, nombre y matricula de CUALQUIER telefono sin autenticacion
+ * (enumeracion de PII). El frontend no lo consume en ningun flujo activo
+ * (import muerto en onboarding/page.tsx), asi que se restringe a admin.
+ */
+router.get('/:telefono', requireAuth, requireRol('admin'), async (req: AuthRequest, res: Response) => {
     try {
         const onboarding = await prisma.onboarding.findUnique({ where: { telefono: req.params.telefono } });
         if (!onboarding) { res.status(404).json({ status: 'FAIL', error: 'not_found' }); return; }

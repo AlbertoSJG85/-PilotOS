@@ -1,6 +1,8 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requirePatron, requireClienteContext, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { sumarMeses } from '../lib/fechas';
+import { resolverPreferenciasAvisos } from '../services/mantenimientoAlertas.service';
 
 const router = Router();
 
@@ -11,9 +13,31 @@ router.get('/catalogo', async (_req: any, res: Response) => {
     } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
 });
 
+// GET /api/mantenimientos/preferencias-avisos — Fase 6 M8 (2026-07-24).
+// Devuelve las preferencias efectivas (ya con los valores por defecto
+// aplicados) del cliente del usuario autenticado.
+router.get('/preferencias-avisos', requireAuth, requireClienteContext, async (req: AuthRequest, res: Response) => {
+    try {
+        const cliente = await prisma.cliente.findUnique({ where: { id: req.usuario!.cliente_id! }, select: { preferencias_avisos: true } });
+        res.json({ status: 'OK', data: resolverPreferenciasAvisos(cliente?.preferencias_avisos) });
+    } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
+});
+
+// PUT /api/mantenimientos/preferencias-avisos — Solo patron.
+router.put('/preferencias-avisos', requireAuth, requireClienteContext, requirePatron, async (req: AuthRequest, res: Response) => {
+    try {
+        const resueltas = resolverPreferenciasAvisos(req.body);
+        await prisma.cliente.update({
+            where: { id: req.usuario!.cliente_id! },
+            data: { preferencias_avisos: resueltas as any },
+        });
+        res.json({ status: 'OK', data: resueltas });
+    } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
+});
+
 router.get('/vehiculo/:vehiculoId', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const vehiculoCheck = await prisma.vehiculo.findUnique({ where: { id: req.params.vehiculoId }, select: { cliente_id: true } });
+        const vehiculoCheck = await prisma.vehiculo.findUnique({ where: { id: req.params.vehiculoId }, select: { cliente_id: true, km_actuales: true } });
         if (!vehiculoCheck || !isSameTenant(req, vehiculoCheck.cliente_id)) {
             res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
         }
@@ -23,7 +47,17 @@ router.get('/vehiculo/:vehiculoId', requireAuth, async (req: AuthRequest, res: R
             where.OR = [{ ultima_ejecucion_km: { not: null } }, { estado: { in: ['PENDIENTE', 'VENCIDO'] } }];
         }
         const mantenimientos = await prisma.mantenimientoVehiculo.findMany({ where, include: { catalogo: true }, orderBy: { estado: 'asc' } });
-        res.json({ status: 'OK', data: mantenimientos });
+
+        // Fase 6, M5: recalculo en el momento de la lectura (ver comentario
+        // equivalente en /vehiculo/:vehiculoId/proximos).
+        const ahora = new Date();
+        const data = mantenimientos.map((m) => {
+            const vencidoPorKm = m.proximo_km != null && m.proximo_km <= vehiculoCheck.km_actuales;
+            const vencidoPorFecha = m.proxima_fecha != null && m.proxima_fecha <= ahora;
+            return { ...m, vencido_real: vencidoPorKm || vencidoPorFecha };
+        });
+
+        res.json({ status: 'OK', data });
     } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
 });
 
@@ -40,12 +74,28 @@ router.get('/vehiculo/:vehiculoId/proximos', requireAuth, async (req: AuthReques
             where: { vehiculo_id: req.params.vehiculoId, activo: true, OR: [{ proximo_km: { lte: kmUmbral } }, { proxima_fecha: { lte: fechaUmbral } }], estado: { not: 'RESUELTO' } },
             include: { catalogo: true },
         });
-        res.json({ status: 'OK', data: proximos, km_actuales: vehiculo.km_actuales });
+
+        // Fase 6 (2026-07-24), M5: el estado guardado en BD solo se actualiza
+        // a VENCIDO cuando corre el cron diario. Si el cron no ha corrido
+        // todavia (o fallo), un mantenimiento realmente vencido podia seguir
+        // mostrando PENDIENTE. Se recalcula aqui en el momento de la lectura,
+        // sin depender del cron, y se expone junto al estado persistido.
+        const ahora = new Date();
+        const data = proximos.map((m) => {
+            const vencidoPorKm = m.proximo_km != null && m.proximo_km <= vehiculo.km_actuales;
+            const vencidoPorFecha = m.proxima_fecha != null && m.proxima_fecha <= ahora;
+            return { ...m, vencido_real: vencidoPorKm || vencidoPorFecha };
+        });
+
+        res.json({ status: 'OK', data, km_actuales: vehiculo.km_actuales });
     } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
 });
 
 // POST /api/mantenimientos/:id/resolver — Resolver mantenimiento (DT-012: transaccion)
-router.post('/:id/resolver', requireAuth, async (req: AuthRequest, res: Response) => {
+// Fase 3 RBAC: solo el patron resuelve mantenimientos (decision conservadora;
+// pendiente de confirmar con Alberto si un asalariado deberia poder marcarlo
+// resuelto sin poder editar frecuencia/config).
+router.post('/:id/resolver', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         const { km_ejecucion, fecha_factura, url_factura, importe } = req.body;
         const mant = await prisma.mantenimientoVehiculo.findUnique({ where: { id: req.params.id }, include: { catalogo: true, vehiculo: true } });
@@ -56,16 +106,34 @@ router.post('/:id/resolver', requireAuth, async (req: AuthRequest, res: Response
         const km = km_ejecucion || mant.vehiculo.km_actuales;
         const frecKm = mant.frecuencia_km_personalizada || mant.frecuencia_aprendida || mant.catalogo.frecuencia_km;
         const frecMeses = mant.frecuencia_meses_personalizada || mant.catalogo.frecuencia_meses;
+        const fechaEjecucion = fecha_factura ? new Date(fecha_factura) : new Date();
+
+        const proximoKm = frecKm ? km + frecKm : null;
+        const proximaFecha = frecMeses ? sumarMeses(fechaEjecucion, frecMeses) : null;
+
+        // Fase 6 (2026-07-24): si el mantenimiento es recurrente (tiene
+        // frecuencia por km o por meses), vuelve a PENDIENTE con el siguiente
+        // umbral en vez de quedar en RESUELTO para siempre. Antes, el
+        // scheduler solo consultaba PENDIENTE/VENCIDO y el endpoint de
+        // "proximos" excluia expresamente RESUELTO, asi que tras el primer
+        // cambio de aceite/ITV el siguiente vencimiento nunca volvia a
+        // aparecer. Si NO hay frecuencia (catalogo "SEGUN USO" sin km/meses),
+        // no hay nada que recurrir y queda RESUELTO (comportamiento anterior).
+        const tieneRecurrencia = proximoKm !== null || proximaFecha !== null;
 
         const result = await prisma.$transaction(async (tx) => {
             const updated = await tx.mantenimientoVehiculo.update({
                 where: { id: req.params.id },
                 data: {
                     ultima_ejecucion_km: km,
-                    ultima_ejecucion_fecha: fecha_factura ? new Date(fecha_factura) : new Date(),
-                    proximo_km: frecKm ? km + frecKm : null,
-                    proxima_fecha: frecMeses ? new Date(Date.now() + frecMeses * 30 * 24 * 60 * 60 * 1000) : null,
-                    estado: 'RESUELTO',
+                    ultima_ejecucion_fecha: fechaEjecucion,
+                    proximo_km: proximoKm,
+                    proxima_fecha: proximaFecha,
+                    estado: tieneRecurrencia ? 'PENDIENTE' : 'RESUELTO',
+                    // Nuevo ciclo: se resetea el dedupe de avisos para que el
+                    // proximo umbral (1000km, 30 dias, etc.) pueda notificar.
+                    ultimo_nivel_aviso_km: null,
+                    ultimo_nivel_aviso_dias: null,
                 },
             });
 
@@ -91,7 +159,8 @@ router.post('/:id/resolver', requireAuth, async (req: AuthRequest, res: Response
     }
 });
 
-router.post('/:id/aprender', requireAuth, async (req: AuthRequest, res: Response) => {
+// Fase 3 RBAC: solo el patron ajusta la frecuencia aprendida de un mantenimiento.
+router.post('/:id/aprender', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         const { frecuencia_aprendida } = req.body;
         const mantCheck = await prisma.mantenimientoVehiculo.findUnique({ where: { id: req.params.id }, include: { vehiculo: { select: { cliente_id: true } } } });
@@ -160,9 +229,7 @@ router.put('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
                               (current.frecuencia_meses_personalizada || current.catalogo.frecuencia_meses);
                 
                 if (uFecha != null && fMeses != null) {
-                    const d = new Date(uFecha);
-                    d.setMonth(d.getMonth() + fMeses);
-                    newProximaFecha = d;
+                    newProximaFecha = sumarMeses(uFecha, fMeses);
                 }
             }
 

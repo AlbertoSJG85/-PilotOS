@@ -63,6 +63,11 @@ model Cliente {
   nombre_comercial       String?
   tipo_actividad         String                   @default("TAXI")
   activo                 Boolean                  @default(true)
+  // M8 (auditoria seguridad 2026-07-24): preferencias de aviso de mantenimiento
+  // por cliente. Antes existia un campo homonimo en Onboarding sin forma
+  // definida ni consumidor; ver services/mantenimientoAlertas.service.ts
+  // (resolverPreferenciasAvisos) para el esquema y los valores por defecto.
+  preferencias_avisos    Json?
   created_at             DateTime                 @default(now())
   updated_at             DateTime                 @updatedAt
   cierresPeriodo         CierrePeriodo[]
@@ -190,6 +195,7 @@ model CalculoParte {
   bruto_diario                  Decimal                @db.Decimal(10, 2)
   combustible                   Decimal                @default(0) @db.Decimal(10, 2)
   neto_diario                   Decimal                @db.Decimal(10, 2)
+  base_reparto                  Decimal                @default(0) @db.Decimal(10, 2)
   varios                        Decimal                @default(0) @db.Decimal(10, 2)
   parte_conductor               Decimal                @db.Decimal(10, 2)
   parte_patron                  Decimal                @db.Decimal(10, 2)
@@ -362,6 +368,12 @@ model MantenimientoVehiculo {
   activo                 Boolean                    @default(true)
   frecuencia_km_personalizada    Int?
   frecuencia_meses_personalizada Int?
+  // Fase 6 (2026-07-24): ultimo escalon de aviso ya notificado, para no
+  // avisar el mismo umbral cada dia (dedupe). null = ningun aviso emitido
+  // todavia. Ver services/mantenimientoAlertas.service.ts para la semantica
+  // de los niveles (1000/500/250/0/-250/... para km, 30/0/-15/... para dias).
+  ultimo_nivel_aviso_km   Int?
+  ultimo_nivel_aviso_dias Int?
   created_at             DateTime                   @default(now())
   updated_at             DateTime                   @updatedAt
   catalogo               MantenimientoCatalogo      @relation(fields: [catalogo_id], references: [id])
@@ -397,6 +409,12 @@ model Aviso {
   leido        Boolean   @default(false)
   enviado      Boolean   @default(false)
   enviado_at   DateTime?
+  // Fase 6 (2026-07-24): trazabilidad real de envio (antes no existia
+  // ningun registro de intento/error para los avisos generados por el
+  // scheduler de mantenimientos).
+  canal        String    @default("whatsapp")
+  intentos     Int       @default(0)
+  error_envio  String?
   created_at   DateTime  @default(now())
 
   @@map("avisos")
@@ -423,6 +441,9 @@ model CierrePeriodo {
   updated_at             DateTime @updatedAt
   cliente                Cliente  @relation(fields: [cliente_id], references: [id])
 
+  // Fase 4 (2026-07-24): antes no habia ninguna restriccion que impidiera
+  // generar dos cierres para el mismo cliente y el mismo rango de fechas.
+  @@unique([cliente_id, periodo_inicio, periodo_fin], map: "cierres_periodo_cliente_periodo_key")
   @@map("cierres_periodo")
   @@schema("pilotos")
 }

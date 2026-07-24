@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
-import { AuthRequest, requireAuth, requireRol } from '../middleware/auth.middleware';
+import { AuthRequest, requireAuth, requirePatron } from '../middleware/auth.middleware';
 import { Decimal } from '@prisma/client/runtime/library';
+import { prorratearGastosFijos } from '../services/resumen.service';
 
 const router = Router();
 router.use(requireAuth);
@@ -32,8 +33,14 @@ router.get('/', async (req, res, next) => {
 /**
  * POST /api/cierres
  * Genera un nuevo cierre de periodo para un rango de fechas.
+ *
+ * Fase 3 (RBAC, 2026-07-24): antes usaba requireRol('admin', 'patron'), pero
+ * el rol de minos.Users para un propietario normal es 'user' (el rol PilotOS
+ * "patron" no existe como minos.role, vive en es_patron/Conductor). Eso dejaba
+ * al propietario fuera de su propia creacion de cierres. requirePatron
+ * comprueba es_patron || role==='admin', que es el criterio correcto.
  */
-router.post('/', requireRol('admin', 'patron'), async (req, res, next) => {
+router.post('/', requirePatron, async (req, res, next) => {
     try {
         const cliente_id = (req as AuthRequest).usuario!.cliente_id;
         if (!cliente_id) return res.status(403).json({ status: 'FAIL', message: 'No tienes cliente asociado' });
@@ -105,12 +112,11 @@ router.post('/', requireRol('admin', 'patron'), async (req, res, next) => {
             totalGastosVariables = totalGastosVariables.plus(g.importe);
         }
 
-        let totalGastosFijos = new Decimal(0);
-        for (const gf of gastosFijos) {
-            // Simplificación MVP: Si es MENSUAL, lo sumo tal cual para el cierre. 
-            // Si el rango es varios meses, esto requeriría cálculo proporcional.
-            totalGastosFijos = totalGastosFijos.plus(gf.importe);
-        }
+        // Fase 4 (2026-07-24): antes se sumaba el importe integro de cada
+        // gasto fijo sin mirar la duracion del rango del cierre (una semana
+        // pagaba lo mismo que un trimestre). Ahora se prorratea por dias
+        // reales, igual que en el resumen del dashboard.
+        const totalGastosFijos = new Decimal(prorratearGastosFijos(gastosFijos, fechaInicio, fechaFin));
 
         // 4. Crear el registro en BD
         const cierre = await prisma.cierrePeriodo.create({
@@ -136,7 +142,17 @@ router.post('/', requireRol('admin', 'patron'), async (req, res, next) => {
             data: cierre
         });
 
-    } catch (error) {
+    } catch (error: any) {
+        // Fase 4 (2026-07-24): ya existe un cierre para este cliente y este
+        // rango exacto (constraint unica cierres_periodo_cliente_periodo_key).
+        if (error?.code === 'P2002') {
+            res.status(409).json({
+                status: 'FAIL',
+                error: 'cierre_duplicado',
+                message: 'Ya existe un cierre para este cliente en ese periodo exacto.',
+            });
+            return;
+        }
         next(error);
     }
 });

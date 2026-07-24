@@ -129,6 +129,30 @@ export function requireRol(...roles: string[]) {
 }
 
 /**
+ * Middleware: Exige contexto de cliente PilotOS (deny-by-default, Fase 2 auditoria
+ * seguridad 2026-07-24).
+ *
+ * Antes de esta fase, varios listados construian el filtro tenant condicionalmente
+ * (`if (req.usuario?.cliente_id) where.cliente_id = ...`): si el usuario autenticado
+ * no tenia cliente_id (p.ej. un usuario minos de otro producto NexOS sin contexto
+ * PilotOS, o una resolucion de contexto fallida), el filtro se omitia por completo
+ * y la consulta devolvia datos de TODOS los clientes. Este middleware corta ese
+ * caso antes de llegar al handler: sin cliente_id y sin ser admin, 403 directo.
+ */
+export function requireClienteContext(req: AuthRequest, res: Response, next: NextFunction): void {
+    if (!req.usuario) {
+        res.status(401).json({ status: 'FAIL', error: 'auth_required' });
+        return;
+    }
+    if (req.usuario.role === 'admin') { next(); return; }
+    if (!req.usuario.cliente_id) {
+        res.status(403).json({ status: 'FAIL', error: 'no_client_context', message: 'Tu cuenta no tiene un cliente PilotOS asociado' });
+        return;
+    }
+    next();
+}
+
+/**
  * Middleware: Requiere que el usuario sea patron del cliente.
  * Util para operaciones que solo el patron puede hacer (configuracion, incidencias, etc.)
  */

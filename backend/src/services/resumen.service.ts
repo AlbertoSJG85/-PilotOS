@@ -7,14 +7,52 @@
  * Reglas:
  *   - Solo computan partes en estados ENVIADO o FOTO_SUSTITUIDA. BORRADOR fuera.
  *   - Gastos variables se filtran por fecha del gasto.
- *   - Gastos fijos activos se prorratean según periodicidad:
- *       MENSUAL → tal cual; TRIMESTRAL → ÷3; ANUAL → ÷12.
- *   - El prorrateo siempre asume "1 mes" como unidad de comparación. Para periodos
- *     distintos a un mes natural se sigue mostrando la cuota mensual prorrateada
- *     (consistente con la lógica previa de informes/page.tsx).
+ *   - Gastos fijos activos se prorratean segun los DIAS REALES del rango
+ *     solicitado (Fase 4, 2026-07-24): antes siempre se mostraba la cuota
+ *     mensual equivalente (importe/3 para TRIMESTRAL, etc.) sin mirar si el
+ *     rango pedido era una semana, un mes o varios meses — una semana veia
+ *     el mismo gasto fijo que un trimestre entero. Ahora se convierte cada
+ *     gasto fijo a un importe ANUAL segun periodicidad, se divide entre 365
+ *     para obtener una tasa diaria, y se multiplica por los dias del rango.
+ *     Si no se pide un rango (desde/hasta ausentes), se mantiene el
+ *     equivalente mensual como vista por defecto (no hay un rango que prorratear).
  */
 import { Decimal } from '@prisma/client/runtime/library';
 import { prisma } from '../lib/prisma';
+
+const DIAS_POR_ANIO = 365;
+
+function vecesPorAnio(periodicidad: string): number {
+    if (periodicidad === 'TRIMESTRAL') return 4;
+    if (periodicidad === 'SEMESTRAL') return 2;
+    if (periodicidad === 'ANUAL') return 1;
+    return 12; // MENSUAL (y por defecto)
+}
+
+/**
+ * Prorratea un conjunto de gastos fijos segun los dias reales de [desde, hasta].
+ * Sin rango, devuelve el equivalente mensual (comportamiento historico).
+ */
+export function prorratearGastosFijos(
+    fijos: { importe: Decimal | number; periodicidad: string }[],
+    desde?: Date,
+    hasta?: Date,
+): number {
+    const diasEnRango = (desde && hasta)
+        ? Math.max(1, Math.round((hasta.getTime() - desde.getTime()) / (24 * 60 * 60 * 1000)) + 1)
+        : null;
+
+    return fijos.reduce((acc, f) => {
+        const importe = Number(f.importe);
+        const veces = vecesPorAnio(f.periodicidad);
+        if (diasEnRango === null) {
+            return acc + (importe * veces) / 12;
+        }
+        const importeAnual = importe * veces;
+        const importeDiario = importeAnual / DIAS_POR_ANIO;
+        return acc + importeDiario * diasEnRango;
+    }, 0);
+}
 
 export interface ResumenInput {
     cliente_id: string;
@@ -89,15 +127,9 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
     const gastos = await prisma.gasto.findMany({ where: whereGastos });
     const gastosVariables = gastos.reduce((acc, g) => acc + toNum(g.importe), 0);
 
-    // 3. Gastos fijos activos, prorrateados a mensualidad
+    // 3. Gastos fijos activos, prorrateados por los dias reales del rango
     const fijos = await prisma.gastoFijo.findMany({ where: { cliente_id, activo: true } });
-    const gastosFijosProrrateados = fijos.reduce((acc, f) => {
-        let multiplier = 1;
-        if (f.periodicidad === 'TRIMESTRAL') multiplier = 1 / 3;
-        else if (f.periodicidad === 'SEMESTRAL') multiplier = 1 / 6;
-        else if (f.periodicidad === 'ANUAL') multiplier = 1 / 12;
-        return acc + toNum(f.importe) * multiplier;
-    }, 0);
+    const gastosFijosProrrateados = prorratearGastosFijos(fijos, desde, hasta);
 
     const beneficio = partePatron - gastosVariables - gastosFijosProrrateados;
 

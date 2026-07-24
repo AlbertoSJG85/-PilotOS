@@ -5,11 +5,21 @@
  *
  * Ref: PilotOS_Master.md seccion 7 (Calculos base derivados)
  * - bruto diario = ingreso bruto del dia
- * - neto diario = bruto - combustible
+ * - neto diario = bruto - combustible (SIEMPRE; es una medida operativa,
+ *   no depende de si el combustible se reparte o no)
+ * - base de reparto = lo que realmente se divide entre conductor/patron.
+ *   Coincide con neto_diario cuando incluye_combustible_en_reparto=true,
+ *   pero es bruto_diario cuando la config excluye el combustible del reparto
+ *   (Fase 4, 2026-07-24: antes ambos conceptos se guardaban en el mismo
+ *   campo neto_diario, que llegaba a valer "bruto" cuando la config excluia
+ *   el combustible — un neto no deberia poder ser igual al bruto).
  * - reparto segun configuracion del conductor / cliente
  */
 import { prisma } from '../lib/prisma';
+import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
+
+type ClientePrisma = typeof prisma | Prisma.TransactionClient;
 
 interface CalculoInput {
     parte_diario_id: string;
@@ -20,6 +30,7 @@ interface CalculoResult {
     bruto_diario: Decimal;
     combustible: Decimal;
     neto_diario: Decimal;
+    base_reparto: Decimal;
     varios: Decimal;
     parte_conductor: Decimal;
     parte_patron: Decimal;
@@ -30,31 +41,45 @@ interface CalculoResult {
 }
 
 /**
+ * Resuelve la configuracion economica vigente para un conductor, priorizando
+ * siempre la especifica sobre la generica del cliente.
+ *
+ * Fase 4 (2026-07-24): antes se hacia una unica query con
+ * `orderBy: [{ conductor_id: 'desc' }, ...]` para intentar que las filas con
+ * conductor_id no-nulo salieran primero. En PostgreSQL, ORDER BY ... DESC
+ * pone los NULL primero (NULLS FIRST es el default en DESC), asi que el
+ * orden real era el CONTRARIO al buscado: la config generica (conductor_id
+ * NULL) ganaba sobre la especifica. Ahora se hacen dos consultas explicitas,
+ * sin ambiguedad de orden.
+ */
+async function resolverConfiguracionVigente(client: ClientePrisma, cliente_id: string, conductor_id: string) {
+    const especifica = await client.configuracionEconomica.findFirst({
+        where: { cliente_id, activo: true, fecha_fin: null, conductor_id },
+        orderBy: { fecha_inicio: 'desc' },
+    });
+    if (especifica) return especifica;
+
+    return client.configuracionEconomica.findFirst({
+        where: { cliente_id, activo: true, fecha_fin: null, conductor_id: null },
+        orderBy: { fecha_inicio: 'desc' },
+    });
+}
+
+/**
  * Calcula el reparto de un parte diario segun la configuracion economica vigente.
  * Si no hay configuracion vigente, lanza error.
+ *
+ * Acepta opcionalmente un cliente de transaccion Prisma (`tx`) para que el
+ * calculo pueda ejecutarse dentro de la misma transaccion que crea el parte
+ * (Fase 4: antes el calculo se hacia SIEMPRE contra el pool global, fuera de
+ * cualquier transaccion, incluso cuando se llamaba desde dentro de una).
  */
-export async function calcularParte(input: CalculoInput): Promise<CalculoResult> {
-    // Obtener parte
-    const parte = await prisma.parteDiario.findUniqueOrThrow({
+export async function calcularParte(input: CalculoInput, client: ClientePrisma = prisma): Promise<CalculoResult> {
+    const parte = await client.parteDiario.findUniqueOrThrow({
         where: { id: input.parte_diario_id },
     });
 
-    // Obtener configuracion economica (Priorizando la específica del conductor)
-    const config = await prisma.configuracionEconomica.findFirst({
-        where: {
-            cliente_id: input.cliente_id,
-            activo: true,
-            fecha_fin: null,
-            OR: [
-                { conductor_id: parte.conductor_id },
-                { conductor_id: null }
-            ]
-        },
-        orderBy: [
-            { conductor_id: 'desc' }, // Los que tienen conductor_id (no nulos) suelen ir primero en desc si nulls son lowest
-            { fecha_inicio: 'desc' }
-        ],
-    });
+    const config = await resolverConfiguracionVigente(client, input.cliente_id, parte.conductor_id);
 
     if (!config) {
         throw new Error('No hay configuracion economica vigente para este propietario/cliente');
@@ -64,13 +89,12 @@ export async function calcularParte(input: CalculoInput): Promise<CalculoResult>
     const combustible = new Decimal((parte.combustible ?? 0).toString());
     const varios = new Decimal((parte.varios ?? 0).toString());
 
-    // Neto = bruto - combustible (si la config lo indica)
-    let neto: Decimal;
-    if (config.incluye_combustible_en_reparto) {
-        neto = bruto.minus(combustible);
-    } else {
-        neto = bruto;
-    }
+    // neto operativo: SIEMPRE bruto - combustible, independientemente de la
+    // configuracion de reparto (es una medida de negocio, no de reparto).
+    const netoOperativo = bruto.minus(combustible);
+
+    // base de reparto: lo que realmente se divide entre conductor y patron.
+    const baseReparto = config.incluye_combustible_en_reparto ? netoOperativo : bruto;
 
     // Aplicar reparto segun modelo
     let parteConductor: Decimal;
@@ -80,22 +104,22 @@ export async function calcularParte(input: CalculoInput): Promise<CalculoResult>
         case 'PORCENTAJE': {
             const pctConductor = new Decimal(config.porcentaje_conductor.toString()).dividedBy(100);
             const pctPatron = new Decimal(config.porcentaje_patron.toString()).dividedBy(100);
-            parteConductor = neto.times(pctConductor);
-            partePatron = neto.times(pctPatron);
+            parteConductor = baseReparto.times(pctConductor);
+            partePatron = baseReparto.times(pctPatron);
             break;
         }
         case 'FIJO_DIARIO': {
             // porcentaje_conductor se interpreta como importe fijo diario del conductor
             parteConductor = new Decimal(config.porcentaje_conductor.toString());
-            partePatron = neto.minus(parteConductor);
+            partePatron = baseReparto.minus(parteConductor);
             break;
         }
         default: {
             // PERSONALIZADO: se usa porcentaje como base
             const pctC = new Decimal(config.porcentaje_conductor.toString()).dividedBy(100);
             const pctP = new Decimal(config.porcentaje_patron.toString()).dividedBy(100);
-            parteConductor = neto.times(pctC);
-            partePatron = neto.times(pctP);
+            parteConductor = baseReparto.times(pctC);
+            partePatron = baseReparto.times(pctP);
             break;
         }
     }
@@ -106,7 +130,8 @@ export async function calcularParte(input: CalculoInput): Promise<CalculoResult>
     return {
         bruto_diario: bruto,
         combustible,
-        neto_diario: neto,
+        neto_diario: netoOperativo,
+        base_reparto: baseReparto,
         varios,
         parte_conductor: parteConductor,
         parte_patron: partePatron,
@@ -121,10 +146,10 @@ export async function calcularParte(input: CalculoInput): Promise<CalculoResult>
  * Crea o actualiza el calculo de un parte diario.
  * Se usa despues de enviar un parte o si se recalcula por cambio de configuracion.
  */
-export async function crearOActualizarCalculo(input: CalculoInput) {
-    const resultado = await calcularParte(input);
+export async function crearOActualizarCalculo(input: CalculoInput, client: ClientePrisma = prisma) {
+    const resultado = await calcularParte(input, client);
 
-    return prisma.calculoParte.upsert({
+    return client.calculoParte.upsert({
         where: { parte_diario_id: input.parte_diario_id },
         create: {
             parte_diario_id: input.parte_diario_id,
@@ -132,6 +157,7 @@ export async function crearOActualizarCalculo(input: CalculoInput) {
             bruto_diario: resultado.bruto_diario,
             combustible: resultado.combustible,
             neto_diario: resultado.neto_diario,
+            base_reparto: resultado.base_reparto,
             varios: resultado.varios,
             parte_conductor: resultado.parte_conductor,
             parte_patron: resultado.parte_patron,
@@ -144,6 +170,7 @@ export async function crearOActualizarCalculo(input: CalculoInput) {
             bruto_diario: resultado.bruto_diario,
             combustible: resultado.combustible,
             neto_diario: resultado.neto_diario,
+            base_reparto: resultado.base_reparto,
             varios: resultado.varios,
             parte_conductor: resultado.parte_conductor,
             parte_patron: resultado.parte_patron,
