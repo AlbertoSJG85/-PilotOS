@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, requireClienteContext, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requireClienteContext, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -39,7 +39,8 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     }
 });
 
-router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
+// Fase 3 RBAC: solo el patron puede dar de alta un vehiculo.
+router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         if (!req.usuario?.cliente_id) { res.status(400).json({ status: 'FAIL', error: 'no_client_context' }); return; }
         const { matricula, marca, modelo, fecha_matriculacion, tipo_combustible, tipo_transmision, km_actuales } = req.body;
@@ -53,7 +54,8 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
     }
 });
 
-router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+// Fase 3 RBAC: solo el patron puede editar/dar de baja un vehiculo.
+router.patch('/:id', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         const existing = await prisma.vehiculo.findUnique({ where: { id: req.params.id }, select: { cliente_id: true } });
         if (!existing || !isSameTenant(req, existing.cliente_id)) {
@@ -78,7 +80,8 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     }
 });
 
-router.post('/:id/conductores', requireAuth, async (req: AuthRequest, res: Response) => {
+// Fase 3 RBAC: solo el patron puede asignar conductores a un vehiculo.
+router.post('/:id/conductores', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         const vehiculo_id = req.params.id;
         const existing = await prisma.vehiculo.findUnique({ where: { id: vehiculo_id }, select: { cliente_id: true } });

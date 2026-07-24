@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, requireClienteContext, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requireClienteContext, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
 
 const router = Router();
@@ -46,8 +46,8 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     }
 });
 
-// POST /api/usuarios — Crear conductor
-router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
+// POST /api/usuarios — Crear conductor (Fase 3 RBAC: solo el patron puede dar de alta conductores)
+router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         if (!req.usuario?.cliente_id) { res.status(400).json({ status: 'FAIL', error: 'no_client_context' }); return; }
         
@@ -112,8 +112,8 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
     }
 });
 
-// PATCH /api/usuarios/:id — Editar / Desactivar
-router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+// PATCH /api/usuarios/:id — Editar/Desactivar (Fase 3 RBAC: solo patron)
+router.patch('/:id', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         const existing = await prisma.conductor.findUnique({ where: { id: req.params.id }, select: { cliente_id: true } });
         if (!existing || !isSameTenant(req, existing.cliente_id)) {

@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, requireClienteContext, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requireClienteContext, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -91,8 +91,8 @@ router.get('/fijos', requireAuth, requireClienteContext, async (req: AuthRequest
     }
 });
 
-// POST /api/gastos/fijos
-router.post('/fijos', requireAuth, async (req: AuthRequest, res: Response) => {
+// POST /api/gastos/fijos — Fase 3 RBAC: solo el patron puede crear gastos fijos.
+router.post('/fijos', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         if (!req.usuario?.cliente_id) { res.status(400).json({ status: 'FAIL', error: 'no_client_context' }); return; }
         const { vehiculo_id, tipo, descripcion, importe, periodicidad } = req.body;

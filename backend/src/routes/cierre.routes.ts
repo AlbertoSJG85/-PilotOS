@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
-import { AuthRequest, requireAuth, requireRol } from '../middleware/auth.middleware';
+import { AuthRequest, requireAuth, requirePatron } from '../middleware/auth.middleware';
 import { Decimal } from '@prisma/client/runtime/library';
 
 const router = Router();
@@ -32,8 +32,14 @@ router.get('/', async (req, res, next) => {
 /**
  * POST /api/cierres
  * Genera un nuevo cierre de periodo para un rango de fechas.
+ *
+ * Fase 3 (RBAC, 2026-07-24): antes usaba requireRol('admin', 'patron'), pero
+ * el rol de minos.Users para un propietario normal es 'user' (el rol PilotOS
+ * "patron" no existe como minos.role, vive en es_patron/Conductor). Eso dejaba
+ * al propietario fuera de su propia creacion de cierres. requirePatron
+ * comprueba es_patron || role==='admin', que es el criterio correcto.
  */
-router.post('/', requireRol('admin', 'patron'), async (req, res, next) => {
+router.post('/', requirePatron, async (req, res, next) => {
     try {
         const cliente_id = (req as AuthRequest).usuario!.cliente_id;
         if (!cliente_id) return res.status(403).json({ status: 'FAIL', message: 'No tienes cliente asociado' });

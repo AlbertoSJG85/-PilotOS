@@ -7,7 +7,8 @@ import { requireAuth, requirePatron, isSameTenant, AuthRequest } from '../middle
 
 const router = Router();
 
-router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
+// Fase 3 RBAC: R-IN-002 dice "solo patron autoriza"; antes solo pedia requireAuth.
+router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         const { parte_diario_id, que_ocurrio, decision_tomada, justificacion } = req.body;
         if (!parte_diario_id || !que_ocurrio || !decision_tomada || !justificacion) {

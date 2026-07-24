@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -45,7 +45,10 @@ router.get('/vehiculo/:vehiculoId/proximos', requireAuth, async (req: AuthReques
 });
 
 // POST /api/mantenimientos/:id/resolver — Resolver mantenimiento (DT-012: transaccion)
-router.post('/:id/resolver', requireAuth, async (req: AuthRequest, res: Response) => {
+// Fase 3 RBAC: solo el patron resuelve mantenimientos (decision conservadora;
+// pendiente de confirmar con Alberto si un asalariado deberia poder marcarlo
+// resuelto sin poder editar frecuencia/config).
+router.post('/:id/resolver', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         const { km_ejecucion, fecha_factura, url_factura, importe } = req.body;
         const mant = await prisma.mantenimientoVehiculo.findUnique({ where: { id: req.params.id }, include: { catalogo: true, vehiculo: true } });
@@ -91,7 +94,8 @@ router.post('/:id/resolver', requireAuth, async (req: AuthRequest, res: Response
     }
 });
 
-router.post('/:id/aprender', requireAuth, async (req: AuthRequest, res: Response) => {
+// Fase 3 RBAC: solo el patron ajusta la frecuencia aprendida de un mantenimiento.
+router.post('/:id/aprender', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         const { frecuencia_aprendida } = req.body;
         const mantCheck = await prisma.mantenimientoVehiculo.findUnique({ where: { id: req.params.id }, include: { vehiculo: { select: { cliente_id: true } } } });
