@@ -37,3 +37,18 @@ ALTER TABLE pilotos.calculos_partes
 -- un indice unico aplica la misma restriccion a nivel de motor.
 CREATE UNIQUE INDEX IF NOT EXISTS cierres_periodo_cliente_periodo_key
   ON pilotos.cierres_periodo (cliente_id, periodo_inicio, periodo_fin);
+
+-- ========================================================
+-- 2026-07-24 · Fase 6 auditoria seguridad (mantenimientos e2e)
+-- ========================================================
+
+-- Dedupe de avisos: ultimo escalon (km/dias) ya notificado por mantenimiento.
+ALTER TABLE pilotos.mantenimientos_vehiculos
+  ADD COLUMN IF NOT EXISTS ultimo_nivel_aviso_km INTEGER,
+  ADD COLUMN IF NOT EXISTS ultimo_nivel_aviso_dias INTEGER;
+
+-- Trazabilidad real de envio de avisos (antes no existia).
+ALTER TABLE pilotos.avisos
+  ADD COLUMN IF NOT EXISTS canal VARCHAR(20) NOT NULL DEFAULT 'whatsapp',
+  ADD COLUMN IF NOT EXISTS intentos INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS error_envio VARCHAR(500);

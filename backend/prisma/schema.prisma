@@ -363,6 +363,12 @@ model MantenimientoVehiculo {
   activo                 Boolean                    @default(true)
   frecuencia_km_personalizada    Int?
   frecuencia_meses_personalizada Int?
+  // Fase 6 (2026-07-24): ultimo escalon de aviso ya notificado, para no
+  // avisar el mismo umbral cada dia (dedupe). null = ningun aviso emitido
+  // todavia. Ver services/mantenimientoAlertas.service.ts para la semantica
+  // de los niveles (1000/500/250/0/-250/... para km, 30/0/-15/... para dias).
+  ultimo_nivel_aviso_km   Int?
+  ultimo_nivel_aviso_dias Int?
   created_at             DateTime                   @default(now())
   updated_at             DateTime                   @updatedAt
   catalogo               MantenimientoCatalogo      @relation(fields: [catalogo_id], references: [id])
@@ -398,6 +404,12 @@ model Aviso {
   leido        Boolean   @default(false)
   enviado      Boolean   @default(false)
   enviado_at   DateTime?
+  // Fase 6 (2026-07-24): trazabilidad real de envio (antes no existia
+  // ningun registro de intento/error para los avisos generados por el
+  // scheduler de mantenimientos).
+  canal        String    @default("whatsapp")
+  intentos     Int       @default(0)
+  error_envio  String?
   created_at   DateTime  @default(now())
 
   @@map("avisos")

@@ -10,6 +10,7 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
 import { requireAuth, requireRol, AuthRequest } from '../middleware/auth.middleware';
+import { sumarMeses } from '../lib/fechas';
 
 const router = Router();
 
@@ -274,6 +275,11 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
             }
 
             // 9. Inicializar mantenimientos del vehículo
+            // Fase 6 (2026-07-24), M9: calendario real (sumarMeses) en vez de
+            // meses*30 dias. M10 (pendiente, ver informe): esto sigue
+            // calculando desde "ahora" y los km actuales del alta, no desde
+            // la fecha real de la ultima ITV/revision/seguro — requeriria
+            // pedir esos datos en el formulario de onboarding.
             const catalogo = await tx.mantenimientoCatalogo.findMany();
             for (const item of catalogo) {
                 await tx.mantenimientoVehiculo.create({
@@ -282,7 +288,7 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
                         catalogo_id: item.id,
                         proximo_km: item.frecuencia_km ? vehiculo.km_actuales + item.frecuencia_km : null,
                         proxima_fecha: item.frecuencia_meses
-                            ? new Date(Date.now() + item.frecuencia_meses * 30 * 24 * 60 * 60 * 1000)
+                            ? sumarMeses(new Date(), item.frecuencia_meses)
                             : null,
                     },
                 });
