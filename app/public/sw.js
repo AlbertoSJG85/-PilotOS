@@ -1,6 +1,8 @@
-// PilotOS Service Worker — v2 (icono real + sesión larga)
+// PilotOS Service Worker — v3 (iconos del branding oficial)
+// El bump de CACHE_NAME es lo que purga los iconos y el logo antiguos ya
+// cacheados en los dispositivos: `activate` borra toda cache que no sea esta.
 
-const CACHE_NAME = 'pilotos-shell-v2';
+const CACHE_NAME = 'pilotos-shell-v3';
 
 const SHELL_URLS = [
   '/conductor',

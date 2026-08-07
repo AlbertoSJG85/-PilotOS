@@ -6,8 +6,8 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#07111E",
-  "theme_color": "#8DC63F",
+  "background_color": "#05070B",
+  "theme_color": "#FFB703",
   "lang": "es",
   "icons": [
     {
@@ -23,7 +23,7 @@
       "purpose": "any"
     },
     {
-      "src": "/branding/pilotos/icon-512.png",
+      "src": "/branding/pilotos/icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
