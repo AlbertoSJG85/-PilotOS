@@ -438,3 +438,21 @@ Tres ajustes funcionales + una incidencia de despliegue documentada al final.
 - **Segundo gotcha:** los PNG "transparentes" del pack no lo estan del todo. El recorte automatico deja halo de alfa muy baja (el horizontal solo tenia el 80,5 % de pixeles a alfa 0; el simbolo suelto `PilotOS_icono_P_transparente.png`, un 22 %). No se ve en un visor de imagenes, pero sobre fondo oscuro deja un rectangulo grisaceo. El script limpia alfa ≤ 48 y reescala el resto a 0–255 para no perder el antialiasing.
 - Prevencion: Nunca redibujar un logo del ecosistema. Si el pack no trae el recorte que hace falta, se extrae del asset oficial (como aqui el simbolo, sacado del propio lockup) y se deja el proceso en un script versionado, no a mano. `PilotOS_Branding_Final_v4/` esta ahora en el repo para que `npm run branding` sea reproducible.
 - Nota operativa: una PWA ya instalada **conserva el icono de la pantalla de inicio** hasta que se desinstala y se vuelve a instalar — es del sistema operativo, no del service worker.
+
+### C-041 · El webhook de Coolify no encolo NADA tras el push (amplia C-034)
+- Area: Despliegue / Coolify
+- Problema: Tras subir `4c9b2ef` (iconos) a `main`, produccion seguia sirviendo el favicon antiguo. C-034 describia el caso de "solo uno de los dos servicios se redespliega"; aqui fue peor: **no se encolo ningun deploy**. La misma sesion subio la landing NexOS a su repo y tampoco encolo nada.
+- Diagnostico: `SELECT application_id, status, left(commit,7), updated_at FROM application_deployment_queues ORDER BY id DESC` en `coolify-db`. El ultimo deploy del **frontend de PilotOS (app id 5)** era `f6354f0` del **2026-07-24**, y el de la landing (app id 4) `fdaca3e` del **2026-07-30**. Ni una fila fallida: el webhook de GitHub simplemente no llego a crear la entrada. Ojo: `application_id` es `varchar` en esa tabla, comparar con `'5'` y no con `5` o el `IN` peta con `operator does not exist`.
+- Implicacion que hay que mirar siempre: si el frontend llevaba 2 semanas sin desplegarse, **todo lo mergeado a `main` en ese intervalo tampoco estaba en produccion**, no solo el cambio que uno acaba de subir.
+- Solucion: Encolado a mano desde el servidor con el mismo procedimiento ya documentado para ClinicOS, sin token de API:
+  ```bash
+  ssh root@161.97.108.106 "docker exec coolify php artisan tinker --execute='
+    queue_application_deployment(
+      application: App\Models\Application::find(5),
+      deployment_uuid: (string) Illuminate\Support\Str::uuid(),
+      force_rebuild: false
+    );'"
+  ```
+  Ambos pasaron a `finished` en ~1-2 min. PilotOS son **dos apps distintas** en Coolify: id **1** (backend/api, `api.pilotos.nexostudios.digital`) e id **5** (frontend, `pilotos.nexostudios.digital`).
+- Verificacion: no fiarse del estado `finished`. Comparar el md5 del asset local con el que sirve produccion — aqui se comprobaron uno a uno los 6 iconos/logos, el `manifest.json` y que el SVG viejo de la landing devuelve 404.
+- Prevencion: Despues de cada `git push` a un repo desplegado por Coolify, consultar la cola antes de dar nada por desplegado. El push a GitHub y el deploy son dos cosas independientes y hoy la segunda no ocurre sola.
