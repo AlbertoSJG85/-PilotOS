@@ -12,6 +12,7 @@ import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
 import { requireAuth, requireRol, AuthRequest } from '../middleware/auth.middleware';
 import { sumarMeses } from '../lib/fechas';
 import { resolverPreferenciasAvisos } from '../services/mantenimientoAlertas.service';
+import { provisionarCliente } from '../lib/nexos-pay';
 
 const router = Router();
 
@@ -320,6 +321,18 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
 
             return { patronUser, cliente, conductorPatron, conductoresAsalariados, vehiculo };
         });
+
+        // Alta en NexOS Pay — deliberadamente fuera de la transacción y SIN await.
+        // Si NexOS Pay está caído, el patrón termina su alta igual: un problema
+        // de facturación no puede impedir que empiece a usar PilotOS. La llamada
+        // es idempotente, así que reintentarla es seguro.
+        provisionarCliente({
+            externalId: result.patronUser.id,
+            email: result.patronUser.email ?? '',
+            nombre: result.patronUser.nombre ?? '',
+            telefono: result.patronUser.telefono,
+            rolExterno: 'patron',
+        }).catch((err) => console.warn('[nexos-pay] alta fallida (no bloquea):', err?.message));
 
         res.json({
             status: 'OK',
