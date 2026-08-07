@@ -456,3 +456,18 @@ Tres ajustes funcionales + una incidencia de despliegue documentada al final.
   Ambos pasaron a `finished` en ~1-2 min. PilotOS son **dos apps distintas** en Coolify: id **1** (backend/api, `api.pilotos.nexostudios.digital`) e id **5** (frontend, `pilotos.nexostudios.digital`).
 - Verificacion: no fiarse del estado `finished`. Comparar el md5 del asset local con el que sirve produccion — aqui se comprobaron uno a uno los 6 iconos/logos, el `manifest.json` y que el SVG viejo de la landing devuelve 404.
 - Prevencion: Despues de cada `git push` a un repo desplegado por Coolify, consultar la cola antes de dar nada por desplegado. El push a GitHub y el deploy son dos cosas independientes y hoy la segunda no ocurre sola.
+
+### C-042 · Integración con NexOS Pay: alta automática desde el onboarding
+- Area: `backend/src/lib/nexos-pay.ts`, `backend/src/routes/onboarding.routes.ts`
+- Contexto: norma del ecosistema `docs/arquitectura/nexos-pay-integracion-obligatoria.md` — si alguien puede darse de alta en algo que construimos, esa alta tiene que llegar a NexOS Pay.
+- Solución: el patrón que completa el onboarding aparece en NexOS Pay con cliente, suscripción, permiso de acceso y referencia externa, en una sola llamada idempotente. Entra con `tipo_exencion: fase_prueba` sobre el plan `pilotos_autonomo` (tarifa 39 €): hoy paga 0, pero NexOS Pay sabe cuánto ingresaría al terminar las pruebas.
+- **Regla que gobierna la integración:** la llamada va **fuera de la transacción y sin `await`**. Si NexOS Pay está caído, tarda o responde mal, el patrón termina su alta igual y solo queda constancia en el log. Un problema de facturación no puede impedir que alguien empiece a usar PilotOS.
+- Verificado antes de desplegar (11 de 11 contra un NexOS Pay local): alta correcta, repetirla no duplica, con el servidor caído no lanza, con la red colgada corta a los 4 s.
+- **Verificado en producción de punta a punta:** onboarding real → el cliente apareció solo en `pay.nexostudios.digital` con su plan y su exención. Datos de prueba borrados después de los dos schemas.
+
+**Gotchas del despliegue, para la próxima:**
+
+1. **El backend llevaba sin desplegarse desde el 2026-07-24.** Se comprobó antes con `git log <commit-desplegado>..main -- backend/`: **cero cambios**, así que el despliegue solo arrastraba esta integración. Hacer siempre esa comprobación antes de desplegar algo que lleva tiempo parado.
+2. **Los uuid de contenedor NO se pueden adivinar por el nombre del servicio.** El backend (app id 1) es `pssws88so8cgcwc0ccgcc04w`, no `fgk8o4w088s0c004sg08g84g` (que es otro servicio). Sacar siempre el uuid de `applications.uuid` en la BD de Coolify antes de inspeccionar variables de entorno dentro del contenedor.
+3. **Crear variables de entorno en Coolify por Eloquent**, no por SQL: `App\Models\EnvironmentVariable` con `resourceable_id` y `resourceable_type`. Pasar el PHP por fichero (base64 → `docker cp` → `php artisan tinker /tmp/fichero.php`), nunca por `--execute` con comillas anidadas: el shell se come los `$` de PHP y el script se ejecuta a medias.
+4. **Un `psql` con `ON_ERROR_STOP` dentro de `BEGIN` deshace TODO.** Un borrado de limpieza que falló a mitad revirtió también la parte que ya había funcionado, y pareció que no se había borrado nada.
