@@ -26,12 +26,21 @@ function tokensCoinciden(recibido: string, esperado: string): boolean {
  */
 const RUTAS_HERMES = new Set(['/resumen', '/registrar-gasto', '/mantenimientos', '/kb/producto']);
 
+/**
+ * Y estas son las de LucIA. **Solo lectura: no incluye registrar-gasto.**
+ *
+ * LucIA solo tiene que poder contestarle a Alberto cuando pregunta por su taxi.
+ * Escribir es de Hermes, con su cola y su autorizacion. Que LucIA no pueda
+ * escribir no es una limitacion: es la separacion entre preguntar y mandar.
+ */
+const RUTAS_LUCIA = new Set(['/resumen', '/mantenimientos', '/kb/producto']);
+
 declare global {
     // eslint-disable-next-line @typescript-eslint/no-namespace
     namespace Express {
         interface Request {
-            /** Alcance del token con el que se entro: 'total' o 'hermes'. */
-            internalScope?: 'total' | 'hermes';
+            /** Alcance del token con el que se entro. */
+            internalScope?: 'total' | 'hermes' | 'lucia';
         }
     }
 }
@@ -63,6 +72,7 @@ export function requireInternalToken(req: Request, res: Response, next: NextFunc
     const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
     const expectedToken = process.env.INTERNAL_API_TOKEN;
     const hermesToken = process.env.HERMES_INTERNAL_TOKEN;
+    const luciaToken = process.env.LUCIA_INTERNAL_TOKEN;
 
     if (!expectedToken) {
         console.error('[INTERNAL] INTERNAL_API_TOKEN no configurado en variables de entorno');
@@ -80,12 +90,20 @@ export function requireInternalToken(req: Request, res: Response, next: NextFunc
         return;
     }
 
-    // El token de Hermes solo abre su puerta, y solo si esta configurado.
-    if (token && hermesToken && tokensCoinciden(token, hermesToken)) {
-        // `req.path` dentro del router monta sin el prefijo /internal.
-        const ruta = req.path.replace(/\/$/, '') || '/';
-        if (!RUTAS_HERMES.has(ruta)) {
-            console.warn('[INTERNAL] token de Hermes usado en una ruta que no le toca:', ruta);
+    // Los tokens acotados solo abren su puerta, y solo si estan configurados.
+    const acotados: Array<[string | undefined, Set<string>, 'hermes' | 'lucia']> = [
+        [hermesToken, RUTAS_HERMES, 'hermes'],
+        [luciaToken, RUTAS_LUCIA, 'lucia'],
+    ];
+    for (const [esperado, rutas, alcance] of acotados) {
+        if (!token || !esperado || !tokensCoinciden(token, esperado)) continue;
+        // La ruta se calcula AQUI, solo cuando un token acotado ha coincidido.
+        // Calcularla antes hacia que un 401 normal reventara si `req.path` no
+        // venia (lo cazaron los tests de humo del token, que montan un `req` a
+        // mano). `req.path` dentro del router monta sin el prefijo /internal.
+        const ruta = String(req.path || '').replace(/\/$/, '') || '/';
+        if (!rutas.has(ruta)) {
+            console.warn(`[INTERNAL] token de ${alcance} usado en una ruta que no le toca:`, ruta);
             res.status(403).json({
                 status: 'FAIL',
                 error: 'forbidden',
@@ -93,7 +111,7 @@ export function requireInternalToken(req: Request, res: Response, next: NextFunc
             });
             return;
         }
-        req.internalScope = 'hermes';
+        req.internalScope = alcance;
         next();
         return;
     }
