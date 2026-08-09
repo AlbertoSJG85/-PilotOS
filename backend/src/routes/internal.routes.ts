@@ -225,7 +225,23 @@ router.get('/resumen', async (req: Request, res: Response) => {
  */
 router.post('/registrar-gasto', async (req: Request, res: Response) => {
     try {
-        const { cliente_id, vehiculo_id, tipo, descripcion, importe, fecha, forma_pago, url_factura, huella } = req.body;
+        const { vehiculo_id, tipo, descripcion, importe, fecha, forma_pago, url_factura, huella } = req.body;
+
+        // Con el token acotado de Hermes, el cliente NO lo elige quien llama: lo
+        // fija el servidor. Si viniera del cuerpo, un Hermes comprometido —o un
+        // fichero manipulado— podria escribir gastos en el PilotOS de cualquier
+        // otro cliente. Es el mismo principio que el color de las tareas: no se
+        // acepta de fuera algo que decide si la accion es segura.
+        const clienteHermes = process.env.HERMES_CLIENTE_ID;
+        if (req.internalScope === 'hermes' && !clienteHermes) {
+            res.status(500).json({
+                status: 'FAIL',
+                error: 'server_config_error',
+                message: 'HERMES_CLIENTE_ID no configurado: no se acepta el del cuerpo',
+            });
+            return;
+        }
+        const cliente_id = req.internalScope === 'hermes' ? clienteHermes : req.body.cliente_id;
 
         if (!cliente_id || !tipo || !descripcion || importe === undefined || !fecha) {
             res.status(400).json({

@@ -20,10 +20,49 @@ function tokensCoinciden(recibido: string, esperado: string): boolean {
     return crypto.timingSafeEqual(bufRecibido, bufEsperado);
 }
 
+/**
+ * Rutas que puede tocar un portador del token acotado de Hermes. Lo que no este
+ * aqui le esta vedado aunque el token sea valido.
+ */
+const RUTAS_HERMES = new Set(['/resumen', '/registrar-gasto', '/mantenimientos', '/kb/producto']);
+
+declare global {
+    // eslint-disable-next-line @typescript-eslint/no-namespace
+    namespace Express {
+        interface Request {
+            /** Alcance del token con el que se entro: 'total' o 'hermes'. */
+            internalScope?: 'total' | 'hermes';
+        }
+    }
+}
+
+/**
+ * Protege /internal/ con x-internal-token.
+ *
+ * ── Dos tokens, dos alcances (2026-08-09) ──────────────────────────────────
+ *
+ * `INTERNAL_API_TOKEN` es el de siempre: alcance total, lo usa GlorIA.
+ *
+ * `HERMES_INTERNAL_TOKEN` es nuevo y esta ACOTADO. Hermes vive en otro servidor
+ * y solo tiene que hacer dos cosas con el PilotOS personal de Alberto: leer su
+ * resumen y registrarle un gasto. Darle el token total le habria dado acceso a
+ * los datos internos de TODOS los clientes de PilotOS, que es un producto
+ * comercial multi-cliente.
+ *
+ * Es la regla inamovible de minimo privilegio del proyecto Hermes: el limite no
+ * puede depender de que Hermes se porte bien. Con este token:
+ *   - solo valen las rutas de RUTAS_HERMES;
+ *   - y `registrar-gasto` ignora el cliente_id que venga en el cuerpo y usa el
+ *     de HERMES_CLIENTE_ID (ver internal.routes.ts).
+ *
+ * Si `HERMES_INTERNAL_TOKEN` no esta configurado, no existe ese camino y todo
+ * sigue exactamente como antes.
+ */
 export function requireInternalToken(req: Request, res: Response, next: NextFunction): void {
     const tokenHeader = req.headers['x-internal-token'];
     const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
     const expectedToken = process.env.INTERNAL_API_TOKEN;
+    const hermesToken = process.env.HERMES_INTERNAL_TOKEN;
 
     if (!expectedToken) {
         console.error('[INTERNAL] INTERNAL_API_TOKEN no configurado en variables de entorno');
@@ -35,14 +74,33 @@ export function requireInternalToken(req: Request, res: Response, next: NextFunc
         return;
     }
 
-    if (!token || !tokensCoinciden(token, expectedToken)) {
-        res.status(401).json({
-            status: 'FAIL',
-            error: 'unauthorized',
-            message: 'Token interno no valido',
-        });
+    if (token && tokensCoinciden(token, expectedToken)) {
+        req.internalScope = 'total';
+        next();
         return;
     }
 
-    next();
+    // El token de Hermes solo abre su puerta, y solo si esta configurado.
+    if (token && hermesToken && tokensCoinciden(token, hermesToken)) {
+        // `req.path` dentro del router monta sin el prefijo /internal.
+        const ruta = req.path.replace(/\/$/, '') || '/';
+        if (!RUTAS_HERMES.has(ruta)) {
+            console.warn('[INTERNAL] token de Hermes usado en una ruta que no le toca:', ruta);
+            res.status(403).json({
+                status: 'FAIL',
+                error: 'forbidden',
+                message: 'Ese token no alcanza a esta ruta',
+            });
+            return;
+        }
+        req.internalScope = 'hermes';
+        next();
+        return;
+    }
+
+    res.status(401).json({
+        status: 'FAIL',
+        error: 'unauthorized',
+        message: 'Token interno no valido',
+    });
 }
