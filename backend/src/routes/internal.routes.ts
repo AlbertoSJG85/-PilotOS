@@ -208,10 +208,24 @@ router.get('/resumen', async (req: Request, res: Response) => {
  * POST /internal/registrar-gasto
  * Registra un gasto desde GlorIA (el usuario envia factura por WhatsApp).
  * Sigue R-GA-001 a R-GA-013.
+ *
+ * ── Idempotencia por huella del documento (Hermes, Gate 13.3) ──────────────
+ *
+ * Acepta un campo opcional `huella`: el hash del justificante del que sale el
+ * gasto. Cuando viene, el mismo documento enviado dos veces NO crea dos gastos:
+ * devuelve el que ya habia con `duplicado: true`.
+ *
+ * El cerrojo es la restriccion UNIQUE de `dedupe_key` en el ledger, no una
+ * comprobacion previa. Una comprobacion previa deja una ventana entre el "no
+ * existe" y el insert; la restriccion no la deja. Se consulta antes igualmente
+ * para poder responder con el gasto original en vez de con un error.
+ *
+ * Sin `huella` el comportamiento es exactamente el de antes: GlorIA sigue
+ * funcionando igual y no habia que cambiar nada de su lado.
  */
 router.post('/registrar-gasto', async (req: Request, res: Response) => {
     try {
-        const { cliente_id, vehiculo_id, tipo, descripcion, importe, fecha, forma_pago, url_factura } = req.body;
+        const { cliente_id, vehiculo_id, tipo, descripcion, importe, fecha, forma_pago, url_factura, huella } = req.body;
 
         if (!cliente_id || !tipo || !descripcion || importe === undefined || !fecha) {
             res.status(400).json({
@@ -220,6 +234,21 @@ router.post('/registrar-gasto', async (req: Request, res: Response) => {
                 message: 'Campos obligatorios: cliente_id, tipo, descripcion, importe, fecha',
             });
             return;
+        }
+
+        const dedupeKey = huella ? `gasto-huella-${huella}` : null;
+
+        // Si ya se registro este mismo documento, se devuelve aquel gasto.
+        if (dedupeKey) {
+            const previo = await prisma.ledgerEvento.findUnique({ where: { dedupe_key: dedupeKey } });
+            const gastoIdPrevio = (previo?.datos as any)?.gasto_id;
+            if (gastoIdPrevio) {
+                const gastoPrevio = await prisma.gasto.findUnique({ where: { id: gastoIdPrevio } });
+                if (gastoPrevio) {
+                    res.json({ status: 'OK', gasto: gastoPrevio, duplicado: true });
+                    return;
+                }
+            }
         }
 
         const gasto = await prisma.$transaction(async (tx) => {
@@ -237,17 +266,19 @@ router.post('/registrar-gasto', async (req: Request, res: Response) => {
                 },
             });
 
-            // Registrar evento en ledger
+            // Registrar evento en ledger. Con huella, la dedupe_key la lleva:
+            // es lo que hace que el segundo intento no pueda entrar.
             await tx.ledgerEvento.create({
                 data: {
                     tipo_evento: 'GASTO_REGISTRADO',
                     source: 'PILOTOS',
-                    dedupe_key: `gasto-${nuevoGasto.id}`,
+                    dedupe_key: dedupeKey ?? `gasto-${nuevoGasto.id}`,
                     datos: {
                         gasto_id: nuevoGasto.id,
                         tipo,
                         importe,
-                        origen: 'GLORIA',
+                        origen: huella ? 'HERMES' : 'GLORIA',
+                        ...(huella ? { huella } : {}),
                     },
                 },
             });
@@ -257,6 +288,22 @@ router.post('/registrar-gasto', async (req: Request, res: Response) => {
 
         res.json({ status: 'OK', gasto });
     } catch (err: any) {
+        // Dos peticiones a la vez con la misma huella: la segunda choca contra
+        // el UNIQUE y su transaccion entera se deshace, asi que no queda ningun
+        // gasto huerfano. Se devuelve el que si entro.
+        if (err?.code === 'P2002' && req.body?.huella) {
+            const previo = await prisma.ledgerEvento.findUnique({
+                where: { dedupe_key: `gasto-huella-${req.body.huella}` },
+            });
+            const gastoIdPrevio = (previo?.datos as any)?.gasto_id;
+            const gastoPrevio = gastoIdPrevio
+                ? await prisma.gasto.findUnique({ where: { id: gastoIdPrevio } })
+                : null;
+            if (gastoPrevio) {
+                res.json({ status: 'OK', gasto: gastoPrevio, duplicado: true });
+                return;
+            }
+        }
         console.error('[INTERNAL] registrar-gasto error:', err.message);
         const isDev = process.env.NODE_ENV === 'development';
         res.status(500).json({
