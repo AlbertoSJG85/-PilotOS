@@ -453,31 +453,18 @@ model Aviso {
   canal        String    @default("whatsapp")
   intentos     Int       @default(0)
   error_envio  String?
+  // 2026-08-11: desde que PilotOS envía directo a Meta (sin la cola de
+  // n8n), la deduplicación es responsabilidad nuestra — la cola ya no nos
+  // la da gratis. Clave estable por hecho avisado, NO por fecha:
+  //   mantenimiento -> `pilotos:mant:<mantenimiento_id>:<escalon>`
+  //   anomalía      -> `pilotos:anomalia:<parte_id>`
+  // Si un envío falla, la fila se conserva con enviado=false y el escalón
+  // se revierte, así que mañana se reintenta con la MISMA clave: se
+  // reutiliza la fila en vez de duplicar el aviso.
+  dedupe_key   String?   @unique
   created_at   DateTime  @default(now())
 
   @@map("avisos")
-  @@schema("pilotos")
-}
-
-// Sombra de envío — Fase E del plan de acción (2026-08-11). Registra qué
-// mandaría el backend a Meta directamente, sin mandarlo nunca, en paralelo
-// al envío real vía GlorIA/n8n. Molde: core."Sombra_Reconciliacion" de
-// RentOS, que lleva semanas en producción sin aplicar nada. `coincide` y
-// `resultado_n8n` se rellenan cuando exista la conciliación de entregas
-// (Fase A del plan); hasta entonces quedan null — no es un fallo, es que
-// todavía no hay con qué comparar.
-model SombraEnvio {
-  id               String    @id @default(uuid())
-  ejecutado_en     DateTime  @default(now())
-  aviso_id         String?
-  entrada          Json // { telefono, tipo, template_params }
-  decision_backend Json // payload de Meta que el backend habría mandado
-  resultado_n8n    Json?
-  coincide         Boolean?
-  alerta           String?
-
-  @@index([ejecutado_en])
-  @@map("sombra_envios")
   @@schema("pilotos")
 }
 

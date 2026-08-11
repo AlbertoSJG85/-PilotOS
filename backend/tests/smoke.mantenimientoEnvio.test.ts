@@ -34,7 +34,7 @@ function prismaMockCon(mantenimiento: Record<string, unknown>) {
                     estado: 'PENDIENTE',
                     ultimo_nivel_aviso_km: null,
                     ultimo_nivel_aviso_dias: null,
-                    proximo_km: 9500, // faltan 500 km → cruza el escalón 1000
+                    proximo_km: 9500, // faltan 500 km → cruza el escalón 500
                     proxima_fecha: null,
                     catalogo: { nombre: 'Cambio de aceite' },
                     ...mantenimiento,
@@ -42,13 +42,22 @@ function prismaMockCon(mantenimiento: Record<string, unknown>) {
             }]),
         },
         mantenimientoVehiculo: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-        aviso: { create: vi.fn().mockResolvedValue({ id: 'aviso-1' }), update: vi.fn().mockResolvedValue({}) },
-        sombraEnvio: { create: vi.fn().mockResolvedValue({}) },
+        aviso: {
+            create: vi.fn().mockResolvedValue({ id: 'aviso-1' }),
+            update: vi.fn().mockResolvedValue({}),
+            findUnique: vi.fn().mockResolvedValue(null), // sin aviso previo -> se crea
+        },
     };
 }
 
 describe('procesarMantenimientos → enviarAvisoGloria (llamada real, no solo estado)', () => {
-    beforeEach(() => vi.clearAllMocks());
+    beforeEach(() => {
+        vi.clearAllMocks();
+        // Sin estas variables el motor sale antes de recorrer nada (es un
+        // fallo de despliegue que debe verse, no procesarse a medias).
+        process.env.GLORIA_API_URL = 'https://gloria.test';
+        process.env.GLORIA_INTERNAL_TOKEN = 'token-de-prueba';
+    });
 
     it('mantenimiento próximo cruza escalón → llama a GlorIA con el teléfono del patrón y tipo correcto', async () => {
         enviarAvisoGlorMock.mockResolvedValue({ ok: true });

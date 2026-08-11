@@ -505,35 +505,43 @@ router.post('/documentos-vehiculo', express.json({ limit: '15mb' }), async (req:
 });
 
 /**
- * GET /internal/avisos/sombra?dias=7
+ * GET /internal/avisos/entregas?dias=7
  *
- * Fase E del plan (2026-08-11) — mismo formato que el `GET /internal/ical/sombra`
- * de RentOS. Vigilancia de la sombra de envío: qué mandaría el backend a
- * Meta directamente si se desengachara n8n de esta cadena. NUNCA aplica
- * nada — es solo lectura de lo que ya se registró en cada aviso real.
+ * "¿Se enviaron de verdad?" — la pregunta que antes no se podía responder.
+ * Desde que PilotOS envía directo a Meta (sin la cola de n8n), `Aviso.enviado`
+ * significa que Meta aceptó el mensaje, no que quedara encolado. Los fallos
+ * traen el motivo real en `error_envio`, así que este resumen es accionable:
+ * si algo sale aquí, es un problema de verdad.
  */
-router.get('/avisos/sombra', async (req: Request, res: Response) => {
+router.get('/avisos/entregas', async (req: Request, res: Response) => {
     try {
         const dias = Math.min(parseInt(req.query.dias as string, 10) || 7, 60);
         const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000);
 
-        const registros = await prisma.sombraEnvio.findMany({
-            where: { ejecutado_en: { gt: desde } },
-            orderBy: { ejecutado_en: 'desc' },
+        const avisos = await prisma.aviso.findMany({
+            where: { created_at: { gt: desde }, canal: 'whatsapp' },
+            orderBy: { created_at: 'desc' },
             take: 200,
         });
-        const conAlerta = registros.filter((r) => r.alerta);
+        const fallidos = avisos.filter((a) => !a.enviado);
 
         res.json({
             status: 'OK',
             ventana_dias: dias,
-            ejecuciones: registros.length,
-            con_alerta: conAlerta.length,
-            alertas: conAlerta,
-            ultimas: registros.slice(0, 20),
+            total: avisos.length,
+            enviados: avisos.length - fallidos.length,
+            fallidos: fallidos.length,
+            problemas: fallidos.map((a) => ({
+                id: a.id,
+                tipo: a.tipo,
+                titulo: a.titulo,
+                intentos: a.intentos,
+                error: a.error_envio,
+                creado: a.created_at,
+            })),
         });
     } catch (err: any) {
-        console.error('[INTERNAL] Error en /avisos/sombra:', err.message);
+        console.error('[INTERNAL] Error en /avisos/entregas:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });

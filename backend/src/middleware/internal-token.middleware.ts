@@ -33,7 +33,7 @@ const RUTAS_HERMES = new Set(['/resumen', '/registrar-gasto', '/mantenimientos',
  * Escribir es de Hermes, con su cola y su autorizacion. Que LucIA no pueda
  * escribir no es una limitacion: es la separacion entre preguntar y mandar.
  */
-const RUTAS_LUCIA = new Set(['/resumen', '/mantenimientos', '/kb/producto', '/avisos/sombra']);
+const RUTAS_LUCIA = new Set(['/resumen', '/mantenimientos', '/kb/producto', '/avisos/entregas']);
 
 declare global {
     // eslint-disable-next-line @typescript-eslint/no-namespace

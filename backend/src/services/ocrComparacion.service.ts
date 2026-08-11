@@ -28,7 +28,7 @@
 import { prisma } from '../lib/prisma';
 import type { DatosTaximetro } from './ocr.service';
 import { enviarAvisoGloria } from './notificacion.service';
-import { registrarSombraEnvio } from './metaPayload.service';
+
 
 const TOLERANCIA_TAXIMETRO_EUR = 3;
 const TOLERANCIA_KM = 6;
@@ -433,7 +433,7 @@ async function compararAcumulados(
     }
 
     const anomalia = await crearAnomalia(parte.conductor_id, mensaje, parte.id, docId, 'CRITICA');
-    await notificarPatronAnomalia(ctx, anomalia.id, mensaje, motivoCorto);
+    await notificarPatronAnomalia(ctx, parte.id, anomalia.id, mensaje, motivoCorto);
 
     return {
         campo: 'borrados',
@@ -452,15 +452,19 @@ async function compararAcumulados(
  * try/catch y esta función no lanza. La anomalía ya quedó registrada en el
  * panel (Anomalia + widget "Alertas Pendientes") pase lo que pase con el envío.
  *
- * NOTA (2026-08-11): usa `enviarAvisoGloria` tal cual existe hoy — sin las
- * mejoras de reintento/confirmación de entrega de la Fase A del plan de
- * auditoría (todavía no ejecutada). Cuando esa fase se cierre, este aviso
- * hereda la mejora automáticamente porque llama a la misma función.
- * Requiere la plantilla Meta `anomalia_taximetro` aprobada (pendiente, ver
- * plan de acción — igual que mantenimiento_proximo/vencido).
+ * DEDUPE (2026-08-11): la clave es por PARTE, no por anomalía. Al recalcular
+ * un parte (p.ej. se sustituye la foto) las anomalías se borran y se vuelven
+ * a crear con id nuevo — si la clave dependiera del id de la anomalía, cada
+ * recálculo mandaría otro WhatsApp del mismo hecho. Antes esto lo tapaba por
+ * accidente la cola de n8n (deduplicaba por tipo+teléfono+día); ahora que
+ * enviamos directo, la protección tiene que ser nuestra y explícita.
+ *
+ * Requiere la plantilla Meta `anomalia_taximetro` aprobada (enviada a
+ * revisión el 2026-08-11, igual que mantenimiento_proximo/vencido).
  */
 async function notificarPatronAnomalia(
     ctx: ContextoAviso,
+    parteId: string,
     anomaliaId: string,
     mensajeCompleto: string,
     motivoCorto: string,
@@ -468,7 +472,11 @@ async function notificarPatronAnomalia(
     try {
         if (!ctx.telefonoPatron) return; // sin teléfono, no hay a quién avisar
 
-        const aviso = await prisma.aviso.create({
+        const dedupeKey = `pilotos:anomalia:${parteId}`;
+        const previo = await prisma.aviso.findUnique({ where: { dedupe_key: dedupeKey } });
+        if (previo?.enviado) return; // ya se avisó de este parte
+
+        const aviso = previo ?? await prisma.aviso.create({
             data: {
                 cliente_id: ctx.clienteId,
                 tipo: 'ANOMALIA',
@@ -477,21 +485,19 @@ async function notificarPatronAnomalia(
                 entidad_tipo: 'ANOMALIA',
                 entidad_id: anomaliaId,
                 canal: 'whatsapp',
-                intentos: 1,
+                intentos: 0,
+                dedupe_key: dedupeKey,
             },
         });
 
         const templateParams = { matricula: ctx.matricula, motivo: motivoCorto };
         const envio = await enviarAvisoGloria(ctx.telefonoPatron, 'anomalia_taximetro', templateParams);
 
-        // Sombra (Fase E): observación en paralelo, nunca manda nada real.
-        await registrarSombraEnvio(prisma, aviso.id, ctx.telefonoPatron, 'anomalia_taximetro', templateParams);
-
         await prisma.aviso.update({
             where: { id: aviso.id },
             data: envio.ok
-                ? { enviado: true, enviado_at: new Date() }
-                : { error_envio: envio.error?.slice(0, 500) },
+                ? { enviado: true, enviado_at: new Date(), intentos: { increment: 1 }, error_envio: null }
+                : { error_envio: envio.error?.slice(0, 500), intentos: { increment: 1 } },
         });
     } catch (err: any) {
         console.error('[OCR-COMPARACION] Fallo al avisar al patrón (no bloquea):', err?.message);

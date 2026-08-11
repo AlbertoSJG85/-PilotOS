@@ -23,8 +23,7 @@ const prismaMock = {
     parteDiario: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn() },
     anomalia: { deleteMany: vi.fn(), create: vi.fn() },
     documento: { update: vi.fn() },
-    aviso: { create: vi.fn(), update: vi.fn() },
-    sombraEnvio: { create: vi.fn() },
+    aviso: { create: vi.fn(), update: vi.fn(), findUnique: vi.fn() },
 };
 
 vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }));
@@ -100,6 +99,7 @@ describe('compararAcumulados (vía compararDocumentosConParte)', () => {
         prismaMock.anomalia.deleteMany.mockResolvedValue({});
         prismaMock.documento.update.mockResolvedValue({});
         prismaMock.anomalia.create.mockImplementation(async ({ data }: any) => ({ id: 'anom-1', ...data }));
+        prismaMock.aviso.findUnique.mockResolvedValue(null); // sin aviso previo -> se crea
         prismaMock.aviso.create.mockResolvedValue({ id: 'aviso-1' });
         prismaMock.aviso.update.mockResolvedValue({});
         enviarAvisoGlorMock.mockResolvedValue({ ok: true });

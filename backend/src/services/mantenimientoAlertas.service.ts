@@ -20,7 +20,6 @@
  */
 import { PrismaClient } from '@prisma/client';
 import { enviarAvisoGloria } from './notificacion.service';
-import { registrarSombraEnvio } from './metaPayload.service';
 
 // ── Escalones por defecto ───────────────────────────────────────────────
 // Km: 1000/500/250 antes de vencer (explicitos en el informe), y cada 250km
@@ -161,6 +160,16 @@ export async function procesarMantenimientos(
     const ahora = new Date();
     const resultado: ProcesarResultado = { evaluados: 0, avisosCreados: 0, avisosEnviados: 0, avisosFallidos: 0, avisosSilenciados: 0 };
 
+    // Sin configuracion de GlorIA no se puede enviar NADA. Salimos antes de
+    // recorrer la flota: si siguieramos, cada mantenimiento reservaria su
+    // escalon, el envio fallaria y -- aunque ahora revertimos -- estariamos
+    // haciendo trabajo inutil y llenando la tabla de avisos fallidos en cada
+    // pasada diaria. Es un fallo de despliegue, no de datos: que se vea.
+    if (!process.env.GLORIA_API_URL || !process.env.GLORIA_INTERNAL_TOKEN) {
+        console.error('[MANTENIMIENTOS] GLORIA_API_URL/GLORIA_INTERNAL_TOKEN sin configurar: no se procesa nada.');
+        return resultado;
+    }
+
     const vehiculos = await prisma.vehiculo.findMany({
         where: { activo: true },
         include: {
@@ -244,7 +253,16 @@ export async function procesarMantenimientos(
                 motivoDias,
             ].filter(Boolean).join(' ');
 
-            const aviso = await prisma.aviso.create({
+            // Dedupe propio: desde que enviamos directo a Meta (sin la cola
+            // de n8n) la deduplicacion es nuestra. Clave por hecho avisado,
+            // no por fecha, para que un reintento manana reutilice esta fila.
+            const nivelEfectivo = avisarKm ? `km${nivelKm}` : `d${nivelDias}`;
+            const dedupeKey = `pilotos:mant:${mant.id}:${nivelEfectivo}`;
+
+            const previo = await prisma.aviso.findUnique({ where: { dedupe_key: dedupeKey } });
+            if (previo?.enviado) continue; // ya se aviso de este escalon, nada que hacer
+
+            const aviso = previo ?? await prisma.aviso.create({
                 data: {
                     cliente_id: vehiculo.cliente_id,
                     tipo: 'MANTENIMIENTO',
@@ -253,30 +271,46 @@ export async function procesarMantenimientos(
                     entidad_tipo: 'MANTENIMIENTO_VEHICULO',
                     entidad_id: mant.id,
                     canal: 'whatsapp',
-                    intentos: 1,
+                    intentos: 0,
+                    dedupe_key: dedupeKey,
                 },
             });
-            resultado.avisosCreados++;
+            if (!previo) resultado.avisosCreados++;
 
             const tipoAviso = vencido ? 'mantenimiento_vencido' : 'mantenimiento_proximo';
             const templateParams = { matricula: vehiculo.matricula, mantenimiento: mant.catalogo.nombre, motivo: motivoKm ?? motivoDias ?? '' };
 
             const envio = await enviarAvisoGloria(patron.telefono, tipoAviso, templateParams);
 
-            // Sombra (Fase E): registra qué mandaría el backend a Meta
-            // directamente, sin mandarlo nunca. No afecta al envío real,
-            // que ya ha ocurrido en la línea de arriba.
-            await registrarSombraEnvio(prisma, aviso.id, patron.telefono, tipoAviso, templateParams);
-
             await prisma.aviso.update({
                 where: { id: aviso.id },
                 data: envio.ok
-                    ? { enviado: true, enviado_at: new Date() }
-                    : { error_envio: envio.error?.slice(0, 500) },
+                    ? { enviado: true, enviado_at: new Date(), intentos: { increment: 1 }, error_envio: null }
+                    : { error_envio: envio.error?.slice(0, 500), intentos: { increment: 1 } },
             });
 
-            if (envio.ok) resultado.avisosEnviados++;
-            else resultado.avisosFallidos++;
+            if (envio.ok) {
+                resultado.avisosEnviados++;
+            } else {
+                resultado.avisosFallidos++;
+                // CRITICO: el escalon no se ha comunicado, asi que devolvemos
+                // el nivel a como estaba para que la pasada de manana lo
+                // reintente. Sin esto, un fallo puntual de red perdia el aviso
+                // de este escalon PARA SIEMPRE (el motor lo daba por avisado).
+                // El `estado` NO se revierte: si esta vencido, lo esta, y eso
+                // es un hecho independiente de si el aviso salio.
+                await prisma.mantenimientoVehiculo.updateMany({
+                    where: {
+                        id: mant.id,
+                        ...(avisarKm ? { ultimo_nivel_aviso_km: nivelKm } : {}),
+                        ...(avisarDias ? { ultimo_nivel_aviso_dias: nivelDias } : {}),
+                    },
+                    data: {
+                        ...(avisarKm ? { ultimo_nivel_aviso_km: mant.ultimo_nivel_aviso_km } : {}),
+                        ...(avisarDias ? { ultimo_nivel_aviso_dias: mant.ultimo_nivel_aviso_dias } : {}),
+                    },
+                });
+            }
         }
     }
 

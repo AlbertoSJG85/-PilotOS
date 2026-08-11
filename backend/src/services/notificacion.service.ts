@@ -9,19 +9,30 @@
  * de n8n nuevos en PilotOS. Lo que GlorIA haga internamente para entregar el
  * mensaje (encolar, plantilla Meta, etc.) es responsabilidad de GlorIA.
  *
- * PENDIENTE (bloqueante para que el envio llegue de verdad, ver informe):
- *   - Configurar GLORIA_API_URL y GLORIA_INTERNAL_TOKEN en el entorno de
- *     PilotOS (Coolify). Sin ellos, esta funcion no intenta la llamada y
- *     deja constancia del motivo en el propio Aviso (ver mantenimientoAlertas.service.ts).
- *   - Registrar y conseguir aprobacion de Meta para las plantillas de
- *     WhatsApp 'mantenimiento_proximo' y 'mantenimiento_vencido' en el
- *     catalogo de plantillas de GlorIA (repo distinto, fuera del alcance de
- *     esta sesion).
+ * ── SIN n8n desde 2026-08-11 ──────────────────────────────────────────────
+ * GlorIA ya no encola lo que viene de PilotOS: manda a Meta en el acto
+ * (`origin: 'pilotos'` -> MetaSender.ts). Dos consecuencias practicas:
+ *   1. El aviso sale al instante, no hasta 30 min despues.
+ *   2. `ok: true` significa que META ACEPTO el mensaje, no que quedara
+ *      encolado. Antes marcabamos "enviado" a ciegas y podia fallar despues
+ *      sin que nadie se enterara.
+ * A cambio, las dos protecciones que daba la cola son ahora nuestras:
+ * dedupe (Aviso.dedupe_key) y reintento (revertir el escalon si falla, ver
+ * mantenimientoAlertas.service.ts).
+ *
+ * Estado de produccion (verificado 2026-08-11): GLORIA_API_URL y
+ * GLORIA_INTERNAL_TOKEN configuradas y la llamada autentica correctamente.
+ * Queda que Meta apruebe las plantillas 'mantenimiento_proximo',
+ * 'mantenimiento_vencido' y 'anomalia_taximetro' (enviadas a revision).
  */
 
 export interface EnvioResultado {
     ok: boolean;
     error?: string;
+    /** 'ENVIADO' (directo a Meta) | 'PENDIENTE' (encolado, camino antiguo). */
+    estado?: string;
+    /** wamid de Meta cuando el envio fue directo. */
+    message_id?: string;
 }
 
 const TIMEOUT_MS = 8000;
@@ -57,12 +68,25 @@ export async function enviarAvisoGloria(
             signal: controller.signal,
         });
 
+        const cuerpo: any = await res.json().catch(() => ({}));
+
         if (!res.ok) {
-            const texto = await res.text().catch(() => '');
-            return { ok: false, error: `GlorIA respondio ${res.status}: ${texto.slice(0, 200)}` };
+            // GlorIA devuelve 502 + {status:'FALLIDO', error, codigo_meta}
+            // cuando Meta rechaza el envio directo. El motivo real importa:
+            // "plantilla no aprobada" y "token caducado" se arreglan distinto.
+            const motivo = cuerpo?.error || `HTTP ${res.status}`;
+            const codigo = cuerpo?.codigo_meta ? ` (meta:${cuerpo.codigo_meta})` : '';
+            return { ok: false, error: `${motivo}${codigo}`.slice(0, 300) };
         }
 
-        return { ok: true };
+        // Camino directo (el de PilotOS): 'ENVIADO' = Meta lo acepto de verdad.
+        // Camino en cola (RentOS): 'PENDIENTE' = solo encolado; 'DEDUPED' = descartado.
+        // Un DEDUPED NO es un exito: el mensaje no ha salido.
+        if (cuerpo?.status === 'DEDUPED') {
+            return { ok: false, error: 'DEDUPED: GlorIA descarto el mensaje por duplicado' };
+        }
+
+        return { ok: true, estado: cuerpo?.status, message_id: cuerpo?.message_id };
     } catch (err: any) {
         return { ok: false, error: err.name === 'AbortError' ? 'timeout' : err.message };
     } finally {

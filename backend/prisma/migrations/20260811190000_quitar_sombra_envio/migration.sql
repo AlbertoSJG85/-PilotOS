@@ -1,0 +1,13 @@
+-- 2026-08-11 (mismo día que se creó): se retira la sombra de envío.
+--
+-- Motivo, decisión de Alberto: una sombra sirve para observar en paralelo
+-- algo que NO te puedes permitir romper porque hay gente real dependiendo
+-- (el caso de RentOS, con huéspedes). PilotOS todavía no está en uso real
+-- -- 1 vehículo y 12 partes de prueba -- así que observar durante semanas
+-- un camino que nadie usa era retrasar el cambio sin ganar seguridad.
+--
+-- En su lugar se hace el envío directo a Meta desde GlorIA (MetaSender.ts),
+-- que es lo que la sombra iba a validar. Las dos protecciones que daba la
+-- cola de n8n (reintento y no-duplicados) se implementan en PilotOS: ver
+-- Aviso.dedupe_key y la reversión del escalón en mantenimientoAlertas.
+DROP TABLE IF EXISTS "pilotos"."sombra_envios";
