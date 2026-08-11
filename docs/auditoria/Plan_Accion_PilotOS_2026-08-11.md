@@ -385,14 +385,18 @@ Alberto preguntó explícitamente si el aviso llegaba a algún canal: no llegaba
 
 **No es código. Es comprobación, y sin ella lo demás no significa nada.** Necesita acceso a Coolify: si el modelo no lo tiene, **para y pídeselo a Alberto**.
 
-- [ ] **C.1** SHA desplegado de **backend y frontend por separado** (son dos apps en Coolify: 1 backend, 5 frontend). El webhook de auto-deploy ya falló el 7 de agosto (C-041): comprobar los dos, siempre.
-- [ ] **C.2** Variables en producción: `GLORIA_API_URL`, `GLORIA_INTERNAL_TOKEN`, `HERMES_CLIENTE_ID`, tokens de Hermes/LucIA, y todo el bloque `NEXOS_PAY_*`. Recordatorio de memoria: **`NEXOS_PAY_URL` debe ser el dominio, nunca el nombre del contenedor** — si no llegan altas a Pay, mirar eso primero.
-- [ ] **C.3** Comprobar que `NEXOS_PAY_ENFORCE_ACCESS` y `NEXOS_PAY_ENFORCE_PLAN_GATES` siguen en `false`. El doc de learning del 2026-08-11 dice explícitamente que no se activan hasta aprobar y cargar los planes Control/Pro.
-- [ ] **C.4** Desde el contenedor de PilotOS, `curl` al endpoint de GlorIA con el token real. Debe dar 400 (faltan campos), **no 401 ni 503**.
-- [ ] **C.5** Estado real de las plantillas en Meta Business (A5.4).
-- [ ] **C.6** Volumen `pilotos-uploads:/app/uploads` montado **y con copia externa**. Hoy los documentos viven ahí y solo ahí.
-- [ ] **C.7** Estado del webhook de auto-deploy de Coolify, o procedimiento manual fiable documentado.
-- [ ] **C.8** Escribir todo el resultado en `docs/learning/`. Sin esto, la próxima sesión repite el trabajo.
+**EJECUTADA EL 2026-08-11** (Alberto confirmó que sí hay acceso SSH: `root@161.97.108.106`, Coolify vía `docker exec coolify php artisan tinker`). Resultados:
+
+- [x] **C.1** Backend (app 1) y frontend (app 5) desplegados en `b9bbee1`. **El webhook volvió a no encolar nada tras el push** (3ª vez, ver C-034/C-041) — encolados a mano. El frontend llevaba parado desde el 2026-08-07; comprobado que no había nada acumulado de otras sesiones.
+- [x] **C.2** `GLORIA_API_URL`, `GLORIA_INTERNAL_TOKEN`, `HERMES_CLIENTE_ID`, tokens Hermes/LucIA y el bloque `NEXOS_PAY_*`: **todos configurados**. `NEXOS_PAY_URL` es el dominio (`https://pay.nexostudios.digital`), correcto.
+- [x] **C.3** `NEXOS_PAY_ENFORCE_ACCESS`/`NEXOS_PAY_ENFORCE_PLAN_GATES` **no están definidas** → siguen apagadas, como debía ser.
+- [x] **C.4** `curl` real desde el VPS al endpoint de GlorIA con el token de producción → **HTTP 400 "Faltan campos: phone, tipo"**. Exactamente lo esperado: la red llega y el token autentica.
+- [ ] **C.5** Plantillas en Meta Business: **enviadas a revisión el 2026-08-11, esperando aprobación**. Único bloqueo real que queda para que los avisos lleguen.
+- [x] **C.6** **El volumen NO existía** — `Mounts: []`, ninguna fila en `local_persistent_volumes`. Creado y montado (C-047). Lo subido antes se perdió. **Sigue sin copia externa** — pendiente, ver G3.1.
+- [x] **C.7** Webhook sigue roto. Procedimiento manual verificado y documentado (C-047, C-050).
+- [x] **C.8** Todo escrito en `docs/learning/correcciones.md` (C-047, C-050).
+
+**Descubrimiento colateral importante (C-050):** el `.env` local del backend apunta a la **misma BD que producción** (`161.97.108.106:5433` = `eg40cws0g8okk0o0oso0skgg`). No hay base de datos de desarrollo separada. La nota de memoria que decía que ese puerto era el Postgres de n8n era incorrecta.
 
 ---
 
