@@ -635,4 +635,32 @@ Al aplicarle a `validarTicketGasoil` la misma limpieza de ruido, el caso **limpi
 Consecuencia: **todo** ticket de gasolinera salía "No se detectó importe" → inválido → el combustible declarado **no se ha contrastado jamás**. No es una regresión: no ha funcionado nunca. Los patrones del taxímetro no llevan `/g`, por eso ese lado sí funcionaba y este no.
 - Arreglado (quitado el `/g` y aplicada la normalización). Verificado en los tres formatos habituales: limpio, con ruido de OCR, y con símbolo de euro sin la palabra "total". Test `smoke.ocrGasoil.test.ts`.
 - **Prevención concreta:** un patrón con grupo de captura **nunca** debe llevar `/g` si se usa con `String.match` y se lee `m[1]`. Merece una revisión de todos los regex del proyecto que capturen.
-- **Pendiente:** el ticket de combustible sigue **sin verificar contra salida real de Tesseract** — no había ninguna foto de gasolinera subida (el flujo murió antes). Cuando haya una, meter su texto literal como fixture, igual que se hizo con el del taxímetro. Los tres formatos probados son sintéticos, y la lección del día es justo esa.
+- Ese día no se pudo verificar contra una foto real de gasolinera. Al reintentarlo con una, aparecieron **tres fallos más** — ver C-055.
+
+### C-055 · El ticket de gasolinera cogía el descuento, y las fotos no se veían
+- Area: `backend/src/services/ocr.service.ts`, `app/src/lib/utils/documento-url.ts`
+- Tras arreglar C-054, Alberto reintentó el envío. **El flujo ya funcionó entero** (parte creado, las dos fotos enganchadas, ticket de taxímetro **VÁLIDO** con su importe correcto). Quedaron dos cosas: el combustible «no leyó los datos» y no podía ver las imágenes.
+
+**Fallo A — el parser cogía el descuento en vez del importe pagado.**
+Con la factura real delante (Suministros Insulares Océano, 10/08/2026) se ve al instante, y era imposible de ver con un ejemplo inventado:
+```
+Total Venta:      30,00 €   <- antes del descuento
+Dto. total:        1,30 €   <- el descuento
+IMPORTE A PAGAR:  28,70 €   <- la buena
+```
+El patrón genérico `(?:total|importe)` casaba **primero** con `Dto. total: 1,30`, guardaba 1,30 € como gasto del día y levantaba una discrepancia de 27,40 € **que no existía**. Ahora los patrones van de lo específico a lo genérico (`importe a pagar` → `total a pagar` → `total` a principio de línea → …), y exigir principio de línea impide que `Dto. total` cuele.
+Lección: en un documento con varias cifras en euros, el problema no es *encontrar* un número, es **elegir el correcto**. Un fixture sintético con una sola cifra nunca lo habría destapado.
+
+**Fallo B — «GASOLEO» no estaba en la lista de combustibles.**
+La lista tenía `gasoil` pero no `gasoleo`, que es como lo escriben casi todas las gasolineras españolas. Sin palabra reconocida y sin litros, el ticket se daba por «no es de combustible» → `PENDIENTE_REVISION`. Añadido `gasoleo` y las cadenas más comunes.
+
+**Fallo C — los litros venían en una tabla.**
+`21,66` va en una fila bajo la línea del producto, sin la unidad pegada. Añadido un patrón que lee el primer número de la fila siguiente a la línea del combustible.
+
+**Fallo D — las fotos daban 401 y no se veían.**
+`/uploads` exige token y lo acepta por cabecera `Authorization` **o** por la cookie `pilotos_token`. Pero:
+- un `<img src>` del navegador **no manda cabeceras**, solo cookies;
+- la cookie se pone en `pilotos.nexostudios.digital` y la URL guardada apunta a `api.pilotos.nexostudios.digital`, que es **otro host**, así que la cookie tampoco viaja.
+Resultado: 401 y foto rota, siempre. `next.config.ts` **ya proxeaba** `/uploads/:path*` al backend, así que bastaba con pedir la foto por la ruta del propio dominio: misma petición, mismo origen, cookie enviada. Helper `urlDocumento()` que se queda con el `pathname` — arregla también las fotos ya guardadas sin tocar ninguna fila, y deja pasar sin cambios cualquier URL que no sea de `/uploads`.
+- Verificado: 146/146 tests, con `smoke.ocrGasoilRealOcr.test.ts` usando el texto **literal** de Tesseract sobre la factura real.
+- **Prevención:** el fixture sintético de combustible que escribí en C-054 pasaba al 100% y no valía para nada — tres fallos reales pasaron por debajo. Cada tipo de documento nuevo necesita **su** fixture real antes de darse por bueno. Es la tercera vez en el mismo día que esta lección cuesta dinero.
