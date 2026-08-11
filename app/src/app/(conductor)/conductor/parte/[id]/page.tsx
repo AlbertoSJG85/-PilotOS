@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, CheckCircle, Clock, AlertCircle, Car, Fuel, Receipt } from 'lucide-react';
 import { getParte } from '@/lib/api';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatDate, urlDocumento } from '@/lib/utils';
 import type { ParteDiario } from '@/types';
 
 function EstadoBadge({ estado }: { estado: string }) {
@@ -161,7 +161,7 @@ export default function ParteDetalleConductor() {
                   </div>
                   {enlace.documento?.url && (
                     <a
-                      href={enlace.documento.url}
+                      href={urlDocumento(enlace.documento.url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-pilot-lime hover:text-pilot-lime-light"

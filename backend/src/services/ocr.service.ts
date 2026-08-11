@@ -538,31 +538,56 @@ export function validarTicketGasoil(texto: string): {
     // entre dígitos y estropearía 08/08/26).
     const fecha = extractDate(crudo) || undefined;
 
-    // El resto, del texto limpio: este parser tenía la MISMA exposición que
-    // el del taxímetro (ver C-054). Si el OCR lee "28»70" en vez de "28,70",
-    // el importe no casa, el ticket se marca inválido y el combustible no se
-    // contrasta. No está verificado contra una foto real de gasolinera
-    // todavía — no había ninguna subida — pero la exposición es idéntica y
-    // dejarla sin cubrir sabiéndolo no tiene defensa.
+    // El resto, del texto limpio: este parser tenía la misma exposición al
+    // ruido del OCR que el del taxímetro (ver C-054).
     const t = normalizarNumerosOcr(crudo);
 
-    // OJO con el flag /g: estos cuatro patrones lo llevaban, y con /g
+    // ── Importe ──────────────────────────────────────────────────────────
+    // El ORDEN de estos patrones importa, y es la lección del ticket real de
+    // Alberto (2026-08-11). Una factura de gasolinera trae varias cifras en
+    // euros y solo una es la que pagó:
+    //
+    //     Total Venta:        30,00 €   <- antes del descuento
+    //     Dto. total:          1,30 €   <- el descuento
+    //     IMPORTE A PAGAR:    28,70 €   <- ESTA
+    //
+    // El patrón genérico anterior (`(?:total|importe)...`) casaba primero con
+    // "Dto. total: 1,30" y guardaba 1,30 € como el gasto del día. El parte
+    // declaraba 28,70, así que saltaba una discrepancia de 27,40 € que no
+    // existía. Lo específico va antes que lo genérico.
+    //
+    // OJO también con el flag /g: estos patrones lo llevaban, y con /g
     // `String.match` devuelve las coincidencias ENTERAS y descarta los grupos
-    // de captura, así que `m[1]` era siempre undefined y el importe NUNCA se
-    // detectaba — ni con un ticket perfectamente limpio. Es la razón de que
-    // el combustible no se haya contrastado jamás. Los patrones del taxímetro
-    // no llevan /g, por eso ese lado sí funcionaba. Ver C-054.
+    // de captura (`m[1]` siempre undefined). Por eso el importe no se
+    // detectaba nunca, ni con un ticket limpio.
     const importe = extractNumCurrency(t, [
-        /(?:total|importe)\s*[:.]?\s*([\d]+[.,][\d]{2})\s*(?:€|eur)?/i,
+        /importe\s*a\s*pagar\s*[:.]?\s*([\d]+[.,][\d]{2})/i,
+        /total\s*a\s*pagar\s*[:.]?\s*([\d]+[.,][\d]{2})/i,
+        // "Total" al PRINCIPIO de línea: así "Dto. total" no cuela, porque
+        // lleva el "Dto." delante.
+        /(?:^|\n)\s*total[^\n\d]{0,12}?([\d]+[.,][\d]{2})/i,
+        /importe[^\n\d]{0,12}?([\d]+[.,][\d]{2})/i,
         /([\d]+[.,][\d]{2})\s*€/i,
     ]) ?? undefined;
 
     const litros = extractNum(t, [
-        /([\d]+[.,][\d]{1,3})\s*(?:l|lt|litros?)\b/i,
+        /([\d]+[.,][\d]{1,3})\s*(?:l\b|lt\b|litros?\b)/i,
         /litros?\s*[:.]?\s*([\d]+[.,][\d]{1,3})/i,
+        // Formato de tabla: la línea del producto y debajo la fila de
+        // valores, donde los litros son el primer número.
+        //     GASOLEO A PREMIUM *
+        //     21,66  1,385€  1,30€  28,70€
+        /(?:gasoleo|gasolina|diesel|carburante)[^\n]*\n\s*([\d]+[.,][\d]{1,3})\s/i,
     ]) ?? undefined;
 
-    const palabrasCombustible = ['diesel', 'gasoil', 'gasolina', 'combustible', 'carburante', 'gas oil'];
+    // "gasoleo" (y "gasóleo", que llega sin tilde tras normalizar) faltaba, y
+    // es como lo escriben la mayoría de las gasolineras españolas. Sin él, el
+    // ticket real de Alberto se daba por "no es de combustible".
+    const palabrasCombustible = [
+        'diesel', 'gasoil', 'gas oil', 'gasoleo', 'gasolina', 'combustible',
+        'carburante', 'sin plomo', 'adblue', 'estacion de servicio', 'repsol',
+        'cepsa', 'galp', 'bp ', 'shell', 'petroprix', 'ballenoil',
+    ];
     const tienePalabraCombustible = palabrasCombustible.some(p => t.toLowerCase().includes(p));
 
     if (!importe) errores.push('No se detectó importe');

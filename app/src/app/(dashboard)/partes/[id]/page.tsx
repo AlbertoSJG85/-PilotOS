@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/layout';
 import { Card, Badge, Skeleton, Button } from '@/components/ui';
 import { getParte, uploadFoto, reemplazarFoto, reintentarOcr, eliminarFoto } from '@/lib/api';
-import { formatCurrency, formatDate, formatKm } from '@/lib/utils';
+import { formatCurrency, formatDate, formatKm, urlDocumento } from '@/lib/utils';
 import { getSessionUser } from '@/lib/auth';
 import type { ParteDiario, Documento, Anomalia } from '@/types';
 import {
@@ -349,7 +349,7 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                                         <div className="h-28 bg-zinc-900 flex items-center justify-center overflow-hidden">
                                             {!hasImgError ? (
                                                 <img
-                                                    src={doc.url}
+                                                    src={urlDocumento(doc.url)}
                                                     alt={doc.tipo}
                                                     className="w-full h-full object-cover"
                                                     onError={() => markImgError(doc.id)}
@@ -460,7 +460,7 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                                             {/* Acciones */}
                                             <div className="flex flex-col gap-1.5 mt-auto pt-2">
                                                 <a
-                                                    href={doc.url}
+                                                    href={urlDocumento(doc.url)}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="flex items-center justify-center gap-1.5 text-xs py-1.5 px-3 bg-zinc-800 rounded text-zinc-100 hover:bg-zinc-700 transition-colors"
