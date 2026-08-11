@@ -1,10 +1,14 @@
 /**
- * Anomalias routes. R-AN-001: Se acumulan. R-AN-002: NUNCA se resetean.
+ * Anomalias routes. R-AN-001: Se acumulan. R-AN-002: la anomalía en sí NUNCA
+ * se resetea ni se borra — es un hecho ocurrido. Lo que SÍ cambia (desde
+ * 2026-08-11) es si el patrón ya la ha revisado (`estado`, `revisada_at`,
+ * `revisada_por`): el WhatsApp puede no llegar o pasar desapercibido, así
+ * que la anomalía se queda en rojo en el panel hasta que él decide.
  * DT-003: Notificaciones via n8n, no WhatsApp directo.
  */
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, requireClienteContext, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requirePatron, requireClienteContext, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
 const UMBRAL_AVISO_PATRON = 3; // R-AN-003
@@ -101,6 +105,33 @@ router.get('/conductor/:conductorId/total', requireAuth, async (req: AuthRequest
         const proximoUmbral = Math.ceil((total + 1) / UMBRAL_AVISO_PATRON) * UMBRAL_AVISO_PATRON;
         res.json({ status: 'OK', conductor_id: req.params.conductorId, total_anomalias: total, proximo_umbral: proximoUmbral, faltan_para_aviso: proximoUmbral - total });
     } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
+});
+
+// POST /api/anomalias/:id/revisar — el patrón marca que ya la ha visto y
+// hablado con el asalariado (o decidido que no hace falta). Solo el patrón:
+// es su criterio, no algo que el propio asalariado pueda cerrar sobre sí mismo.
+router.post('/:id/revisar', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
+    try {
+        const anomalia = await prisma.anomalia.findUnique({
+            where: { id: req.params.id },
+            include: { conductor: { select: { cliente_id: true } } },
+        });
+        if (!anomalia || !isSameTenant(req, anomalia.conductor.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'anomalia_not_found' }); return;
+        }
+        if (anomalia.estado === 'RESUELTA') {
+            res.status(200).json({ status: 'OK', data: anomalia }); return; // idempotente
+        }
+
+        const actualizada = await prisma.anomalia.update({
+            where: { id: anomalia.id },
+            data: { estado: 'RESUELTA', revisada_at: new Date(), revisada_por: req.usuario!.id },
+        });
+        res.json({ status: 'OK', data: actualizada });
+    } catch (err: any) {
+        console.error('[ANOMALIAS] Error al revisar:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
 });
 
 export default router;

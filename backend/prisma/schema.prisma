@@ -119,6 +119,9 @@ model Vehiculo {
   partesDiarios       ParteDiario[]
   conductores         VehiculoConductor[]
   cliente             Cliente                 @relation(fields: [cliente_id], references: [id])
+  // Documentos que NO nacen de un parte diario (factura de taller, ITV,
+  // seguro...). Ver Documento.vehiculo_id — 2026-08-11.
+  documentos          Documento[]
 
   @@map("vehiculos")
   @@schema("pilotos")
@@ -229,6 +232,30 @@ model Documento {
   enlaces               DocumentoEnlace[]
   historial             DocumentoHistorial[]
 
+  // 2026-08-11 — terreno para "el propietario manda una foto por WhatsApp y
+  // el sistema la encaja sola" (petición de Alberto). Deliberadamente NO se
+  // reutiliza DocumentoEnlace: esa tabla tiene un FK físico a ParteDiario
+  // (`entidad_id` solo puede apuntar a un parte), así que un documento sin
+  // parte —factura de taller, ITV, seguro— no cabe ahí sin un refactor
+  // grande y arriesgado de los ~10 sitios que ya la consultan (ver hallazgo
+  // de la auditoría, punto 23 / tarea G2 del plan, que sigue pendiente por
+  // separado). Estos dos campos son la vía corta y segura: un documento
+  // puede nacer sin vehiculo_id/mantenimiento_vehiculo_id (recién llegado,
+  // sin clasificar todavía) y rellenarlos cuando se sepa qué es.
+  //
+  // Convención de `tipo` para estos documentos (además de los ya existentes
+  // TICKET_TAXIMETRO/TICKET_GASOIL/TICKET_COMBUSTIBLE):
+  //   DOCUMENTO_VEHICULO_SIN_CLASIFICAR — recién recibido, nadie ha
+  //     determinado todavía si es factura de taller, ITV, seguro...
+  //     (la clasificación automática NO está construida, ver informe)
+  //   FACTURA_TALLER / CERTIFICADO_ITV / POLIZA_SEGURO — una vez
+  //     clasificado (manual hoy; automático cuando se construya la
+  //     extracción con un documento real de referencia)
+  vehiculo_id               String?
+  mantenimiento_vehiculo_id String?
+  vehiculo                  Vehiculo?              @relation(fields: [vehiculo_id], references: [id])
+  mantenimientoVehiculo     MantenimientoVehiculo? @relation(fields: [mantenimiento_vehiculo_id], references: [id])
+
   @@map("documentos")
   @@schema("pilotos")
 }
@@ -282,6 +309,13 @@ model Anomalia {
   parte_diario_id String?
   documento_id    String?
   estado          String    @default("ACTIVA")
+  // 2026-08-11: el patrón puede marcarla como revisada desde el panel — el
+  // WhatsApp puede no llegar, pasar desapercibido u olvidarse de contestar;
+  // la anomalía se queda en rojo en el panel hasta que él decide que ya la
+  // ha hablado con el asalariado. `estado` ya existía en el schema pero
+  // nunca se actualizaba desde ningún endpoint.
+  revisada_at     DateTime?
+  revisada_por    Int? // MinosUser.id del patrón que la marcó
   created_at      DateTime  @default(now())
   conductor       Conductor @relation(fields: [conductor_id], references: [id])
 
@@ -379,6 +413,10 @@ model MantenimientoVehiculo {
   catalogo               MantenimientoCatalogo      @relation(fields: [catalogo_id], references: [id])
   vehiculo               Vehiculo                   @relation(fields: [vehiculo_id], references: [id])
   seguimiento            SeguimientoMantenimiento[]
+  // Factura/documento que resolvió (o que se está evaluando si resuelve)
+  // este mantenimiento — 2026-08-11, terreno para el reconocimiento OCR
+  // de facturas (todavía sin construir la extracción, ver docs/learning).
+  documentos             Documento[]
 
   @@unique([vehiculo_id, catalogo_id])
   @@map("mantenimientos_vehiculos")
@@ -418,6 +456,28 @@ model Aviso {
   created_at   DateTime  @default(now())
 
   @@map("avisos")
+  @@schema("pilotos")
+}
+
+// Sombra de envío — Fase E del plan de acción (2026-08-11). Registra qué
+// mandaría el backend a Meta directamente, sin mandarlo nunca, en paralelo
+// al envío real vía GlorIA/n8n. Molde: core."Sombra_Reconciliacion" de
+// RentOS, que lleva semanas en producción sin aplicar nada. `coincide` y
+// `resultado_n8n` se rellenan cuando exista la conciliación de entregas
+// (Fase A del plan); hasta entonces quedan null — no es un fallo, es que
+// todavía no hay con qué comparar.
+model SombraEnvio {
+  id               String    @id @default(uuid())
+  ejecutado_en     DateTime  @default(now())
+  aviso_id         String?
+  entrada          Json // { telefono, tipo, template_params }
+  decision_backend Json // payload de Meta que el backend habría mandado
+  resultado_n8n    Json?
+  coincide         Boolean?
+  alerta           String?
+
+  @@index([ejecutado_en])
+  @@map("sombra_envios")
   @@schema("pilotos")
 }
 

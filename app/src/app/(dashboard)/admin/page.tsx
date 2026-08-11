@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/layout';
 import { StatCard, Card, Badge, Skeleton, Button } from '@/components/ui';
-import { getPartes, getResumenDashboard, getVehiculos, getAnomalias, getMantenimientosProximos } from '@/lib/api';
+import { getPartes, getResumenDashboard, getVehiculos, getAnomalias, getMantenimientosProximos, marcarAnomaliaRevisada } from '@/lib/api';
 import { getSessionUser } from '@/lib/auth';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { DollarSign, Fuel, TrendingUp, Wrench, AlertTriangle, ArrowRight, Activity, CalendarDays, FileText, Car, CreditCard, Banknote } from 'lucide-react';
@@ -24,6 +24,8 @@ function AdminDashboardContent() {
   const [anomalias, setAnomalias] = useState<Anomalia[]>([]);
   const [mantenimientos, setMantenimientos] = useState<MantenimientoVehiculo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [revisando, setRevisando] = useState<string | null>(null);
+  const [errorRevisar, setErrorRevisar] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -75,7 +77,23 @@ function AdminDashboardContent() {
   const soloEfectivo = totalBruto > 0 && totalDatafono === 0;
 
   const recentPartes = partes.slice(0, 4);
-  const pendingAnomalias = anomalias.filter(a => !a.notificada).slice(0, 4);
+  // Todas las que el patrón aún no ha revisado, no solo las 4 últimas — una
+  // anomalía no desaparece por antigua, se queda hasta que él decide (el
+  // WhatsApp puede no llegar, pasar desapercibido, o simplemente olvidarse).
+  const pendingAnomalias = anomalias.filter(a => a.estado !== 'RESUELTA');
+
+  async function handleRevisarAnomalia(id: string) {
+    setErrorRevisar(null);
+    setRevisando(id);
+    try {
+      await marcarAnomaliaRevisada(id);
+      setAnomalias((prev) => prev.map((a) => (a.id === id ? { ...a, estado: 'RESUELTA' } : a)));
+    } catch {
+      setErrorRevisar('No se pudo marcar como revisada. Inténtalo de nuevo.');
+    } finally {
+      setRevisando(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -177,13 +195,33 @@ function AdminDashboardContent() {
               <h2 className="text-sm font-semibold text-red-400 mb-3 flex items-center gap-2 uppercase tracking-wider">
                 <AlertTriangle className="w-4 h-4" /> Alertas Pendientes ({pendingAnomalias.length})
               </h2>
+              {errorRevisar && (
+                <p className="text-xs text-red-300 mb-2">{errorRevisar}</p>
+              )}
               <div className="space-y-2">
                 {pendingAnomalias.map(a => (
-                  <div key={a.id} className="text-sm bg-black/30 p-3 rounded-lg border border-red-900/40 flex justify-between items-center">
-                    <div>
-                      <span className="font-medium text-zinc-100">{a.descripcion}</span>
-                      <p className="text-xs text-red-300/70 mt-0.5">Registrado el {formatDate(a.created_at)}</p>
+                  <div key={a.id} className="text-sm bg-black/30 p-3 rounded-lg border border-red-900/40 flex justify-between items-center gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        {a.tipo === 'CRITICA' && (
+                          <Badge variant="danger" className="uppercase text-[10px] tracking-wide shrink-0">Crítica</Badge>
+                        )}
+                        <span className="font-medium text-zinc-100">{a.descripcion}</span>
+                      </div>
+                      <p className="text-xs text-red-300/70 mt-0.5">
+                        {a.conductor?.usuario?.nombre ? `${a.conductor.usuario.nombre} · ` : ''}
+                        Registrado el {formatDate(a.created_at)}
+                      </p>
                     </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="shrink-0"
+                      disabled={revisando === a.id}
+                      onClick={() => handleRevisarAnomalia(a.id)}
+                    >
+                      {revisando === a.id ? 'Marcando…' : 'Marcar revisada'}
+                    </Button>
                   </div>
                 ))}
               </div>

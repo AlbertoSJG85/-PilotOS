@@ -193,6 +193,8 @@ export interface Anomalia {
   parte_diario_id?: string | null;
   documento_id?: string | null;
   estado: 'ACTIVA' | 'RESUELTA';
+  revisada_at?: string | null;
+  revisada_por?: number | null;
   created_at: string;
   conductor?: { usuario: { nombre: string } };
 }
