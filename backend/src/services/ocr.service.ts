@@ -532,18 +532,34 @@ export function validarTicketGasoil(texto: string): {
     errores: string[];
 } {
     const errores: string[] = [];
-    const t = texto.normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const crudo = texto.normalize('NFD').replace(/[̀-ͯ]/g, '');
 
-    const fecha = extractDate(t) || undefined;
+    // La fecha, del texto sin normalizar (la normalización toca los símbolos
+    // entre dígitos y estropearía 08/08/26).
+    const fecha = extractDate(crudo) || undefined;
 
+    // El resto, del texto limpio: este parser tenía la MISMA exposición que
+    // el del taxímetro (ver C-054). Si el OCR lee "28»70" en vez de "28,70",
+    // el importe no casa, el ticket se marca inválido y el combustible no se
+    // contrasta. No está verificado contra una foto real de gasolinera
+    // todavía — no había ninguna subida — pero la exposición es idéntica y
+    // dejarla sin cubrir sabiéndolo no tiene defensa.
+    const t = normalizarNumerosOcr(crudo);
+
+    // OJO con el flag /g: estos cuatro patrones lo llevaban, y con /g
+    // `String.match` devuelve las coincidencias ENTERAS y descarta los grupos
+    // de captura, así que `m[1]` era siempre undefined y el importe NUNCA se
+    // detectaba — ni con un ticket perfectamente limpio. Es la razón de que
+    // el combustible no se haya contrastado jamás. Los patrones del taxímetro
+    // no llevan /g, por eso ese lado sí funcionaba. Ver C-054.
     const importe = extractNumCurrency(t, [
-        /(?:total|importe)\s*[:.]?\s*([\d]+[.,][\d]{2})\s*(?:€|eur)?/gi,
-        /([\d]+[.,][\d]{2})\s*€/gi,
+        /(?:total|importe)\s*[:.]?\s*([\d]+[.,][\d]{2})\s*(?:€|eur)?/i,
+        /([\d]+[.,][\d]{2})\s*€/i,
     ]) ?? undefined;
 
     const litros = extractNum(t, [
-        /([\d]+[.,][\d]{1,3})\s*(?:l|lt|litros?)\b/gi,
-        /litros?\s*[:.]?\s*([\d]+[.,][\d]{1,3})/gi,
+        /([\d]+[.,][\d]{1,3})\s*(?:l|lt|litros?)\b/i,
+        /litros?\s*[:.]?\s*([\d]+[.,][\d]{1,3})/i,
     ]) ?? undefined;
 
     const palabrasCombustible = ['diesel', 'gasoil', 'gasolina', 'combustible', 'carburante', 'gas oil'];

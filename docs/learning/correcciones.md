@@ -596,3 +596,34 @@ Tres ajustes funcionales + una incidencia de despliegue documentada al final.
 - Verificado: 127/127 tests (13 nuevos, centrados en los caminos de abuso más que en el feliz), build limpio backend y frontend. Migración aplicada con backup previo.
 - **Pendiente para que funcione de verdad:** la plantilla `codigo_recuperacion` en Meta Business. Es la **cuarta**, y la única que **no puede esperar a que el usuario escriba primero**: se dispara desde la web, con el usuario fuera de la app y sin conversación abierta, así que necesita plantilla aprobada sí o sí. Mientras no esté, el flujo existe pero el código no llega.
 - Prevención: cuando un incidente se repite (dos veces en cuatro días), el arreglo del momento no es la solución — hay que cerrar la causa. Y en un endpoint de recuperación, lo que hay que probar no es el camino feliz: es que no se pueda usar para enumerar usuarios, ni a fuerza bruta, ni dos veces.
+
+### C-054 · «Nunca se puede subir bien el archivo, no contrasta nada» — dos causas, una mía
+- Area: `backend/src/services/ocr.service.ts`
+- Alberto reportó `invalid_response` al enviar un parte, diciendo que **le pasa siempre** y que por eso el sistema nunca contrasta los tickets. Pidió la causa real, no hipótesis. Investigado con evidencia, salieron **dos causas distintas**:
+
+**Causa 1 — la de ese envío concreto: mi propio despliegue.**
+Cronología reconstruida de los datos, no supuesta:
+- `17:30:24` — arranca mi despliegue de la recuperación de contraseña (`bb4d9c6`).
+- `17:33:01` — se crea el parte en BD (con su `CalculoParte`): `crearParte` funcionó.
+- `17:33:03` — **el contenedor se sustituye** (`docker ps` lo confirma).
+- `17:33:05` — el fichero de la foto llega a `uploads/`: `uploadFoto` funcionó.
+- El `POST /api/fotos` siguiente murió con el contenedor viejo → el proxy respondió algo que no era JSON → el frontend lo tradujo a `invalid_response` (`fetcher.ts:69`, el `.catch` de `res.json()`).
+Prueba de que murió ahí: el parte existe, el fichero existe, y **no hay ninguna fila en `documentos`**.
+Es el **mismo fallo que ya me había pasado horas antes** con un 504 de GlorIA (ver C-051): desplegar encima de alguien que está usando la aplicación. **No desplegar sin avisar, y menos dos veces el mismo día.**
+
+**Causa 2 — la recurrente, y la de verdad: el parser no aguantaba el OCR real.**
+Esta explica el "siempre" y el "no contrasta nada". Y es una corrección de mi propia corrección de esta misma mañana: en C-043 validé el parser contra una **transcripción del ticket que escribí yo a mano** leyendo la foto. Pasó al 100%. Pero Tesseract no produce eso:
+```
+7 Total: 2024.65        <- la P leída como 7
+P-Carrerasi 1967-05     <- dos puntos como 'i', decimal como guion
+carreras! 144605» 85    <- dos puntos como '!', decimal como '»'
+Dist- Total 183043»1    <- punto abreviador como guion
+de pel TOA 23521        <- "P Dist. Total: 2352,1", irrecuperable
+```
+Mi separador de bloques dependía del prefijo `P ` de cada línea del turno. Con la P destrozada, esas líneas caían en el bloque **acumulado**, y el resultado era el peor posible: `parc_total` vacío, `acum_total` = 2024,65 (el importe del **turno** metido en el campo del acumulado — dato correcto en el sitio equivocado), y `valido: false` → el ticket se marcaba **ilegible** y no se comparaba nada. Exactamente lo que él describía.
+- Solución: separar por la línea de **`Borrados`** (último campo del acumulado, no se repite en el turno, y al ser palabra larga y sola en su línea sobrevive al ruido). El prefijo `P` queda como segunda estrategia y las cabeceras como tercera. Más `normalizarNumerosOcr()`, que limpia el ruido dentro de las cifras y en el separador de la etiqueta, sin tocar la fecha ni la hora.
+- Verificado contra la foto real en producción (antes → ahora): `valido` false→**true**, importe del turno —→**2024,65** (el parte declaraba 2024,65), km acumulados —→**183.043,1**, importe acumulado 2024,65 (mal)→corregido.
+- Limitación documentada en el propio test, **no es un fallo**: los km del turno de esa foto no se recuperan (`de pel TOA 23521`, etiqueta destruida). La comparación de **importe** sí funciona, que es la que protege el dinero.
+- Test nuevo `smoke.ocrTicketRealOcr.test.ts` con la salida **literal** de Tesseract como fixture. El de la mañana se queda también: uno prueba que se entiende un ticket limpio, el otro que se entiende el real.
+- **Prevención, y es la lección cara del día:** un texto transcrito a mano **no prueba** un parser de OCR — solo prueba lo que uno cree que pone la foto. Para validar OCR hace falta la salida literal del motor. Lo dije por la mañana en la prevención de C-043 y aun así lo repetí por la tarde.
+- **Pendiente:** el ticket de **combustible** no se ha podido verificar contra una foto real — el flujo murió antes de subirlo (solo hay un fichero en `uploads/`, el del taxímetro), así que `validarTicketGasoil` sigue sin probarse contra salida real de Tesseract. Hace falta una foto de un ticket de gasolinera.
