@@ -746,48 +746,42 @@ Si se sigue este documento correctamente, PilotOS debe arrancar:
 (`docs/auditoria/Auditoria_PilotOS_Consolidada_2026-07-24.md`). Sección
 obligatoria según `docs/arquitectura/nexos-pay-politica-transversal.md` §9.
 
-### Estado actual: NO integrado, sin justificación formal
+### Estado actual: integrado y protegido por flags
 
-Revisado el código completo del backend: **PilotOS hoy no tiene ninguna
-integración con NexOS Pay** — ni activa, ni preparada con adaptador y flag
-(a diferencia de RentOS). No es una decisión documentada; es un hueco que
-esta sección deja constatado para que se decida antes de dar de alta
-clientes reales de pago.
+Actualizado el 2026-08-11. El onboarding provisiona al patrón en NexOS Pay de
+forma idempotente. El backend puede consultar su entitlement, aplicar una
+suspensión/reactivación explícita y separar las funciones Pro mediante límites
+del plan. `NEXOS_PAY_ENFORCE_ACCESS` y `NEXOS_PAY_ENFORCE_PLAN_GATES` permanecen
+apagados hasta validar el catálogo comercial y la migración de datos.
 
 ### Respuestas al checklist (§8 de la política transversal)
 
 | Pregunta | Estado en PilotOS hoy |
 |---|---|
 | ¿Quién es el cliente? | El **patrón** (dueño del taxi), modelado como `Cliente` (tabla `pilotos.clientes`), vinculado a un `MinosUser` vía `patron_id`. Es un producto propio NexOS, no un proyecto a medida. |
-| ¿Qué producto o plan tiene contratado? | No existen planes. Todo cliente de PilotOS tiene el mismo acceso, sin distinción de plan/tier. |
+| ¿Qué producto o plan tiene contratado? | NexOS Pay es la fuente de verdad. La estructura técnica distingue Control y Pro por entitlement; los precios base siguen pendientes de aprobación comercial. |
 | ¿Hay setup? | No definido ni cobrado. |
 | ¿Hay mantenimiento mensual? | Existe un campo `cuota_pilotos` en `ConfiguracionEconomica` (pensado como "cuota de PilotOS" según `docs/decisiones/decisiones-tecnicas.md`), pero **no está conectado a ningún cobro ni control de acceso real** — es un número que se traslada a los cierres de periodo, sin mecanismo de cobro, recordatorio ni bloqueo. |
-| ¿Hay suscripción? | No. |
-| ¿Hay límites de uso? | No. Ningún endpoint comprueba plan ni cuota. |
-| ¿Hay módulos de pago? | No. |
-| ¿Qué pasa si hay impago? | Nada: no existe el concepto de impago en PilotOS. `minos.Users.estado_pago`/`fecha_bloqueo` existen a nivel de esquema compartido NexOS, pero PilotOS no los consulta en ningún middleware. |
-| ¿Debe limitarse acceso? | Hoy no se limita por ningún motivo económico. |
+| ¿Hay suscripción? | Sí, creada por provisioning en NexOS Pay. |
+| ¿Hay límites de uso? | No hay máximos artificiales. Los flags `pilotos_proactividad` y `pilotos_asalariados` gobiernan capacidades Pro. |
+| ¿Hay módulos de pago? | GlorIA forma parte de todos los planes. Mantenimiento, vencimientos y avisos proactivos se habilitan en Pro. |
+| ¿Qué pasa si hay impago? | Pay registra y avisa. PilotOS solo corta ante `suspendido_total`; una caída temporal de Pay usa última decisión conocida o permite paso degradado, conservando datos. |
+| ¿Debe limitarse acceso? | Sí, cuando Pay ordena suspensión total. El gating se activa por variables después de configurar catálogo y migrar clientes. |
 | ¿Debe emitir factura/proforma? | No se genera ninguna factura del propio servicio PilotOS (sí se registran gastos/facturas del taxi, que es otra cosa: la operativa del cliente, no el cobro de NexOS al cliente). |
-| ¿Debe avisar GlorIA? | La integración PilotOS↔GlorIA no está operativa todavía (ver Fase 6 de la auditoría y P1-9 del informe de ChatGPT), así que tampoco hay aviso de impago vía GlorIA. |
+| ¿Debe avisar GlorIA? | Sí. Los avisos comerciales pertenecen a Pay/GlorIA; los avisos operativos Pro siguen perteneciendo a PilotOS. |
 | ¿Debe conectarse con IngresOS? | No conectado. |
 | ¿El dinero lo cobra NexOS o el cliente final? | Producto propio NexOS: si se cobra una cuota de PilotOS, la cobraría NexOS (vía SEPA/transferencia según política base), nunca el patrón del taxi. Hoy no se cobra nada de forma automatizada. |
 
-### Recomendación
+### Pendientes comerciales antes de activar los gates
 
-Antes de dar de alta clientes reales de PilotOS con expectativa de cobro:
-
-1. Definir plan(es) y precio (setup + mensualidad), igual que está pendiente
-   para RentOS (`docs/marketing` — bloqueo: pricing sin definir).
-2. Conectar NexOS Pay siguiendo el patrón ya usado por RentOS
-   (`RentOS/docs/learning/rentos-nexos-pay-integracion-2026-05-29.md`): un
-   adaptador con flag de activación (`NEXOS_PAY_ENABLED`), consultando
-   `/internal/billing/entitlements`, sin construir lógica de pagos aislada
-   dentro de PilotOS.
+1. Aprobar slugs y precios base de Control y Pro, setup y condiciones.
+2. Crear/actualizar esos planes y sus límites en NexOS Pay y migrar las
+   suscripciones existentes antes de encender los flags de enforcement.
 3. Decidir si el `cuota_pilotos` actual de `ConfiguracionEconomica` se
    retira (pasa a vivir solo en NexOS Pay) o se mantiene como un campo
    informativo dentro de la economía del taxi, distinto de lo que NexOS
    cobra al patrón por el servicio.
 
-Hasta que se resuelva lo anterior, PilotOS debe tratarse como **sin control
-de acceso por pago**: cualquier cuenta con contexto PilotOS tiene acceso
-completo, independientemente de si NexOS le factura o no.
+Los asalariados se sincronizan como cantidad absoluta en Pay; el precio unitario
+aplicado vive en el catálogo de Pay. No existe límite máximo de asalariados y un
+evento repetido no incrementa dos veces la cantidad ni la cuota.

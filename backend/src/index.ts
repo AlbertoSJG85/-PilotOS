@@ -28,6 +28,8 @@ import dashboardRoutes from './routes/dashboard.routes';
 // Routes — Internal API (GlorIA integration)
 import internalRoutes from './routes/internal.routes';
 import { requireInternalToken } from './middleware/internal-token.middleware';
+import { requireAuth } from './middleware/auth.middleware';
+import { requireNexosPayAccess } from './middleware/billing-access.middleware';
 
 // Services
 import { iniciarScheduler } from './services/scheduler.service';
@@ -158,12 +160,15 @@ app.use('/uploads', async (req: express.Request, res: express.Response, next: ex
 // ============================================
 // Protected routes (auth required)
 // ============================================
+// Pay gobierna el acceso del cliente PilotOS. Los routers conservan sus
+// controles RBAC propios; requireAuth es idempotente para no repetir consultas.
+app.use('/api', requireAuth, requireNexosPayAccess());
 app.use('/api/partes', parteDiarioRoutes);
 app.use('/api/vehiculos', vehiculoRoutes);
 app.use('/api/usuarios', usuarioRoutes);
 app.use('/api/anomalias', anomaliaRoutes);
 app.use('/api/gastos', gastoRoutes);
-app.use('/api/mantenimientos', mantenimientoRoutes);
+app.use('/api/mantenimientos', requireNexosPayAccess('pilotos_proactividad'), mantenimientoRoutes);
 app.use('/api/fotos', fotoRoutes);
 app.use('/api/incidencias', incidenciaRoutes);
 app.use('/api/cierres', cierreRoutes);

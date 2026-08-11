@@ -33,6 +33,16 @@ export interface ResultadoAlta {
   clienteId?: string;
 }
 
+export interface EntitlementPilotOS {
+  disponible: boolean;
+  allowed: boolean;
+  plan: string | null;
+  estadoPago?: string;
+  estadoAcceso?: string;
+  limites: Record<string, number | boolean | null>;
+  motivo?: string;
+}
+
 export function estaActivo(): boolean {
   return process.env.NEXOS_PAY_ENABLED === 'true';
 }
@@ -42,9 +52,22 @@ function config() {
     activo: estaActivo(),
     baseUrl: (process.env.NEXOS_PAY_URL || '').replace(/\/+$/, ''),
     token: process.env.NEXOS_PAY_INTERNAL_TOKEN || '',
-    plan: process.env.NEXOS_PAY_PLAN_DEFECTO || 'pilotos_autonomo',
+    plan: process.env.NEXOS_PAY_PLAN_DEFECTO || 'pilotos_control',
+    planPro: process.env.NEXOS_PAY_PLAN_PRO || 'pilotos_pro',
     exencion: process.env.NEXOS_PAY_EXENCION || 'fase_prueba',
   };
+}
+
+export function planPro(): string {
+  return config().planPro;
+}
+
+export function enforceAccess(): boolean {
+  return process.env.NEXOS_PAY_ENFORCE_ACCESS === 'true';
+}
+
+export function enforcePlanGates(): boolean {
+  return process.env.NEXOS_PAY_ENFORCE_PLAN_GATES === 'true';
 }
 
 async function fetchConTimeout(url: string, opciones: RequestInit, ms: number): Promise<Response> {
@@ -115,5 +138,77 @@ export async function provisionarCliente(datos: DatosAlta): Promise<ResultadoAlt
   } catch (err) {
     console.warn('[nexos-pay] no se ha podido dar de alta:', err instanceof Error ? err.message : String(err));
     return { ok: false, motivo: 'error_red' };
+  }
+}
+
+/** Consulta read-only. Un fallo de red se distingue de una denegación explícita. */
+export async function consultarEntitlement(externalId: string | number): Promise<EntitlementPilotOS> {
+  const cfg = config();
+  if (!cfg.activo || !cfg.baseUrl || !cfg.token) {
+    return { disponible: false, allowed: true, plan: null, limites: {}, motivo: 'desactivado_o_sin_configurar' };
+  }
+  const query = new URLSearchParams({
+    producto: 'pilotos', external_system: 'pilotos', external_id: String(externalId),
+  });
+  try {
+    const response = await fetchConTimeout(
+      `${cfg.baseUrl}/internal/billing/entitlements?${query.toString()}`,
+      { headers: { 'x-internal-token': cfg.token } },
+      2500,
+    );
+    if (!response.ok) {
+      return { disponible: false, allowed: true, plan: null, limites: {}, motivo: `http_${response.status}` };
+    }
+    const body = await response.json() as any;
+    return {
+      disponible: true,
+      allowed: body.acceso?.allowed !== false,
+      plan: body.plan ?? null,
+      estadoPago: body.estado_pago,
+      estadoAcceso: body.estado_acceso,
+      limites: body.limites ?? {},
+      motivo: body.acceso?.reason,
+    };
+  } catch (error) {
+    return {
+      disponible: false, allowed: true, plan: null, limites: {},
+      motivo: error instanceof Error ? error.message : 'error_red',
+    };
+  }
+}
+
+/**
+ * Sincroniza el número ABSOLUTO de asalariados. El precio unitario no viaja:
+ * NexOS Pay lo obtiene de su catálogo y deduplica por evento_id.
+ */
+export async function actualizarCantidadAsalariados(datos: {
+  externalId: string | number;
+  cantidad: number;
+  eventoId: string;
+}): Promise<{ ok: boolean; motivo?: string }> {
+  const cfg = config();
+  if (!cfg.activo) return { ok: false, motivo: 'desactivado' };
+  if (!cfg.baseUrl || !cfg.token) return { ok: false, motivo: 'sin_configurar' };
+  try {
+    const response = await fetchConTimeout(
+      `${cfg.baseUrl}/internal/billing/componentes/cantidad`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-internal-token': cfg.token },
+        body: JSON.stringify({
+          producto: 'pilotos',
+          external_system: 'pilotos',
+          external_id: String(datos.externalId),
+          clave: 'asalariados_facturables',
+          cantidad: datos.cantidad,
+          evento_id: datos.eventoId,
+        }),
+      },
+      TIMEOUT_ALTA_MS,
+    );
+    if (!response.ok) return { ok: false, motivo: `http_${response.status}` };
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, motivo: error instanceof Error ? error.message : 'error_red' };
   }
 }

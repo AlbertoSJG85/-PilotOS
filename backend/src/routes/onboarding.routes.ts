@@ -12,7 +12,8 @@ import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
 import { requireAuth, requireRol, AuthRequest } from '../middleware/auth.middleware';
 import { sumarMeses } from '../lib/fechas';
 import { resolverPreferenciasAvisos } from '../services/mantenimientoAlertas.service';
-import { provisionarCliente } from '../lib/nexos-pay';
+import { planPro, provisionarCliente } from '../lib/nexos-pay';
+import { sincronizarCantidadAsalariados } from '../services/billing-sync.service';
 
 const router = Router();
 
@@ -326,13 +327,19 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
         // Si NexOS Pay está caído, el patrón termina su alta igual: un problema
         // de facturación no puede impedir que empiece a usar PilotOS. La llamada
         // es idempotente, así que reintentarla es seguro.
-        provisionarCliente({
-            externalId: result.patronUser.id,
-            email: result.patronUser.email ?? '',
-            nombre: result.patronUser.nombre ?? '',
-            telefono: result.patronUser.telefono,
-            rolExterno: 'patron',
-        }).catch((err) => console.warn('[nexos-pay] alta fallida (no bloquea):', err?.message));
+        (async () => {
+            const alta = await provisionarCliente({
+                externalId: result.patronUser.id,
+                email: result.patronUser.email ?? '',
+                nombre: result.patronUser.nombre ?? '',
+                telefono: result.patronUser.telefono,
+                rolExterno: 'patron',
+                ...(result.conductoresAsalariados.length > 0 ? { plan: planPro() } : {}),
+            });
+            if (alta.ok) {
+                await sincronizarCantidadAsalariados(result.cliente.id, `onboarding-asalariados-${result.cliente.id}`);
+            }
+        })().catch((err) => console.warn('[nexos-pay] alta/sync fallida (no bloquea):', err?.message));
 
         res.json({
             status: 'OK',

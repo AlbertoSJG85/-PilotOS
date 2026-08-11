@@ -54,6 +54,7 @@ export function isSameTenant(req: AuthRequest, resourceClienteId: string | null 
  * Busca usuario en minos.Users y enriquece con contexto PilotOS.
  */
 export async function requireAuth(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+    if (req.usuario) { next(); return; }
     try {
         const authHeader = req.headers.authorization;
 

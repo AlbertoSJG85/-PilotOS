@@ -153,7 +153,10 @@ interface ProcesarResultado {
  *      (para no acumular una avalancha de avisos atrasados si el cliente
  *      reactiva el canal despues) pero no se crea Aviso ni se envia nada.
  */
-export async function procesarMantenimientos(prisma: PrismaClient): Promise<ProcesarResultado> {
+export async function procesarMantenimientos(
+    prisma: PrismaClient,
+    puedeProcesarCliente: (patronId: number) => Promise<boolean> = async () => true,
+): Promise<ProcesarResultado> {
     const ahora = new Date();
     const resultado: ProcesarResultado = { evaluados: 0, avisosCreados: 0, avisosEnviados: 0, avisosFallidos: 0, avisosSilenciados: 0 };
 
@@ -171,6 +174,7 @@ export async function procesarMantenimientos(prisma: PrismaClient): Promise<Proc
     for (const vehiculo of vehiculos) {
         const patron = vehiculo.cliente?.patron;
         if (!patron?.telefono) continue;
+        if (!(await puedeProcesarCliente(patron.id))) continue;
 
         const prefs = resolverPreferenciasAvisos(vehiculo.cliente?.preferencias_avisos);
 

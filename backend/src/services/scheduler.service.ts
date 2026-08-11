@@ -15,6 +15,7 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma';
 import { procesarMantenimientos } from './mantenimientoAlertas.service';
+import { clienteTieneFeaturePro } from '../middleware/billing-access.middleware';
 
 const TIMEZONE = 'Atlantic/Canary';
 
@@ -26,7 +27,10 @@ const TIMEZONE = 'Atlantic/Canary';
 async function verificarMantenimientos(): Promise<void> {
     console.log('⏰ [Scheduler] Verificando mantenimientos...');
     try {
-        const resultado = await procesarMantenimientos(prisma);
+        const resultado = await procesarMantenimientos(
+            prisma,
+            (patronId) => clienteTieneFeaturePro(patronId, 'pilotos_proactividad'),
+        );
         console.log(
             `⏰ [Scheduler] Verificacion completada. ${resultado.evaluados} evaluados, ` +
             `${resultado.avisosCreados} avisos creados (${resultado.avisosEnviados} enviados, ${resultado.avisosFallidos} fallidos, ${resultado.avisosSilenciados} silenciados por preferencias).`
