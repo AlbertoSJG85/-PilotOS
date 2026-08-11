@@ -555,4 +555,13 @@ Tres ajustes funcionales + una incidencia de despliegue documentada al final.
 - Además: salida temprana si faltan `GLORIA_API_URL`/`GLORIA_INTERNAL_TOKEN` (antes recorría toda la flota reservando escalones que luego fallaban), y `/internal/avisos/sombra` sustituido por `/internal/avisos/entregas`, que con el envío directo por fin puede responder "¿se envió de verdad?".
 - **RentOS sigue por la cola de siempre, a propósito.** Se migrará cuando el directo esté rodado con PilotOS.
 - Verificado: 108/108 tests, build limpio, migraciones aplicadas con backup previo.
+- **Verificado en producción de punta a punta (2026-08-11):** llamada real desde el VPS al endpoint con el token de producción →
+  ```
+  {"status":"FALLIDO","via":"directo","error":"(#132001) Template name does not exist in the translation","codigo_meta":132001}
+  HTTP 502 en 0.9s
+  ```
+  Es el resultado ideal: `via: directo` confirma que no pasa por la cola, Meta contesta en **0,9 segundos** (antes hasta 30 min), y el error aísla el único bloqueo que queda — las plantillas sin aprobar. Comprobado además que un tipo ajeno a PilotOS con `origin=pilotos` cae al camino de la cola sin romper nada.
+- **Dos gotchas operativos de esta sesión:**
+  1. Encolar dos deploys seguidos de la misma app hace que el segundo tire el contenedor mientras el primero aún sirve peticiones — dio un 504 que parecía un fallo del código y no lo era. Si el webhook ya disparó, **no encolar a mano encima**.
+  2. La prueba con `origin` de un tipo que cae a la cola **encola una notificación de verdad** que n8n intentará enviar. Hay que borrarla de `core."Notificaciones"` después. Para probar el camino directo no hace falta: falla en Meta y no deja rastro.
 - Prevención: antes de copiar una salvaguarda de otro producto, preguntarse qué riesgo concreto cubre **aquí**. Y al quitar una pieza intermedia (una cola, un worker), listar qué te estaba dando gratis — casi siempre son reintento e idempotencia — y reponerlo explícitamente antes de quitarla.
