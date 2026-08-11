@@ -626,4 +626,13 @@ Mi separador de bloques dependía del prefijo `P ` de cada línea del turno. Con
 - Limitación documentada en el propio test, **no es un fallo**: los km del turno de esa foto no se recuperan (`de pel TOA 23521`, etiqueta destruida). La comparación de **importe** sí funciona, que es la que protege el dinero.
 - Test nuevo `smoke.ocrTicketRealOcr.test.ts` con la salida **literal** de Tesseract como fixture. El de la mañana se queda también: uno prueba que se entiende un ticket limpio, el otro que se entiende el real.
 - **Prevención, y es la lección cara del día:** un texto transcrito a mano **no prueba** un parser de OCR — solo prueba lo que uno cree que pone la foto. Para validar OCR hace falta la salida literal del motor. Lo dije por la mañana en la prevención de C-043 y aun así lo repetí por la tarde.
-- **Pendiente:** el ticket de **combustible** no se ha podido verificar contra una foto real — el flujo murió antes de subirlo (solo hay un fichero en `uploads/`, el del taxímetro), así que `validarTicketGasoil` sigue sin probarse contra salida real de Tesseract. Hace falta una foto de un ticket de gasolinera.
+**Causa 3 — encontrada de carambola al verificar el ticket de combustible: el flag `/g`.**
+Al aplicarle a `validarTicketGasoil` la misma limpieza de ruido, el caso **limpio** seguía fallando. Eso no cuadraba, así que lo miré: sus cuatro patrones llevaban el flag `/g`, y con `/g` `String.match` devuelve las coincidencias **enteras** y descarta los grupos de captura:
+```js
+'Total: 28,70 EUR'.match(/...([\d]+[.,][\d]{2}).../gi)
+  -> ['Total: 28,70 EUR']        // m[1] = undefined
+```
+Consecuencia: **todo** ticket de gasolinera salía "No se detectó importe" → inválido → el combustible declarado **no se ha contrastado jamás**. No es una regresión: no ha funcionado nunca. Los patrones del taxímetro no llevan `/g`, por eso ese lado sí funcionaba y este no.
+- Arreglado (quitado el `/g` y aplicada la normalización). Verificado en los tres formatos habituales: limpio, con ruido de OCR, y con símbolo de euro sin la palabra "total". Test `smoke.ocrGasoil.test.ts`.
+- **Prevención concreta:** un patrón con grupo de captura **nunca** debe llevar `/g` si se usa con `String.match` y se lee `m[1]`. Merece una revisión de todos los regex del proyecto que capturen.
+- **Pendiente:** el ticket de combustible sigue **sin verificar contra salida real de Tesseract** — no había ninguna foto de gasolinera subida (el flujo murió antes). Cuando haya una, meter su texto literal como fixture, igual que se hizo con el del taxímetro. Los tres formatos probados son sintéticos, y la lección del día es justo esa.
