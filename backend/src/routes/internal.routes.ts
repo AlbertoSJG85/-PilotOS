@@ -449,15 +449,67 @@ router.post('/documentos-vehiculo', express.json({ limit: '15mb' }), async (req:
         const { vehiculo_id, imagen_base64, subido_por_telefono } = req.body as {
             vehiculo_id?: string; imagen_base64?: string; subido_por_telefono?: string;
         };
-        if (!vehiculo_id || !imagen_base64) {
-            res.status(400).json({ status: 'FAIL', error: 'missing_fields', required: ['vehiculo_id', 'imagen_base64'] });
+        if (!imagen_base64 || (!vehiculo_id && !subido_por_telefono)) {
+            res.status(400).json({
+                status: 'FAIL', error: 'missing_fields',
+                required: ['imagen_base64', 'vehiculo_id o subido_por_telefono'],
+            });
             return;
         }
 
-        const vehiculo = await prisma.vehiculo.findUnique({ where: { id: vehiculo_id }, select: { id: true } });
-        if (!vehiculo) {
-            res.status(404).json({ status: 'FAIL', error: 'vehiculo_not_found' });
-            return;
+        // Resolución del vehículo. Dos formas:
+        //   - `vehiculo_id` explícito (quien ya sabe de qué coche habla).
+        //   - `subido_por_telefono`: lo resuelve PilotOS. GlorIA solo sabe de
+        //     teléfonos y de conversaciones; qué coche tiene cada persona es
+        //     dominio de PilotOS, así que se decide aquí y no allí.
+        let vehiculo: { id: string } | null = null;
+
+        if (vehiculo_id) {
+            vehiculo = await prisma.vehiculo.findUnique({ where: { id: vehiculo_id }, select: { id: true } });
+            if (!vehiculo) {
+                res.status(404).json({ status: 'FAIL', error: 'vehiculo_not_found' });
+                return;
+            }
+        } else {
+            const tel = subido_por_telefono!.trim();
+            const variantes = tel.startsWith('+') ? [tel, tel.slice(1)] : [tel, '+' + tel];
+            const user = await prisma.minosUser.findFirst({ where: { telefono: { in: variantes } } });
+            if (!user) {
+                res.status(404).json({ status: 'FAIL', error: 'usuario_no_encontrado' });
+                return;
+            }
+
+            const conductor = await prisma.conductor.findFirst({
+                where: { usuario_id: user.id, activo: true },
+                select: { cliente_id: true },
+            });
+            const cliente = conductor
+                ? { id: conductor.cliente_id }
+                : await prisma.cliente.findFirst({ where: { patron_id: user.id, activo: true }, select: { id: true } });
+            if (!cliente) {
+                res.status(404).json({ status: 'FAIL', error: 'sin_cliente_pilotos' });
+                return;
+            }
+
+            const vehiculos = await prisma.vehiculo.findMany({
+                where: { cliente_id: cliente.id, activo: true },
+                select: { id: true, matricula: true },
+            });
+            if (vehiculos.length === 0) {
+                res.status(404).json({ status: 'FAIL', error: 'sin_vehiculos' });
+                return;
+            }
+            if (vehiculos.length > 1) {
+                // No adivinamos. Que el llamante pregunte de cuál se trata:
+                // adjudicar una factura al coche equivocado es peor que no
+                // adjudicarla.
+                res.status(409).json({
+                    status: 'FAIL', error: 'varios_vehiculos',
+                    vehiculos: vehiculos.map((v) => ({ id: v.id, matricula: v.matricula })),
+                });
+                return;
+            }
+            vehiculo = { id: vehiculos[0].id };
         }
 
         let buffer: Buffer;
@@ -491,11 +543,11 @@ router.post('/documentos-vehiculo', express.json({ limit: '15mb' }), async (req:
                 hash_sha256,
                 estado: 'RECIBIDO',
                 estado_ocr: 'PENDIENTE',
-                vehiculo_id: vehiculo.id,
+                vehiculo_id: vehiculo!.id,
             },
         });
 
-        console.log(`[INTERNAL] Documento sin clasificar recibido para vehiculo ${vehiculo.id}${subido_por_telefono ? ` (via ${subido_por_telefono})` : ''}: ${documento.id}`);
+        console.log(`[INTERNAL] Documento sin clasificar recibido para vehiculo ${vehiculo!.id}${subido_por_telefono ? ` (via ${subido_por_telefono})` : ''}: ${documento.id}`);
 
         res.status(201).json({ status: 'OK', data: { documento_id: documento.id, url } });
     } catch (err: any) {
