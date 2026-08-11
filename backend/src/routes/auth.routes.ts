@@ -6,7 +6,9 @@ import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../lib/prisma';
 import { generarToken, requireAuth, AuthRequest } from '../middleware/auth.middleware';
+import crypto from 'crypto';
 import { esPlaceholder, hashPassword, validarFortalezaPassword, verificarPassword } from '../lib/password';
+import { enviarAvisoGloria } from '../services/notificacion.service';
 
 const router = Router();
 
@@ -268,6 +270,164 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
         });
     } catch (err: any) {
         console.error('[AUTH] /me error:', err.message);
+        const isDev = process.env.NODE_ENV === 'development';
+        res.status(500).json({ status: 'FAIL', error: 'server_error', message: isDev ? err.message : 'Error interno' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Recuperación de contraseña (2026-08-11)
+//
+// Hasta hoy no existía: si olvidabas la contraseña había que editar el hash a
+// mano en la base de datos. Pasó dos veces en cuatro días (C-039 el 7 de
+// agosto, y otra vez el 11) — es la causa de fondo, no la anécdota.
+//
+// Decisiones que gobiernan estos dos endpoints:
+//   - El código se manda por WhatsApp con GlorIA, que ya es el canal del
+//     producto. Verifica posesión del número, que es justo lo que le faltaba
+//     a `establecer-password` (ver su nota de seguridad).
+//   - La respuesta de `/recuperar` es SIEMPRE la misma exista o no la cuenta.
+//     Si dijera "ese teléfono no está registrado" cualquiera podría averiguar
+//     quién usa PilotOS probando números.
+//   - El código no se guarda en claro, solo su hash: quien lea la tabla no
+//     puede entrar en ninguna cuenta.
+//   - Un solo uso, caduca en 15 minutos, y se quema a los 5 intentos fallidos.
+// ─────────────────────────────────────────────────────────────────────────
+
+const RESET_VIGENCIA_MIN = 15;
+const RESET_MAX_INTENTOS = 5;
+
+function generarCodigo(): string {
+    // 6 dígitos con aleatoriedad criptográfica (no Math.random).
+    return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+}
+
+/**
+ * POST /api/auth/recuperar   { telefono }
+ * Manda un código por WhatsApp. Responde igual exista o no la cuenta.
+ */
+router.post('/recuperar', authLimiter, async (req: Request, res: Response) => {
+    // Respuesta única, se use el camino que se use. Definida una sola vez para
+    // que sea imposible que una rama conteste distinto sin querer.
+    const respuestaNeutra = {
+        status: 'OK',
+        message: 'Si el telefono corresponde a una cuenta, recibiras un codigo por WhatsApp.',
+    };
+
+    try {
+        const { telefono } = req.body;
+        if (!telefono) {
+            res.status(400).json({ status: 'FAIL', error: 'missing_telefono', message: 'El telefono es obligatorio' });
+            return;
+        }
+
+        const usuario = await resolverCandidatoPilotOS(String(telefono).trim());
+        if (!usuario || !usuario.telefono) {
+            res.json(respuestaNeutra);
+            return;
+        }
+
+        // Un código nuevo invalida los anteriores: si no, pedir varios dejaría
+        // varias puertas abiertas a la vez.
+        await prisma.passwordReset.updateMany({
+            where: { usuario_id: usuario.id, usado_at: null },
+            data: { usado_at: new Date() },
+        });
+
+        const codigo = generarCodigo();
+        await prisma.passwordReset.create({
+            data: {
+                usuario_id: usuario.id,
+                codigo_hash: await hashPassword(codigo),
+                expira_at: new Date(Date.now() + RESET_VIGENCIA_MIN * 60 * 1000),
+            },
+        });
+
+        const envio = await enviarAvisoGloria(usuario.telefono, 'codigo_recuperacion', {
+            codigo,
+            minutos: String(RESET_VIGENCIA_MIN),
+        });
+        if (!envio.ok) {
+            // No se le cuenta al usuario (revelaría que la cuenta existe), pero
+            // tiene que verse en el log: si esto falla, nadie puede recuperar.
+            console.error(`[AUTH] No se pudo enviar el codigo de recuperacion al usuario ${usuario.id}: ${envio.error}`);
+        }
+
+        res.json(respuestaNeutra);
+    } catch (err: any) {
+        console.error('[AUTH] recuperar error:', err.message);
+        // Incluso ante un fallo interno se responde igual, por lo mismo.
+        res.json(respuestaNeutra);
+    }
+});
+
+/**
+ * POST /api/auth/restablecer   { telefono, codigo, password }
+ * Valida el código y fija la contraseña nueva. Deja la sesión iniciada.
+ */
+router.post('/restablecer', authLimiter, async (req: Request, res: Response) => {
+    try {
+        const { telefono, codigo, password } = req.body;
+        if (!telefono || !codigo || !password) {
+            res.status(400).json({
+                status: 'FAIL', error: 'missing_fields',
+                message: 'Telefono, codigo y contrasena son obligatorios',
+            });
+            return;
+        }
+
+        const fortaleza = validarFortalezaPassword(password);
+        if (!fortaleza.valid) {
+            res.status(400).json({ status: 'FAIL', error: 'weak_password', message: fortaleza.error });
+            return;
+        }
+
+        // Mismo mensaje para "no existe la cuenta", "código incorrecto" y
+        // "código caducado": no damos pistas sobre en cuál de las tres falla.
+        const rechazar = () => res.status(400).json({
+            status: 'FAIL', error: 'codigo_invalido',
+            message: 'El codigo no es valido o ha caducado. Pide uno nuevo.',
+        });
+
+        const usuario = await resolverCandidatoPilotOS(String(telefono).trim());
+        if (!usuario) { rechazar(); return; }
+
+        const reset = await prisma.passwordReset.findFirst({
+            where: { usuario_id: usuario.id, usado_at: null, expira_at: { gt: new Date() } },
+            orderBy: { created_at: 'desc' },
+        });
+        if (!reset) { rechazar(); return; }
+
+        if (reset.intentos >= RESET_MAX_INTENTOS) {
+            await prisma.passwordReset.update({ where: { id: reset.id }, data: { usado_at: new Date() } });
+            rechazar();
+            return;
+        }
+
+        const coincide = await verificarPassword(String(codigo).trim(), reset.codigo_hash);
+        if (!coincide) {
+            await prisma.passwordReset.update({ where: { id: reset.id }, data: { intentos: { increment: 1 } } });
+            rechazar();
+            return;
+        }
+
+        // Código bueno: contraseña nueva y código quemado, de forma atómica —
+        // que no pueda quedar la contraseña cambiada con el código aún vivo.
+        await prisma.$transaction([
+            prisma.minosUser.update({
+                where: { id: usuario.id },
+                data: { password_hash: await hashPassword(password) },
+            }),
+            prisma.passwordReset.update({
+                where: { id: reset.id },
+                data: { usado_at: new Date() },
+            }),
+        ]);
+
+        console.log(`[AUTH] Contrasena restablecida para el usuario ${usuario.id}`);
+        res.json(await emitirSesion(usuario));
+    } catch (err: any) {
+        console.error('[AUTH] restablecer error:', err.message);
         const isDev = process.env.NODE_ENV === 'development';
         res.status(500).json({ status: 'FAIL', error: 'server_error', message: isDev ? err.message : 'Error interno' });
     }

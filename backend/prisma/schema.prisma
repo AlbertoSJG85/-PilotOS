@@ -468,6 +468,32 @@ model Aviso {
   @@schema("pilotos")
 }
 
+/// Códigos de recuperación de contraseña (2026-08-11).
+///
+/// Hasta hoy PilotOS no tenía forma de recuperar el acceso: si olvidabas la
+/// contraseña había que editar el hash a mano en la base de datos. Pasó dos
+/// veces en cuatro días (C-039 el 7 de agosto, otra vez el 11).
+///
+/// El código NUNCA se guarda en claro: solo su hash. Quien lea esta tabla no
+/// puede entrar en ninguna cuenta.
+model PasswordReset {
+  id          String    @id @default(uuid())
+  /// minos.Users.id — no hay FK porque minos es de otro producto del ecosistema.
+  usuario_id  Int
+  codigo_hash String
+  expira_at   DateTime
+  /// Un código sirve UNA vez. Al usarlo se sella aquí.
+  usado_at    DateTime?
+  /// Intentos fallidos contra este código; al pasarse, se quema.
+  intentos    Int       @default(0)
+  created_at  DateTime  @default(now())
+
+  @@index([usuario_id])
+  @@index([expira_at])
+  @@map("password_resets")
+  @@schema("pilotos")
+}
+
 model CierrePeriodo {
   id                     String   @id @default(uuid())
   cliente_id             String

@@ -22,6 +22,34 @@ export async function establecerPassword(telefono: string, password: string): Pr
   });
 }
 
+/**
+ * POST /api/auth/recuperar — Pide un codigo por WhatsApp.
+ * Responde SIEMPRE lo mismo exista o no la cuenta, para no revelar que
+ * telefonos estan registrados. No hay nada que comprobar en la respuesta.
+ */
+export async function pedirCodigoRecuperacion(telefono: string): Promise<{ status: string; message: string }> {
+  return apiFetch('/api/auth/recuperar', {
+    method: 'POST',
+    body: { telefono },
+    public: true,
+  });
+}
+
+/**
+ * POST /api/auth/restablecer — Codigo + contrasena nueva. Inicia sesion.
+ */
+export async function restablecerPassword(
+  telefono: string,
+  codigo: string,
+  password: string,
+): Promise<LoginResponse> {
+  return apiFetch('/api/auth/restablecer', {
+    method: 'POST',
+    body: { telefono, codigo, password },
+    public: true,
+  });
+}
+
 /** POST /api/auth/cambiar-password — Cambia la contrasena de la cuenta autenticada */
 export async function cambiarPassword(passwordActual: string, passwordNueva: string): Promise<{ status: string; message?: string }> {
   return apiFetch('/api/auth/cambiar-password', {
