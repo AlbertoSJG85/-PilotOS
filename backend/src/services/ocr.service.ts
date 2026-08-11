@@ -151,10 +151,17 @@ function extractNumCurrency(text: string, patterns: RegExp[]): number | null {
 /**
  * Normaliza distancias: si el valor es > 2000, asume metros y convierte a km.
  * Cubre taxímetros que reportan en metros (valor típico de un turno: 150–500 km).
+ *
+ * IMPORTANTE (2026-08-11, hallazgo N6 con ticket real): esta heurística SOLO
+ * es válida para valores del TURNO (parcial) — nadie hace 2000+ km en un día.
+ * Un acumulado histórico del taxímetro supera los 2000 km con total normalidad
+ * (183.108 km de vida útil, por ejemplo) y NO debe dividirse por 1000. Llamar
+ * con `permitirConversionMetros: false` para los campos acum_*.
  */
-function extractNumDistance(text: string, patterns: RegExp[]): number | null {
+function extractNumDistance(text: string, patterns: RegExp[], permitirConversionMetros = true): number | null {
     const v = extractNum(text, patterns);
     if (v === null) return null;
+    if (!permitirConversionMetros) return v;
     return v > 2000 ? Math.round((v / 1000) * 10) / 10 : v;
 }
 
@@ -217,12 +224,38 @@ export interface DatosTaximetro {
     errores: string[];
 }
 
-function extractarSeccionTaximetro(t: string) {
-    const tUp = t.toUpperCase();
+// Una línea de "P Total:", "P Dist. Total:", "P Nº de servs:"... — el modelo de
+// ticket real visto el 2026-08-11 no usa cabeceras de sección ("ACUMULADO",
+// "PARCIAL"...), marca CADA campo del turno con este prefijo "P " suelto.
+// \b evita que "Precio" o similar cuente como prefijo (la "P" de "Precio" no
+// está seguida de espacio/punto).
+const LINEA_PARCIAL = /^\s*P[.\s]/i;
 
-    // Palabras clave que delimitan la sección de acumulados
+/**
+ * Separa el texto del ticket en bloque "acumulado" (histórico del taxímetro)
+ * y bloque "parcial" (turno actual).
+ *
+ * Dos estrategias, en orden:
+ *   1. Por LÍNEA: si alguna línea empieza por "P " (el modelo de ticket real
+ *      de PilotOS, sin cabeceras de sección), esa línea es del turno y el
+ *      resto es acumulado. Esta es la señal más fiable porque no depende de
+ *      que el OCR lea bien una palabra de cabecera.
+ *   2. Por PALABRA CLAVE: si ninguna línea usa el prefijo "P ", se cae al
+ *      método anterior (buscar "ACUMULADO"/"PARCIAL"/"TURNO"...), para no
+ *      romper otros modelos de taxímetro que sí rotulen las secciones.
+ */
+function extractarSeccionTaximetro(t: string) {
+    const lineas = t.split('\n');
+    const lineasParcial = lineas.filter((l) => LINEA_PARCIAL.test(l));
+
+    if (lineasParcial.length > 0) {
+        const lineasAcum = lineas.filter((l) => !LINEA_PARCIAL.test(l));
+        return { acumText: lineasAcum.join('\n'), parcText: lineasParcial.join('\n') };
+    }
+
+    // ── Fallback: separación por palabra clave de sección (modelos antiguos) ──
+    const tUp = t.toUpperCase();
     const acumKws = ['ACUMULADO', 'TOTAL GENERAL', 'RESUMEN TOTAL', 'DATOS TOTALES', 'HIST'];
-    // Palabras clave que delimitan la sección de parciales
     const parcKws = ['PARCIAL', 'DEL TURNO', 'TURNO', 'DEL DIA', 'JORNADA', 'DATOS DEL'];
 
     let acumStart = -1;
@@ -236,31 +269,21 @@ function extractarSeccionTaximetro(t: string) {
         if (idx >= 0 && (parcStart < 0 || idx < parcStart)) parcStart = idx;
     }
 
-    let acumText: string;
-    let parcText: string;
-
     if (acumStart >= 0 && parcStart >= 0) {
         if (acumStart < parcStart) {
-            acumText = t.substring(acumStart, parcStart);
-            parcText = t.substring(parcStart);
-        } else {
-            parcText = t.substring(parcStart, acumStart);
-            acumText = t.substring(acumStart);
+            return { acumText: t.substring(acumStart, parcStart), parcText: t.substring(parcStart) };
         }
-    } else if (acumStart >= 0) {
-        acumText = t.substring(acumStart);
-        parcText = t.substring(0, acumStart);
-    } else if (parcStart >= 0) {
-        parcText = t.substring(parcStart);
-        acumText = t.substring(0, parcStart);
-    } else {
-        // Sin secciones claras: usar el texto completo para parciales,
-        // y vacío para acumulados (los parciales son más importantes para cotejo).
-        parcText = t;
-        acumText = '';
+        return { parcText: t.substring(parcStart, acumStart), acumText: t.substring(acumStart) };
     }
-
-    return { acumText, parcText };
+    if (acumStart >= 0) {
+        return { acumText: t.substring(acumStart), parcText: t.substring(0, acumStart) };
+    }
+    if (parcStart >= 0) {
+        return { parcText: t.substring(parcStart), acumText: t.substring(0, parcStart) };
+    }
+    // Sin ninguna señal: todo se trata como parcial (mejor sobre-comparar el
+    // turno, que es lo que ya se hacía, que no comparar nada).
+    return { parcText: t, acumText: '' };
 }
 
 /**
@@ -294,19 +317,24 @@ export function validarTicketTaximetro(texto: string): DatosTaximetro {
         /acum\w*\s+total\s*[:.]?\s*([\d]+[.,][\d]{2})/i,
     ]) ?? undefined;
 
+    // acum_dist_* NUNCA pasa por la conversión metros→km (tercer parámetro
+    // `false`): un acumulado histórico supera los 2000 km con normalidad.
     const acum_dist_total = extractNumDistance(acumText, [
         /dist(?:ancia)?\.?\s*(?:total|recorrida)?\s*[:.]?\s*([\d]+[.,]?[\d]*)\s*(?:km|m\b)/i,
         /dist\s*\.?\s*total\s*[:.]?\s*([\d]+[.,]?[\d]*)/i,
-    ]) ?? undefined;
+    ], false) ?? undefined;
 
+    // "serv\w*" en vez de "servicios?": el ticket real abrevia como "servs".
     const acum_num_servicios = extractNum(acumText, [
-        /n[.oº°]?\s*(?:de\s+)?servicios?\s*[:.]?\s*(\d+)/i,
-        /servicios?\s*[:.]?\s*(\d+)/i,
-        /serv\s*\.?\s*[:.]?\s*(\d+)/i,
+        /n[.oº°]?\s*(?:de\s+)?serv\w*\s*[:.]?\s*(\d+)/i,
+        /serv\w*\s*[:.]?\s*(\d+)/i,
     ]) ?? undefined;
 
-    const acum_carreras = extractNum(acumText, [
-        /carreras?\s*[:.]?\s*(\d+)/i,
+    // "Carreras" es un IMPORTE (€), no un contador — el ticket real lo
+    // confirma: Carreras + Suplementos = Total, los tres en euros con
+    // decimales. extractNum (entero) lo truncaba silenciosamente.
+    const acum_carreras = extractNumCurrency(acumText, [
+        /carreras?\s*[:.]?\s*([\d]+[.,][\d]{2})/i,
     ]) ?? undefined;
 
     const acum_suplementos = extractNumCurrency(acumText, [
@@ -316,24 +344,30 @@ export function validarTicketTaximetro(texto: string): DatosTaximetro {
 
     const acum_dist_ocupado = extractNumDistance(acumText, [
         /dist\.?\s*ocup\w*\s*[:.]?\s*([\d]+[.,]?[\d]*)\s*(?:km|m\b)?/i,
-    ]) ?? undefined;
+    ], false) ?? undefined;
 
     const acum_dist_libre = extractNumDistance(acumText, [
         /dist\.?\s*libre\s*[:.]?\s*([\d]+[.,]?[\d]*)\s*(?:km|m\b)?/i,
-    ]) ?? undefined;
+    ], false) ?? undefined;
 
+    // Nota (2026-08-11): en el ticket real de prueba este campo llega como
+    // "9999999,9" — un desbordamiento del propio taxímetro, no un dato real.
+    // No se usa en ninguna comparación aguas abajo; se deja tal cual llega.
     const acum_dist_off = extractNumDistance(acumText, [
         /dist\.?\s*(?:off|apagado)\s*[:.]?\s*([\d]+[.,]?[\d]*)\s*(?:km|m\b)?/i,
-    ]) ?? undefined;
+    ], false) ?? undefined;
 
+    // \b delante de "t": sin ese límite de palabra, "Dist." (que termina en
+    // "t") + ". " + "Ocupado" coincidía con el patrón y se colaba como si
+    // fuera "Tiempo Ocupado" — hallazgo del ticket real del 2026-08-11.
     const acum_tiempo_ocupado = extractNum(acumText, [
-        /t(?:iempo)?\.?\s*ocup\w*\s*[:.]?\s*(\d+)\s*(?:min|h)?/i,
-        /t\.?\s*ocu\.?\s*[:.]?\s*(\d+)/i,
+        /\bt(?:iempo)?\.?\s*ocup\w*\s*[:.]?\s*(\d+)\s*(?:min|h)?/i,
+        /\bt\.?\s*ocu\.?\s*[:.]?\s*(\d+)/i,
     ]) ?? undefined;
 
     const acum_tiempo_on = extractNum(acumText, [
-        /t(?:iempo)?\.?\s*on\s*[:.]?\s*(\d+)\s*(?:min|h)?/i,
-        /t\.?\s*enc\w*\s*[:.]?\s*(\d+)/i,
+        /\bt(?:iempo)?\.?\s*on\s*[:.]?\s*(\d+)\s*(?:min|h)?/i,
+        /\bt\.?\s*enc\w*\s*[:.]?\s*(\d+)/i,
     ]) ?? undefined;
 
     // ── Parciales ──
@@ -356,12 +390,13 @@ export function validarTicketTaximetro(texto: string): DatosTaximetro {
     ]) ?? undefined;
 
     const parc_num_servicios = extractNum(parcText, [
-        /n[.oº°]?\s*(?:de\s+)?servicios?\s*[:.]?\s*(\d+)/i,
-        /servicios?\s*[:.]?\s*(\d+)/i,
+        /n[.oº°]?\s*(?:de\s+)?serv\w*\s*[:.]?\s*(\d+)/i,
+        /serv\w*\s*[:.]?\s*(\d+)/i,
     ]) ?? undefined;
 
-    const parc_carreras = extractNum(parcText, [
-        /carreras?\s*[:.]?\s*(\d+)/i,
+    // "Carreras" es un importe, no un contador — ver nota en acum_carreras.
+    const parc_carreras = extractNumCurrency(parcText, [
+        /carreras?\s*[:.]?\s*([\d]+[.,][\d]{2})/i,
     ]) ?? undefined;
 
     const parc_suplementos = extractNumCurrency(parcText, [
@@ -380,12 +415,13 @@ export function validarTicketTaximetro(texto: string): DatosTaximetro {
         /dist\.?\s*(?:off|apagado)\s*[:.]?\s*([\d]+[.,]?[\d]*)/i,
     ]) ?? undefined;
 
+    // \b — mismo motivo que en acum_tiempo_ocupado.
     const parc_tiempo_ocupado = extractNum(parcText, [
-        /t(?:iempo)?\.?\s*ocup\w*\s*[:.]?\s*(\d+)/i,
+        /\bt(?:iempo)?\.?\s*ocup\w*\s*[:.]?\s*(\d+)/i,
     ]) ?? undefined;
 
     const parc_tiempo_on = extractNum(parcText, [
-        /t(?:iempo)?\.?\s*on\s*[:.]?\s*(\d+)/i,
+        /\bt(?:iempo)?\.?\s*on\s*[:.]?\s*(\d+)/i,
     ]) ?? undefined;
 
     // ── Validación ──
