@@ -436,23 +436,25 @@ Hoy `proximo_km = km_actuales + frecuencia` y `proxima_fecha = hoy + frecuencia`
 - [ ] **E1.3** Escribir la decisión de rumbo en `docs/decisiones-tecnicas.md`: *los flujos se migran de n8n al backend con patrón sombra; n8n no se apaga de golpe.*
 - [ ] **E1.4** Borrar o marcar como obsoleto `PilotOS/n8n-workflows/wf-scheduler-avisos.json` (ya reemplazado) y `wf-inbound-whatsapp.json` (apunta a `/api/webhook/gloria`, endpoint que no existe en PilotOS).
 
-### E2 — Sombra del envío: backend directo a Meta
+### E2 — Sombra del envío: backend directo a Meta (CONSTRUIDA el 2026-08-11)
 
-El molde a copiar es **`RentOS/nexos-api/server.js:7900-8059` + `migrations/sombra_reconciliacion.sql`**, que lleva 19 días corriendo en producción. Sus tres propiedades de diseño, que hay que replicar tal cual:
+El molde copiado es **`RentOS/nexos-api/server.js:7900-8059` + `migrations/sombra_reconciliacion.sql`**. Sus tres propiedades de diseño, replicadas tal cual:
 
-1. **Guardar las entradas, no solo la decisión** — si no, las divergencias no se pueden interpretar.
-2. **Una "alerta roja" precalculada en la fila** — no todas las divergencias son iguales.
-3. **La sombra debe recibir exactamente la misma entrada que el sistema observado** — si no, mide otra cosa.
+1. **Guardar las entradas, no solo la decisión.**
+2. **Una "alerta roja" precalculada en la fila.**
+3. **La sombra recibe exactamente la misma entrada que el sistema observado** (el mismo `telefono`/`tipo`/`template_params` que se manda de verdad).
 
-Y el anti-patrón a evitar, también de RentOS: `PENDIENTE_SHADOW` es una cola muerta con 10 mensajes atascados porque nadie la revisa. **Toda sombra necesita endpoint de revisión y fecha de decisión.**
+Estado real de RentOS comprobado antes de construir esto (2026-08-11): **todavía no está lista para promover** — los dos casos "crear" repetidos dejaron de aparecer el 8 de agosto, pero el reloj de las 2 semanas limpias empieza ahí (faltaría hasta ~22 de agosto). Sirvió de referencia viva, no de excusa para saltarse el criterio.
 
-- [ ] **E2.1** Migración: tabla `pilotos."Sombra_Envio"` con `ejecutado_en`, `aviso_id`, `entrada` (JSONB: teléfono, tipo, params — lo mismo que se mandó a GlorIA), `decision_backend` (JSONB: el payload de Meta que el backend *habría* construido), `resultado_n8n` (JSONB: lo que hizo el worker, vía la conciliación de A4), `coincide BOOLEAN`, `alerta TEXT`.
-- [ ] **E2.2** Módulo puro y testeable `backend/src/services/metaPayload.service.ts` → `construirPayloadMeta(tipo, telefono, params)`, que replique **exactamente** el nodo "Build Meta Payload" del worker. Molde: `RentOS/scripts/reconciliar-cobertura.js` (28/28 tests).
-- [ ] **E2.3** En `mantenimientoAlertas.service.ts`, tras el envío real, llamar a la sombra: construir el payload y **solo insertar la fila**. Nunca enviar. Nunca alterar el flujo. Envolver en try/catch para que un fallo de la sombra jamás rompa el aviso real.
-- [ ] **E2.4** `GET /internal/avisos/sombra?dias=7` con el mismo formato que `GET /internal/ical/sombra` de RentOS: `{ventana_dias, ejecuciones, con_alerta, alertas, ultimas}`. Añadirlo a `RUTAS_LUCIA` para poder preguntarlo por Telegram.
-- [ ] **E2.5** Doc semanal en `docs/learning/`, con la tabla «Estado de la sombra» del molde `RentOS/docs/learning/sombra-summary-ical-2026-08-08.md`.
-- [ ] **E2.6** **Criterio de promoción, escrito de antemano:** mínimo 2 semanas con `coincide = true` en el 100% y `alertas = 0`. La promoción es **decisión explícita de Alberto**, nunca automática. El rollback es una variable de entorno.
-- [ ] **E2.7** Poner **fecha de revisión** en el doc. Sin fecha, se pudre (ver `PENDIENTE_SHADOW`).
+- [x] **E2.1** Tabla `pilotos.sombra_envios` — `ejecutado_en`, `aviso_id`, `entrada` (JSONB), `decision_backend` (JSONB), `resultado_n8n` (JSONB, null hasta que exista A4), `coincide` (null hasta A4), `alerta`. Migración `20260811180000_sombra_envio`, **no aplicada** (BD compartida, sin confirmar).
+- [x] **E2.2** `backend/src/services/metaPayload.service.ts` → `construirPayloadMeta(tipo, telefono, params)`, réplica exacta del nodo "Build Meta Payload" para los 3 tipos de PilotOS. Test `smoke.sombraEnvio.test.ts` verifica byte a byte contra el payload que el nodo real produciría.
+- [x] **E2.3** Conectada en `mantenimientoAlertas.service.ts` y `ocrComparacion.service.ts` (`registrarSombraEnvio`), siempre en try/catch propio.
+- [x] **E2.4** `GET /internal/avisos/sombra?dias=7`, mismo formato que RentOS. Añadido a `RUTAS_LUCIA`.
+- [ ] **E2.5** Doc semanal de revisión — todavía no, no hay datos acumulados que revisar el primer día.
+- [x] **E2.6** Criterio de promoción ya escrito (ver C-049 en `correcciones.md`): no antes de que exista A4 (conciliación de entregas) y `coincide=true` sostenido varias semanas sin alertas. Decisión explícita de Alberto, nunca automática.
+- [ ] **E2.7** Fecha de revisión — pendiente de fijar cuando haya al menos una semana de datos acumulados.
+
+**Verificado: 110/110 tests del backend, build limpio.**
 
 ---
 
