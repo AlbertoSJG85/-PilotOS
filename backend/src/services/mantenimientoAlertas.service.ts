@@ -20,6 +20,7 @@
  */
 import { PrismaClient } from '@prisma/client';
 import { enviarAvisoGloria } from './notificacion.service';
+import { registrarSombraEnvio } from './metaPayload.service';
 
 // ── Escalones por defecto ───────────────────────────────────────────────
 // Km: 1000/500/250 antes de vencer (explicitos en el informe), y cada 250km
@@ -257,11 +258,15 @@ export async function procesarMantenimientos(
             });
             resultado.avisosCreados++;
 
-            const envio = await enviarAvisoGloria(
-                patron.telefono,
-                vencido ? 'mantenimiento_vencido' : 'mantenimiento_proximo',
-                { matricula: vehiculo.matricula, mantenimiento: mant.catalogo.nombre, motivo: motivoKm ?? motivoDias ?? '' },
-            );
+            const tipoAviso = vencido ? 'mantenimiento_vencido' : 'mantenimiento_proximo';
+            const templateParams = { matricula: vehiculo.matricula, mantenimiento: mant.catalogo.nombre, motivo: motivoKm ?? motivoDias ?? '' };
+
+            const envio = await enviarAvisoGloria(patron.telefono, tipoAviso, templateParams);
+
+            // Sombra (Fase E): registra qué mandaría el backend a Meta
+            // directamente, sin mandarlo nunca. No afecta al envío real,
+            // que ya ha ocurrido en la línea de arriba.
+            await registrarSombraEnvio(prisma, aviso.id, patron.telefono, tipoAviso, templateParams);
 
             await prisma.aviso.update({
                 where: { id: aviso.id },

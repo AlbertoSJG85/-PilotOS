@@ -7,7 +7,11 @@
  * y ejecutar acciones desde WhatsApp.
  */
 import { Router, Request, Response } from 'express';
+import express from 'express';
+import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
+import { clienteTieneFeaturePro } from '../middleware/billing-access.middleware';
+import { procesarYGuardarImagen } from '../services/storage.service';
 
 const router = Router();
 
@@ -342,6 +346,19 @@ router.get('/mantenimientos', async (req: Request, res: Response) => {
             return;
         }
 
+        const vehiculo = await prisma.vehiculo.findUnique({
+            where: { id: vehiculoId },
+            select: { cliente: { select: { patron_id: true } } },
+        });
+        if (!vehiculo) {
+            res.status(404).json({ status: 'FAIL', error: 'vehicle_not_found' });
+            return;
+        }
+        if (!(await clienteTieneFeaturePro(vehiculo.cliente.patron_id, 'pilotos_proactividad'))) {
+            res.status(403).json({ status: 'FAIL', error: 'upgrade_required', feature: 'pilotos_proactividad' });
+            return;
+        }
+
         const mantenimientos = await prisma.mantenimientoVehiculo.findMany({
             where: { vehiculo_id: vehiculoId },
             include: {
@@ -408,6 +425,117 @@ router.get('/kb/producto', async (_req: Request, res: Response) => {
             incidencia: 'Patron solicita → GlorIA crea incidencia con justificacion → queda auditada',
         },
     });
+});
+
+/**
+ * POST /internal/documentos-vehiculo
+ *
+ * 2026-08-11 — terreno para "el propietario manda una foto por WhatsApp y el
+ * sistema la encaja sola" (petición de Alberto). Esto es SOLO el tramo de
+ * recepción y guardado: decide dónde vive el fichero y dueño (vehículo).
+ * NO clasifica el documento ni extrae datos — eso está deliberadamente sin
+ * construir hasta tener una foto real de referencia (ver docs/learning,
+ * mismo motivo que obligó a rehacer el parser del ticket de taxímetro:
+ * las reglas de OCR escritas a ciegas fallan contra el documento real).
+ *
+ * Solo el token `total` (GlorIA) puede llamarlo — no está en RUTAS_HERMES
+ * ni RUTAS_LUCIA, así que un token acotado recibe 403 automáticamente.
+ *
+ * Body: { vehiculo_id: string, imagen_base64: string, subido_por_telefono?: string }
+ * imagen_base64: SIN el prefijo "data:image/...;base64," — solo el payload.
+ */
+router.post('/documentos-vehiculo', express.json({ limit: '15mb' }), async (req: Request, res: Response) => {
+    try {
+        const { vehiculo_id, imagen_base64, subido_por_telefono } = req.body as {
+            vehiculo_id?: string; imagen_base64?: string; subido_por_telefono?: string;
+        };
+        if (!vehiculo_id || !imagen_base64) {
+            res.status(400).json({ status: 'FAIL', error: 'missing_fields', required: ['vehiculo_id', 'imagen_base64'] });
+            return;
+        }
+
+        const vehiculo = await prisma.vehiculo.findUnique({ where: { id: vehiculo_id }, select: { id: true } });
+        if (!vehiculo) {
+            res.status(404).json({ status: 'FAIL', error: 'vehiculo_not_found' });
+            return;
+        }
+
+        let buffer: Buffer;
+        try {
+            buffer = Buffer.from(imagen_base64, 'base64');
+            if (buffer.length === 0) throw new Error('buffer_vacio');
+        } catch {
+            res.status(400).json({ status: 'FAIL', error: 'imagen_invalida' });
+            return;
+        }
+
+        let procesado;
+        try {
+            procesado = await procesarYGuardarImagen(buffer);
+        } catch (err: any) {
+            console.error('[INTERNAL] Error procesando imagen (documentos-vehiculo):', err.message);
+            res.status(415).json({ status: 'FAIL', error: 'invalid_image', message: 'No se pudo procesar la imagen.' });
+            return;
+        }
+
+        const publicBase = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+        const url = publicBase
+            ? `${publicBase}/uploads/${procesado.filename}`
+            : `${req.protocol}://${req.get('host')}/uploads/${procesado.filename}`;
+        const hash_sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+
+        const documento = await prisma.documento.create({
+            data: {
+                tipo: 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR',
+                url,
+                hash_sha256,
+                estado: 'RECIBIDO',
+                estado_ocr: 'PENDIENTE',
+                vehiculo_id: vehiculo.id,
+            },
+        });
+
+        console.log(`[INTERNAL] Documento sin clasificar recibido para vehiculo ${vehiculo.id}${subido_por_telefono ? ` (via ${subido_por_telefono})` : ''}: ${documento.id}`);
+
+        res.status(201).json({ status: 'OK', data: { documento_id: documento.id, url } });
+    } catch (err: any) {
+        console.error('[INTERNAL] Error en /documentos-vehiculo:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
+/**
+ * GET /internal/avisos/sombra?dias=7
+ *
+ * Fase E del plan (2026-08-11) — mismo formato que el `GET /internal/ical/sombra`
+ * de RentOS. Vigilancia de la sombra de envío: qué mandaría el backend a
+ * Meta directamente si se desengachara n8n de esta cadena. NUNCA aplica
+ * nada — es solo lectura de lo que ya se registró en cada aviso real.
+ */
+router.get('/avisos/sombra', async (req: Request, res: Response) => {
+    try {
+        const dias = Math.min(parseInt(req.query.dias as string, 10) || 7, 60);
+        const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000);
+
+        const registros = await prisma.sombraEnvio.findMany({
+            where: { ejecutado_en: { gt: desde } },
+            orderBy: { ejecutado_en: 'desc' },
+            take: 200,
+        });
+        const conAlerta = registros.filter((r) => r.alerta);
+
+        res.json({
+            status: 'OK',
+            ventana_dias: dias,
+            ejecuciones: registros.length,
+            con_alerta: conAlerta.length,
+            alertas: conAlerta,
+            ultimas: registros.slice(0, 20),
+        });
+    } catch (err: any) {
+        console.error('[INTERNAL] Error en /avisos/sombra:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
 });
 
 export default router;
