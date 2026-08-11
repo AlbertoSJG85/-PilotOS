@@ -132,6 +132,31 @@ export async function extraerTextoImagen(imagenPath: string): Promise<OCRResult>
 // Helpers de extracción
 // ─────────────────────────────────────────────────────────
 
+/**
+ * Limpia el ruido que Tesseract mete DENTRO de los números.
+ *
+ * En el ticket real del 2026-08-11 el separador decimal salió como `»`, `>`,
+ * `-` o un espacio según la línea: `144605» 85`, `183043»1`, `80137>3`,
+ * `1967-05`. Sin esto, esas cifras no casan con ningún patrón y el campo se
+ * pierde entero.
+ *
+ * Solo toca lo que está ENTRE DÍGITOS, para no estropear texto normal ni las
+ * horas (`21:50` se queda como está).
+ */
+function normalizarNumerosOcr(t: string): string {
+    return t
+        // separador decimal leído como símbolo raro: 144605» 85 -> 144605.85
+        .replace(/(\d)\s*[»«>·—–]\s*(\d)/g, '$1.$2')
+        // guion entre cifras cuando hace de decimal: 1967-05 -> 1967.05
+        .replace(/(\d)-(\d{1,2})(?!\d)/g, '$1.$2')
+        // los DOS PUNTOS de la etiqueta leídos como otra cosa, justo antes de
+        // la cifra: "carreras! 144605", "P-Carrerasi 1967". Sin esto la
+        // etiqueta no casa y el campo se pierde aunque el número esté bien.
+        .replace(/([A-Za-z])[!¡;iI](?=\s*\d)/g, '$1:')
+        // el PUNTO abreviador leído como guion: "Dist- Total" -> "Dist. Total".
+        .replace(/([A-Za-z])[-–—](?=\s*[A-Za-z])/g, '$1.');
+}
+
 function extractNum(text: string, patterns: RegExp[]): number | null {
     for (const p of patterns) {
         const m = text.match(p);
@@ -232,22 +257,52 @@ export interface DatosTaximetro {
 const LINEA_PARCIAL = /^\s*P[.\s]/i;
 
 /**
+ * La línea de "Borrados" es el ÚLTIMO campo del bloque acumulado y no se
+ * repite en el del turno. Es el separador más fiable que tiene este ticket.
+ */
+const LINEA_BORRADOS = /borrad/i;
+
+/**
  * Separa el texto del ticket en bloque "acumulado" (histórico del taxímetro)
  * y bloque "parcial" (turno actual).
  *
- * Dos estrategias, en orden:
- *   1. Por LÍNEA: si alguna línea empieza por "P " (el modelo de ticket real
- *      de PilotOS, sin cabeceras de sección), esa línea es del turno y el
- *      resto es acumulado. Esta es la señal más fiable porque no depende de
- *      que el OCR lea bien una palabra de cabecera.
- *   2. Por PALABRA CLAVE: si ninguna línea usa el prefijo "P ", se cae al
- *      método anterior (buscar "ACUMULADO"/"PARCIAL"/"TURNO"...), para no
- *      romper otros modelos de taxímetro que sí rotulen las secciones.
+ * Tres estrategias, en orden de fiabilidad:
+ *
+ *   1. Por la línea de BORRADOS. Es el último campo del acumulado y no
+ *      aparece en el turno, así que parte el ticket en dos exactamente por
+ *      donde toca.
+ *
+ *      **Por qué esta va primero (2026-08-11, segunda corrección del mismo
+ *      día):** la estrategia 2 se escribió por la mañana validándola contra
+ *      una transcripción limpia escrita a mano, y se cayó contra el OCR real.
+ *      Tesseract destroza el prefijo "P": en el ticket de Alberto salió
+ *      `7 Total: 2024.65` (la P leída como 7), `P-Carrerasi 1967-05`,
+ *      `PP pist. Ocurado`, `de pel TOA 23521`. Con esas líneas fuera del
+ *      bloque del turno, el importe del turno acababa guardado como
+ *      acumulado y el ticket se marcaba inválido — por eso no contrastaba
+ *      nada. "Borrados" sobrevive al ruido porque es una palabra larga y
+ *      sola en su línea.
+ *
+ *   2. Por PREFIJO "P " de línea, para tickets donde el OCR salga limpio y
+ *      no haya línea de borrados legible.
+ *
+ *   3. Por PALABRA CLAVE de cabecera ("ACUMULADO"/"PARCIAL"...), para otros
+ *      modelos de taxímetro que sí rotulen las secciones.
  */
 function extractarSeccionTaximetro(t: string) {
     const lineas = t.split('\n');
-    const lineasParcial = lineas.filter((l) => LINEA_PARCIAL.test(l));
 
+    // ── 1. Corte por la línea de Borrados ──
+    const iBorrados = lineas.findIndex((l) => LINEA_BORRADOS.test(l));
+    if (iBorrados >= 0 && iBorrados < lineas.length - 1) {
+        return {
+            acumText: lineas.slice(0, iBorrados + 1).join('\n'),
+            parcText: lineas.slice(iBorrados + 1).join('\n'),
+        };
+    }
+
+    // ── 2. Corte por prefijo "P " de línea ──
+    const lineasParcial = lineas.filter((l) => LINEA_PARCIAL.test(l));
     if (lineasParcial.length > 0) {
         const lineasAcum = lineas.filter((l) => !LINEA_PARCIAL.test(l));
         return { acumText: lineasAcum.join('\n'), parcText: lineasParcial.join('\n') };
@@ -300,11 +355,14 @@ export function validarTicketTaximetro(texto: string): DatosTaximetro {
         .replace(/\r\n/g, '\n')
         .replace(/[ \t]+/g, ' ');
 
+    // La fecha y la hora se leen del texto SIN normalizar: la normalización
+    // toca los símbolos entre dígitos y estropearía "21:50" o "08/08/26".
     const fecha = extractDate(t) || undefined;
     const hora = extractTime(t) || undefined;
     const licencia = extractLicencia(t) || undefined;
 
-    const { acumText, parcText } = extractarSeccionTaximetro(t);
+    // El resto de campos sí, para recuperar las cifras que el OCR ensucia.
+    const { acumText, parcText } = extractarSeccionTaximetro(normalizarNumerosOcr(t));
 
     // ── Acumulados ──
     const acum_borrados = extractNum(acumText, [
