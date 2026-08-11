@@ -440,25 +440,23 @@ Hoy `proximo_km = km_actuales + frecuencia` y `proxima_fecha = hoy + frecuencia`
 - [ ] **E1.3** Escribir la decisión de rumbo en `docs/decisiones-tecnicas.md`: *los flujos se migran de n8n al backend con patrón sombra; n8n no se apaga de golpe.*
 - [ ] **E1.4** Borrar o marcar como obsoleto `PilotOS/n8n-workflows/wf-scheduler-avisos.json` (ya reemplazado) y `wf-inbound-whatsapp.json` (apunta a `/api/webhook/gloria`, endpoint que no existe en PilotOS).
 
-### E2 — Sombra del envío: backend directo a Meta (CONSTRUIDA el 2026-08-11)
+### E2 — ~~Sombra del envío~~ → ENVÍO DIRECTO, n8n fuera (2026-08-11)
 
-El molde copiado es **`RentOS/nexos-api/server.js:7900-8059` + `migrations/sombra_reconciliacion.sql`**. Sus tres propiedades de diseño, replicadas tal cual:
+**La sombra se construyó y se retiró el mismo día. Alberto tenía razón:** una sombra sirve cuando no te puedes permitir romper algo porque hay gente real dependiendo — el caso de RentOS, con huéspedes. PilotOS tiene 1 vehículo y 12 partes de prueba; observar semanas un camino que nadie usa era retrasar el cambio sin ganar seguridad. Copiar el patrón de RentOS sin comprobar que la razón que lo justificaba también se daba aquí fue un error de criterio mío.
 
-1. **Guardar las entradas, no solo la decisión.**
-2. **Una "alerta roja" precalculada en la fila.**
-3. **La sombra recibe exactamente la misma entrada que el sistema observado** (el mismo `telefono`/`tipo`/`template_params` que se manda de verdad).
+**Dónde estaba n8n de verdad:** no entre PilotOS y GlorIA, sino DENTRO del camino de envío de GlorIA. Por eso "quitar n8n de PilotOS" no se arreglaba en PilotOS — PilotOS ya hacía lo correcto.
 
-Estado real de RentOS comprobado antes de construir esto (2026-08-11): **todavía no está lista para promover** — los dos casos "crear" repetidos dejaron de aparecer el 8 de agosto, pero el reloj de las 2 semanas limpias empieza ahí (faltaría hasta ~22 de agosto). Sirvió de referencia viva, no de excusa para saltarse el criterio.
+- [x] **E2.1** `MetaSender.ts` en GlorIA: habla con la WhatsApp Cloud API directamente. Se activa solo para `origin: 'pilotos'` y sus tres plantillas. El token se queda en GlorIA.
+- [x] **E2.2** Sombra retirada entera (servicio, tabla, endpoint, tests). Migración `20260811190000_quitar_sombra_envio`.
+- [x] **E2.3** **Reintento** — al fallar el envío, el escalón vuelve atrás y mañana se reintenta. Cierra el fallo A1 del plan, que ya existía: un fallo puntual perdía el aviso de ese escalón para siempre.
+- [x] **E2.4** **No duplicados** — `Aviso.dedupe_key` por hecho avisado, no por fecha. Cierra A3. Migración `20260811191000_aviso_dedupe_key`.
+- [x] **E2.5** Salida temprana sin `GLORIA_API_URL`/`GLORIA_INTERNAL_TOKEN` (cierra A1.2).
+- [x] **E2.6** `/internal/avisos/entregas` sustituye al endpoint de la sombra: con el envío directo por fin puede responder "¿se envió de verdad?". Cierra A4.5.
+- [x] **E2.7** Verificado que **nadie más consume `/api/gloria/enviar`** (ni workflows de n8n ni RentOS) antes de tocar el camino compartido. RentOS sigue por su cola, intacto.
 
-- [x] **E2.1** Tabla `pilotos.sombra_envios` — `ejecutado_en`, `aviso_id`, `entrada` (JSONB), `decision_backend` (JSONB), `resultado_n8n` (JSONB, null hasta que exista A4), `coincide` (null hasta A4), `alerta`. Migración `20260811180000_sombra_envio`, **no aplicada** (BD compartida, sin confirmar).
-- [x] **E2.2** `backend/src/services/metaPayload.service.ts` → `construirPayloadMeta(tipo, telefono, params)`, réplica exacta del nodo "Build Meta Payload" para los 3 tipos de PilotOS. Test `smoke.sombraEnvio.test.ts` verifica byte a byte contra el payload que el nodo real produciría.
-- [x] **E2.3** Conectada en `mantenimientoAlertas.service.ts` y `ocrComparacion.service.ts` (`registrarSombraEnvio`), siempre en try/catch propio.
-- [x] **E2.4** `GET /internal/avisos/sombra?dias=7`, mismo formato que RentOS. Añadido a `RUTAS_LUCIA`.
-- [ ] **E2.5** Doc semanal de revisión — todavía no, no hay datos acumulados que revisar el primer día.
-- [x] **E2.6** Criterio de promoción ya escrito (ver C-049 en `correcciones.md`): no antes de que exista A4 (conciliación de entregas) y `coincide=true` sostenido varias semanas sin alertas. Decisión explícita de Alberto, nunca automática.
-- [ ] **E2.7** Fecha de revisión — pendiente de fijar cuando haya al menos una semana de datos acumulados.
+**Verificado: 108/108 tests, build limpio, migraciones aplicadas con backup previo.** Detalle en C-051.
 
-**Verificado: 110/110 tests del backend, build limpio.**
+**Efecto sobre la Fase A:** A1, A1.2, A3 y A4.5 quedan cerradas por este cambio. A2 (contrato de respuesta que mentía) también, arreglada en `rentos.client.ts`. Lo que queda de la Fase A es solo la confirmación de entrega *posterior* (delivered/read), que con el envío directo pierde urgencia: ahora sabemos en el acto si Meta aceptó el mensaje.
 
 ---
 

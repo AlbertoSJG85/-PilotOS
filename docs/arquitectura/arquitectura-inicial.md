@@ -146,26 +146,35 @@ GlorIA usa estos endpoints para:
 2. Alimentar el prompt de LucIA con datos reales
 3. Ejecutar acciones operativas (gastos, consultas)
 
-### 5.1 Avisos salientes: PilotOS → GlorIA → WhatsApp (verificado 2026-08-11)
+### 5.1 Avisos salientes: PilotOS → GlorIA → WhatsApp, SIN n8n (2026-08-11)
 
-Dirección contraria a la tabla anterior: aquí es PilotOS quien inicia el aviso, sin que el propietario haya preguntado nada. Cadena completa, backend a backend, **sin n8n en el lado PilotOS** (decisión explícita de Alberto, ver cabecera de `notificacion.service.ts`):
+Dirección contraria a la tabla anterior: aquí es PilotOS quien inicia el aviso, sin que el propietario haya preguntado nada.
 
 ```
 scheduler.service.ts (node-cron, diario 08:00, Atlantic/Canary)
   → mantenimientoAlertas.service.ts: procesarMantenimientos()
       calcula escalones (1000/500/250/vencido km, 30/vencido días)
       y detecta anomalías críticas del taxímetro (ocrComparacion.service.ts)
+      dedupe propio: Aviso.dedupe_key (por mantenimiento+escalón / por parte)
   → notificacion.service.ts: enviarAvisoGloria(telefono, tipo, params)
       POST {GLORIA_API_URL}/api/gloria/enviar  (header x-internal-token)
-  → GlorIA: outbound.routes.ts → NotificationQueue → rentos.client.ts
-  → RentOS: POST /internal/notificaciones/enviar → inserta en core."Notificaciones"
-  → n8n (wf-notificaciones-worker-v6, cron cada 30 min):
-      lee pendientes → construye el payload con la plantilla Meta → envía →
-      confirma en RentOS
+  → GlorIA: outbound.routes.ts ve origin='pilotos' → MetaSender.ts
+  → Meta WhatsApp Cloud API (directo, en el acto)
+      respuesta real: wamid si acepta, error con código si no
 ```
 
-Tres tipos de aviso usan esta cadena hoy, con plantilla Meta propia cada uno
-(pendientes de aprobación en Meta Business, ver `docs/auditoria/Plan_Accion_PilotOS_2026-08-11.md`):
+**Qué cambió y por qué.** Hasta el 2026-08-11 esto pasaba por una cola en RentOS que un worker de n8n vaciaba con un cron de 30 minutos. Dos problemas: el aviso podía tardar media hora, y PilotOS marcaba `enviado` cuando el mensaje solo estaba encolado — si fallaba después, nadie se enteraba. Ahora GlorIA envía en el acto y devuelve lo que Meta responde de verdad.
+
+**Las dos protecciones que daba la cola son ahora explícitas de PilotOS.** Al quitar una pieza intermedia hay que reponer lo que daba gratis:
+- **Reintento** — si el envío falla, el escalón vuelve a su valor anterior y la pasada de mañana lo reintenta. Antes, un fallo puntual perdía ese aviso *para siempre*.
+- **No duplicados** — `Aviso.dedupe_key` por hecho avisado, no por fecha.
+
+**El token de Meta vive solo en GlorIA.** Ningún producto lo toca: la regla de que GlorIA es la única que habla con Meta sigue intacta. "Identidad visible" es lo que ve el usuario, no qué servidor hace la llamada HTTP.
+
+**RentOS sigue por la cola de siempre**, a propósito: tiene huéspedes reales y su camino lleva meses funcionando. Se migrará cuando el directo esté rodado con PilotOS. Verificado que nadie más consume `/api/gloria/enviar`, así que el cambio no le afecta.
+
+Tres tipos de aviso usan esta cadena, con plantilla Meta propia cada uno
+(enviadas a revisión de Meta el 2026-08-11, ver `docs/auditoria/Plan_Accion_PilotOS_2026-08-11.md`):
 
 | `tipo` | Cuándo se dispara | Parámetros |
 |---|---|---|
@@ -173,10 +182,10 @@ Tres tipos de aviso usan esta cadena hoy, con plantilla Meta propia cada uno
 | `mantenimiento_vencido` | Mantenimiento pasa de fecha/km sin resolverse | `matricula`, `mantenimiento`, `motivo` |
 | `anomalia_taximetro` | El motor de comparación de acumulados detecta borrados/km/€ sin declarar (ver `ocrComparacion.service.ts`) | `matricula`, `motivo` |
 
-**Requisitos para que llegue de verdad, ninguno verificable desde el repo:**
-- `GLORIA_API_URL` y `GLORIA_INTERNAL_TOKEN` configurados en el entorno de PilotOS (Coolify) — sin ellos, `enviarAvisoGloria` no intenta la llamada (falla en silencio, deja constancia en `Aviso.error_envio`).
-- Las tres plantillas aprobadas en Meta Business, con el idioma y los parámetros exactos de la tabla.
-- El worker n8n con el JSON actualizado importado en la instancia real (el archivo del repo no es automáticamente lo que corre).
+**Requisitos para que llegue de verdad:**
+- `GLORIA_API_URL` y `GLORIA_INTERNAL_TOKEN` en PilotOS — **verificados en producción el 2026-08-11**. Sin ellos, `procesarMantenimientos` sale antes de recorrer la flota y lo deja dicho en el log; no procesa a medias.
+- `WHATSAPP_TOKEN` y `WHATSAPP_PHONE_NUMBER_ID` en GlorIA — verificados.
+- **Las tres plantillas aprobadas en Meta Business** — enviadas a revisión el 2026-08-11, **único bloqueo pendiente**. Hasta que Meta las apruebe, el envío directo falla con su código de error (`132001` o similar), queda en `Aviso.error_envio` y se reintenta al día siguiente.
 
 **Fuera de esta cadena, informativo:** el panel del patrón (`/admin`, widget "Alertas Pendientes") muestra las mismas anomalías críticas de forma pasiva, independiente de si el WhatsApp llegó o no — ver `POST /api/anomalias/:id/revisar`.
 
