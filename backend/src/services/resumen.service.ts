@@ -22,7 +22,7 @@
 import { Decimal } from '@prisma/client/runtime/library';
 import { prisma } from '../lib/prisma';
 import { ESTADOS_COMPUTABLES } from './retencionParte.service';
-import { calcularSeguridadSocial, type DetalleSS } from './seguridadSocial.service';
+import { calcularSeguridadSocial, mesesDelRango, type DetalleSS } from './seguridadSocial.service';
 
 const DIAS_POR_ANIO = 365;
 
@@ -34,29 +34,49 @@ function vecesPorAnio(periodicidad: string): number {
 }
 
 /**
- * Prorratea un conjunto de gastos fijos segun los dias reales de [desde, hasta].
- * Sin rango, devuelve el equivalente mensual (comportamiento historico).
+ * Gastos fijos que corresponden al periodo [desde, hasta].
+ *
+ * ── POR QUÉ YA NO SE PRORRATEA POR DÍAS (2026-08-12) ─────────────────────
+ * Hasta hoy esto repartía el gasto anual entre 365 días y multiplicaba por
+ * los días del rango. Sobre el papel es impecable; en la pantalla del taxista
+ * era un disparate:
+ *
+ *   · Del 1 al 12 de agosto mostraba 182,66 € de gastos fijos, cuando solo
+ *     su cuota de autónomo son 303 €. Alberto lo cazó al instante: "los
+ *     gastos están mal, solo el autónomo mío es más que eso".
+ *   · Y ni siquiera un mes entero cuadraba: 31 días daban 471,88 € cuando
+ *     sus fijos son 463 €. La tarifa diaria nunca acierta, porque los meses
+ *     no miden 30,4 días.
+ *
+ * Una cuota de autónomo se paga entera el día 1, no a trocitos según los días
+ * que lleve el mes. Así que ahora **cada mes que toca el periodo devenga su
+ * cuota mensual completa**, sin mirar cuántos días de ese mes entran en el
+ * rango. Es exactamente la misma regla que Alberto fijó para la Seguridad
+ * Social (F4): mes tocado, cuota entera.
+ *
+ * Los gastos con otra periodicidad se llevan a su equivalente mensual (un
+ * seguro de 780 € al año son 65 € al mes), para que no aparezca un mes con
+ * 780 € y once meses a cero.
  */
-export function prorratearGastosFijos(
+export function calcularGastosFijosDelPeriodo(
     fijos: { importe: Decimal | number; periodicidad: string }[],
     desde?: Date,
     hasta?: Date,
 ): number {
-    const diasEnRango = (desde && hasta)
-        ? Math.max(1, Math.round((hasta.getTime() - desde.getTime()) / (24 * 60 * 60 * 1000)) + 1)
-        : null;
+    const meses = (desde && hasta) ? mesesDelRango(desde, hasta).length : 1;
 
     return fijos.reduce((acc, f) => {
         const importe = Number(f.importe);
-        const veces = vecesPorAnio(f.periodicidad);
-        if (diasEnRango === null) {
-            return acc + (importe * veces) / 12;
-        }
-        const importeAnual = importe * veces;
-        const importeDiario = importeAnual / DIAS_POR_ANIO;
-        return acc + importeDiario * diasEnRango;
+        const equivalenteMensual = (importe * vecesPorAnio(f.periodicidad)) / 12;
+        return acc + equivalenteMensual * meses;
     }, 0);
 }
+
+/**
+ * @deprecated Nombre antiguo, cuando esto prorrateaba por días. Se mantiene
+ * para no romper llamadas existentes; usa `calcularGastosFijosDelPeriodo`.
+ */
+export const prorratearGastosFijos = calcularGastosFijosDelPeriodo;
 
 export interface ResumenInput {
     cliente_id: string;
@@ -182,7 +202,7 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
 
     // 3. Gastos fijos activos, prorrateados por los dias reales del rango
     const fijos = await prisma.gastoFijo.findMany({ where: { cliente_id, activo: true } });
-    const gastosFijosProrrateados = prorratearGastosFijos(fijos, desde, hasta);
+    const gastosFijosProrrateados = calcularGastosFijosDelPeriodo(fijos, desde, hasta);
 
     // Seguridad Social de los asalariados (F4, regla del 2026-08-11). Es un
     // coste del patron como cualquier otro, asi que baja el beneficio. Ojo:

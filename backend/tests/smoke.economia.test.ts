@@ -1,58 +1,73 @@
 /**
- * Tests de humo — Fase 4 (exactitud economica).
+ * Tests de humo — exactitud económica de los gastos fijos.
  *
- * Cubren prorratearGastosFijos (resumen.service.ts), la unica pieza de esta
- * fase que es logica pura sin base de datos. El resto (calculo.service.ts:
- * separacion neto/base de reparto, orden de configuracion especifica/generica)
- * requiere una BD de test real (queda en la lista de pendientes de la fase).
+ * REGLA CAMBIADA EL 2026-08-12, y estos tests son los que la fijan.
+ *
+ * Antes esto prorrateaba por días: gasto anual ÷ 365 × días del rango. Sobre
+ * el papel es impecable; en la pantalla del taxista mentía:
+ *
+ *   · del 1 al 12 de agosto mostraba 182,66 € cuando solo su cuota de
+ *     autónomo son 303 € al mes — Alberto lo cazó al instante;
+ *   · y ni un mes entero cuadraba: 31 días daban 471,88 € con unos fijos de
+ *     463, porque los meses no miden 30,4 días.
+ *
+ * Una cuota de autónomo se paga entera el día 1, no a trocitos. Ahora cada
+ * MES que toca el rango devenga su cuota completa — la misma regla que la
+ * Seguridad Social (F4, decidida por Alberto el 2026-08-11).
  */
 import { describe, it, expect } from 'vitest';
-import { prorratearGastosFijos } from '../src/services/resumen.service';
+import { calcularGastosFijosDelPeriodo } from '../src/services/resumen.service';
 
-describe('prorratearGastosFijos', () => {
-    it('CRITICO: una semana no paga lo mismo que un mes entero (antes si)', () => {
+describe('calcularGastosFijosDelPeriodo', () => {
+    it('CLAVE: 12 días de un mes devengan la cuota ENTERA de ese mes', () => {
+        const fijos = [{ importe: 303, periodicidad: 'MENSUAL' }];
+        const total = calcularGastosFijosDelPeriodo(fijos, new Date('2026-08-01'), new Date('2026-08-12'));
+        // Ni 182,66 ni ninguna otra fracción: la cuota se paga entera.
+        expect(total).toBeCloseTo(303, 2);
+    });
+
+    it('CLAVE: un mes entero devuelve exactamente la cuota, no 471,88', () => {
+        const fijos = [
+            { importe: 303, periodicidad: 'MENSUAL' }, // autónomo
+            { importe: 100, periodicidad: 'MENSUAL' }, // radio taxi
+            { importe: 50, periodicidad: 'MENSUAL' },  // gestoría
+            { importe: 10, periodicidad: 'MENSUAL' },  // datáfono
+        ];
+        const total = calcularGastosFijosDelPeriodo(fijos, new Date('2026-08-01'), new Date('2026-08-31'));
+        expect(total).toBeCloseTo(463, 2);
+    });
+
+    it('un rango a caballo entre dos meses devenga DOS cuotas', () => {
         const fijos = [{ importe: 300, periodicidad: 'MENSUAL' }];
-        const desde = new Date('2026-01-01');
-        const unaSemana = new Date('2026-01-07'); // 7 dias inclusive
-        const unMes = new Date('2026-01-31'); // 31 dias inclusive
-
-        const totalSemana = prorratearGastosFijos(fijos, desde, unaSemana);
-        const totalMes = prorratearGastosFijos(fijos, desde, unMes);
-
-        expect(totalSemana).toBeLessThan(totalMes);
-        // La semana deberia rondar 7/31 del total del mes, no ser igual.
-        expect(totalSemana).toBeCloseTo((300 * 12 / 365) * 7, 1);
+        const total = calcularGastosFijosDelPeriodo(fijos, new Date('2026-07-20'), new Date('2026-08-05'));
+        expect(total).toBeCloseTo(600, 2);
     });
 
-    it('TRIMESTRAL se convierte a anual (importe*4) antes de prorratear', () => {
+    it('TRIMESTRAL se lleva a su equivalente mensual: 90 al trimestre = 30 al mes', () => {
         const fijos = [{ importe: 90, periodicidad: 'TRIMESTRAL' }];
-        const desde = new Date('2026-01-01');
-        const hasta = new Date('2026-12-31'); // ~365 dias
-        const total = prorratearGastosFijos(fijos, desde, hasta);
-        // 90/trimestre * 4 = 360/anio ≈ total de un anio completo
-        expect(total).toBeCloseTo(360, 0);
+        expect(calcularGastosFijosDelPeriodo(fijos, new Date('2026-03-01'), new Date('2026-03-31'))).toBeCloseTo(30, 2);
+        expect(calcularGastosFijosDelPeriodo(fijos, new Date('2026-01-01'), new Date('2026-12-31'))).toBeCloseTo(360, 2);
     });
 
-    it('ANUAL prorrateado a un solo dia es aproximadamente importe/365', () => {
-        const fijos = [{ importe: 365, periodicidad: 'ANUAL' }];
-        const dia = new Date('2026-03-10');
-        const total = prorratearGastosFijos(fijos, dia, dia);
-        expect(total).toBeCloseTo(1, 1);
+    it('un seguro ANUAL no cae entero en un mes: se reparte a 1/12', () => {
+        // 780 € de seguro al año son 65 al mes. Si cayera entero en agosto,
+        // ese mes parecería ruinoso y los otros once, artificialmente buenos.
+        const fijos = [{ importe: 780, periodicidad: 'ANUAL' }];
+        expect(calcularGastosFijosDelPeriodo(fijos, new Date('2026-03-01'), new Date('2026-03-31'))).toBeCloseTo(65, 2);
     });
 
-    it('sin rango (desde/hasta ausentes) devuelve el equivalente mensual, como antes', () => {
+    it('sin rango devuelve el equivalente mensual (vista por defecto)', () => {
         const fijos = [{ importe: 90, periodicidad: 'TRIMESTRAL' }];
-        const total = prorratearGastosFijos(fijos);
-        expect(total).toBeCloseTo(30, 5); // 90/3
+        expect(calcularGastosFijosDelPeriodo(fijos)).toBeCloseTo(30, 5);
     });
 
-    it('varios gastos fijos se suman correctamente', () => {
+    it('varios gastos fijos se suman', () => {
         const fijos = [
             { importe: 300, periodicidad: 'MENSUAL' },
             { importe: 1200, periodicidad: 'ANUAL' },
         ];
-        const total = prorratearGastosFijos(fijos);
-        // 300 (mensual tal cual) + 1200/12 (anual a mensual) = 400
-        expect(total).toBeCloseTo(400, 5);
+        // 300 + 1200/12 = 400 al mes
+        expect(calcularGastosFijosDelPeriodo(fijos)).toBeCloseTo(400, 5);
+        expect(calcularGastosFijosDelPeriodo(fijos, new Date('2026-05-01'), new Date('2026-05-31'))).toBeCloseTo(400, 2);
     });
 });
