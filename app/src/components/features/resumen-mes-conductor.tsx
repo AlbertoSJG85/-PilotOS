@@ -14,10 +14,6 @@
  * `neto = bruto − combustible` es la misma definición que usa el motor de
  * cálculo (calculo.service.ts, "neto operativo"), no una cuenta paralela.
  *
- * La cifra que ata todo es **por cada 100 km**: cuánto entra, cuánto se va en
- * combustible y cuánto queda. Es la única que compara días distintos entre sí
- * — 200 € en un día de 300 km no es lo mismo que 200 € en uno de 90.
- *
  * Los partes retenidos no suman: aún no están aceptados y sus cifras pueden
  * cambiar. Se dice en una línea para que el número no parezca que baila solo.
  */
@@ -71,10 +67,9 @@ export function ResumenMesConductor({ partes, loading }: Props) {
   const pctCombustible = bruto > 0 ? (combustible / bruto) * 100 : 0;
   const pctDatafono = bruto > 0 ? Math.round((datafono / bruto) * 100) : 0;
 
-  // Por cada 100 km: la cifra que permite comparar un día con otro.
-  const brutoPor100 = km > 0 ? (bruto / km) * 100 : null;
+  // Se mantiene el combustible por 100 km (sigue en "Tu ritmo"): es la cifra
+  // que compara el gasto de un día largo con el de uno corto.
   const combustiblePor100 = km > 0 ? (combustible / km) * 100 : null;
-  const netoPor100 = km > 0 ? (neto / km) * 100 : null;
 
   // Barras del mes: neto de cada día, para ver de un vistazo la forma del mes.
   const porDia = [...computables]
@@ -139,34 +134,6 @@ export function ResumenMesConductor({ partes, loading }: Props) {
           </div>
         </div>
       </section>
-
-      {/* La cifra que compara días distintos */}
-      {brutoPor100 !== null && (
-        <section className="rounded-2xl border border-pilot-lime/30 bg-pilot-lime/5 p-5">
-          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-pilot-lime">
-            Por cada 100 km que haces
-          </p>
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
-              <p className="text-xl font-bold text-zinc-100">{formatCurrency(brutoPor100)}</p>
-              <p className="text-[10px] uppercase tracking-wider text-zinc-500">recaudas</p>
-            </div>
-            <span className="pb-5 text-lg text-zinc-600">−</span>
-            <div className="flex-1">
-              <p className="text-xl font-bold text-amber-400">{formatCurrency(combustiblePor100!)}</p>
-              <p className="text-[10px] uppercase tracking-wider text-zinc-500">de combustible</p>
-            </div>
-            <span className="pb-5 text-lg text-zinc-600">=</span>
-            <div className="flex-1">
-              <p className="text-xl font-black text-pilot-lime">{formatCurrency(netoPor100!)}</p>
-              <p className="text-[10px] uppercase tracking-wider text-zinc-500">te quedan</p>
-            </div>
-          </div>
-          <p className="mt-3 text-[11px] text-zinc-500">
-            Es la cifra que compara un día con otro: 200 € en 300 km no es lo mismo que 200 € en 90.
-          </p>
-        </section>
-      )}
 
       {/* Cómo te han pagado */}
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">

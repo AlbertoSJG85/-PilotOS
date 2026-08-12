@@ -150,8 +150,12 @@ export default function LoginPage() {
       </div>
 
       <div className="relative w-full max-w-sm">
-        {/* Logo */}
-        <div className="mb-10 flex flex-col items-center gap-4">
+        {/* Identidad: PilotOS, de quién es, y qué es.
+            El "by NexOS" va en texto, pero con la marca escrita como es: "Nex"
+            claro y "OS" en el azul de NexOS (#158fff, muestreado del logotipo
+            oficial), igual que en el resto del ecosistema. El claim va pegado
+            al recuadro porque es lo último que se lee antes de entrar. */}
+        <div className="mb-8 flex flex-col items-center">
           <Image
             src="/branding/pilotos/logo-compact.png"
             alt="PilotOS"
@@ -160,9 +164,12 @@ export default function LoginPage() {
             className="h-14 w-auto object-contain"
             priority
           />
-          <p className="text-xs tracking-widest text-zinc-600 uppercase font-medium">
-            by NexOS
+
+          <p className="mt-3 text-xs font-medium uppercase tracking-widest text-zinc-600">
+            by <span className="text-zinc-300">Nex</span><span className="text-nexos-blue">OS</span>
           </p>
+
+          <p className="mt-6 text-sm text-zinc-400">Gestión inteligente para flotas</p>
         </div>
 
         {/* Formulario */}
