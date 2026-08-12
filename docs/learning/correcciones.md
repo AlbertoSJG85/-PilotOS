@@ -793,3 +793,26 @@ La home del asalariado es para **trabajar**: avisos, el parte de hoy y poco más
 - 11/11 tests del endpoint interno actualizados (antes afirmaban `estado: 'RECIBIDO'` como comportamiento correcto — ahora afirman que se analiza).
 - 240/240 en la batería completa.
 - **Prevención.** Cuando se construye un circuito nuevo con dos puntos de entrada (app y canal externo), comprobar que el segundo también quedó conectado al final del circuito, no solo al principio. Un endpoint que "guarda algo" y ya no hace nada más es indistinguible de uno que funciona, hasta que alguien mira qué pasa después.
+
+### C-062 · La foto sí llegaba, pero n8n nunca decía dónde estaba
+- Fecha: 2026-08-12
+- Área: n8n `wf-gloria-ai-bridge-v6` (nodo `Code in JavaScript`), `GlorIA/src/routes/inbound.routes.ts`
+
+**El síntoma.** Justo después de cerrar C-061 —que dejaba el endpoint interno de PilotOS analizando de verdad los documentos— Alberto mandó una factura real de una reparación por WhatsApp. GlorIA contestó con una respuesta genérica de RentOS, sin rastro del documento. El arreglo estaba desplegado y verificado con una llamada real al endpoint, y aun así por el canal de verdad no funcionaba.
+
+**El rastreo, y los dos callejones sin salida.** Los logs de GlorIA solo mostraban `POST /api/gloria/inbound` seguido de `POST /api/gloria/commit`, sin cuerpo ni código de estado. Ese `commit` posterior con una respuesta coherente ya descartaba un 400: si hubieran faltado `phone` o `messageId`, no habría habido respuesta. O sea, la petición entraba bien — pero sin `mediaId`.
+
+Se descartó, en este orden: ClinicOS (otro número), RentOS (no reenvía nada), un segundo despliegue de GlorIA (solo existe la app 3 en Coolify), y un `dist/routes/webhook.routes.js` encontrado en local que resultó ser un artefacto viejo, gitignoreado y **ausente del contenedor en producción** — se comprobó antes de darlo por bueno.
+
+**Los dos errores propios que alargaron el diagnóstico.**
+1. *Se dio por cerrada la vía n8n demasiado pronto.* Hay **dos instancias de n8n** en el servidor: `n8n-n8n-1` (con su `n8n-postgres-1`) y `n8n-ak48k0w8c0cog00gowggcgcc`, la gestionada por Coolify, que es la real de `n8n.nexostudios.digital`. La primera consulta de ejecuciones fue contra la equivocada, dio cero, y se concluyó "n8n no está en el camino". Lo estaba.
+2. *Se implementó un arreglo antes de tener la causa.* Se añadió a `/api/gloria/inbound` una red de seguridad que aplana el webhook crudo de Meta si le llega en esa forma. No es incorrecta y se queda —protege ante un emisor que reenvíe el payload sin aplanar— pero **no resolvió nada**, porque el cuerpo ya venía aplanado. Ese despliegue se hizo sin haber confirmado aún la causa raíz.
+
+**Lo que zanjó el caso** fue mirar la tabla `gloria.events`: los dos mensajes (18:21 y 18:56) estaban registrados con `type = 'image'`. El emisor sabía perfectamente que era una imagen y aun así no mandaba el id. Eso descartaba el formato crudo y apuntaba a un normalizador aplanando mal. De ahí a las ejecuciones de la n8n correcta: `wf-gloria-ai-bridge-v6`, **activo**, ejecutándose a las 18:56:42 — tres segundos antes del `inbound`.
+
+**La causa.** El nodo `Code in JavaScript` de ese workflow devuelve `phone`, `text`, `messageId`, `type`, `timestamp` y `phoneNumberId`. Ni una palabra de `mediaId`. La versión **corregida el 2026-08-11**, con `mediaId: message.image?.id || message.document?.id || body.mediaId || null`, está en `GlorIA/n8n-workflows/v6/wf-gloria-ai-bridge-v6.json` — versionada en git, comentada, correcta. El workflow en vivo tiene `updatedAt` de **2026-07-20**. El arreglo se escribió y se commiteó, pero nunca se subió a n8n.
+
+**Prevención, que es lo que importa aquí.**
+- *Un workflow de n8n versionado en el repo no es un workflow desplegado.* El fichero JSON en git y lo que corre en n8n son dos cosas distintas y pueden divergir semanas. Cuando se arregla un workflow, el trabajo no está hecho hasta que se comprueba el `updatedAt` del que está activo.
+- *Antes de descartar un componente, verificar contra qué instancia se está preguntando.* "Cero ejecuciones" solo significa algo si es la base de datos correcta.
+- *No desplegar un arreglo antes de tener la causa.* La red de seguridad del `inbound` se escribió sobre una hipótesis (payload crudo) que los datos —`type='image'` en `gloria.events`— habrían refutado en dos minutos si se hubieran mirado primero.
