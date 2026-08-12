@@ -76,6 +76,8 @@ model Cliente {
   configuracionEconomica ConfiguracionEconomica[]
   gastosFijos            GastoFijo[]
   vehiculos              Vehiculo[]
+  /// Permiso para dejar sus documentos en SU Drive (2026-08-12).
+  conexionDrive          ConexionDrive?
 
   @@map("clientes")
   @@schema("pilotos")
@@ -281,6 +283,8 @@ model Documento {
   /// Cuando se aplicaron los efectos (mantenimiento al dia + gasto). Candado de idempotencia.
   aplicado_at               DateTime?
   gasto_id                  String?
+  /// Enlace al fichero en el Drive del cliente, si lo tiene conectado.
+  drive_web_link            String?
 
   @@map("documentos")
   @@schema("pilotos")
@@ -309,6 +313,26 @@ model DocumentoHistorial {
   documento    Documento @relation(fields: [documento_id], references: [id])
 
   @@map("documento_historial")
+  @@schema("pilotos")
+}
+
+model ConexionDrive {
+  id              String    @id @default(uuid())
+  cliente_id      String    @unique
+  google_email    String?
+  /// Cifrados con AES-256-GCM (lib/cifrado.ts). Nunca se guardan en claro.
+  access_token    String
+  refresh_token   String?
+  expira_at       DateTime?
+  /// Id de la carpeta "PilotOS" en SU Drive, para no buscarla en cada subida.
+  carpeta_raiz_id String?
+  conectado_por   Int?
+  conectado_at    DateTime  @default(now())
+  revocado_at     DateTime?
+  ultimo_error    String?
+  cliente         Cliente   @relation(fields: [cliente_id], references: [id], onDelete: Cascade)
+
+  @@map("conexiones_drive")
   @@schema("pilotos")
 }
 

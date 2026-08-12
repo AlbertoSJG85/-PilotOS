@@ -198,6 +198,50 @@ documentos reales pasados por OCR** — la primera ITV y la primera factura
 reales van a exigir ajustes, y ahí es cuando se fijan con su texto literal
 como fixture.
 
+
+#### 5.4.2 Drive del cliente (2026-08-12)
+
+**Los documentos van al Drive DEL CLIENTE, no a uno de NexOS.** Es la duda que
+surge siempre y conviene dejarla escrita: el taxista conecta su cuenta de
+Google y PilotOS le deja los papeles en su propio Drive. Los ve como cualquier
+carpeta suya, los comparte con su gestoría con el botón de compartir de Google
+sin pedirnos nada, y si un día deja de ser cliente sus papeles siguen siendo
+suyos y donde siempre estuvieron.
+
+**Estructura** — pensada para cómo se busca un papel de verdad ("la factura de
+agosto"):
+
+```
+PilotOS/
+  2026/
+    08 - agosto/
+      ITV/  Facturas de taller/  Seguro/  Otros/
+```
+
+**Permiso mínimo.** Scope `drive.file`: la app solo ve y toca los archivos que
+ella misma crea. No puede leer el resto del Drive del cliente. Además ese
+scope no está en la lista de permisos sensibles de Google, así que no hace
+falta pasar su proceso de verificación.
+
+**Reglas:**
+
+- **Opcional.** Se explica en el onboarding y se conecta desde *Documentos*.
+  Quien no lo quiera, no pierde nada: el documento se guarda en PilotOS igual.
+- **Nunca rompe el producto.** La subida va fuera de la transacción y sin
+  `await`: si Google falla, si el token caduca o si no hay conexión, la
+  factura entra en PilotOS igualmente y el fallo solo se anota.
+- **Tokens cifrados** (AES-256-GCM) en `pilotos.conexiones_drive`, tabla
+  propia. NO se usan las columnas `google_*` de `minos."Users"`: ahí guarda
+  RentOS su conexión de Gmail, y un cliente con los dos productos se
+  desconectaría de uno al conectar el otro.
+- **Desconectar no borra nada** de su Drive: lo subido es suyo.
+- Se reutiliza la app de Google de RentOS (una sola del ecosistema).
+
+**Estado a 2026-08-12:** implementado y apagado por configuración. Para
+encenderlo hacen falta `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+`GOOGLE_DRIVE_REDIRECT_URI` y `DRIVE_ENCRYPTION_KEY`, más añadir la URL de
+retorno de PilotOS y activar la API de Drive en la consola de Google Cloud.
+
 ### 5.5 Gasto y reparto
 
 - El sistema debe soportar varios modelos económicos, no uno solo.

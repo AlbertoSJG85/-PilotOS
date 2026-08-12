@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Button, Input, Card, CardTitle, CardDescription } from '@/components/ui';
 import { guardarOnboarding, completarOnboarding, getOnboarding } from '@/lib/api';
-import { ChevronLeft, ChevronRight, Check, Loader2, Plus, Trash2, Wallet, Users, Car } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check, Loader2, Plus, Trash2, Wallet, Users, Car, HardDrive } from 'lucide-react';
 
 const STEPS = [
   'Datos del propietario',

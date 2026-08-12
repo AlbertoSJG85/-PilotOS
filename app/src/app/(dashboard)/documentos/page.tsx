@@ -27,6 +27,7 @@ import {
 import { formatCurrency, formatDate, urlDocumento } from '@/lib/utils';
 import { FileText, Upload, CheckCircle2, AlertTriangle, Pencil, FolderOpen } from 'lucide-react';
 import type { Vehiculo } from '@/types';
+import { ConexionDrive } from '@/components/features/conexion-drive';
 
 const ETIQUETA_TIPO: Record<string, string> = {
   CERTIFICADO_ITV: 'ITV',
@@ -239,6 +240,8 @@ export default function DocumentosPage() {
           <input type="file" accept="image/*" className="hidden" onChange={handleSubir} disabled={subiendo} />
         </label>
       </PageHeader>
+
+      <ConexionDrive />
 
       {errorSubida && <p className="mb-4 text-sm text-red-300">{errorSubida}</p>}
       {aviso && <p className="mb-4 text-sm text-emerald-300">{aviso}</p>}

@@ -21,6 +21,7 @@
  * Idempotencia: el documento guarda `aplicado_at`. Un documento no puede
  * reiniciar dos veces el mismo contador ni duplicar el gasto.
  */
+import path from 'path';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 
@@ -180,6 +181,45 @@ export async function aplicarDocumentoConfirmado(
             },
         });
 
+        // Copia al Drive del cliente, si lo tiene conectado. FUERA del camino
+        // crítico a propósito: sin await y con el fallo tragado. Que Google
+        // esté caído no puede impedir que una factura entre en PilotOS.
+        subirCopiaADrive(documentoId, clienteId, doc.url, doc.tipo, fechaDoc);
+
         return { mantenimientos_actualizados: actualizados, gasto_id: gastoId, avisos };
     });
+}
+
+/**
+ * Copia el documento al Drive del cliente y guarda el enlace. Se llama sin
+ * `await` desde `aplicarDocumentoConfirmado`: nunca debe retrasar ni romper
+ * la aplicación del documento. Si falla, se anota en el log y ya está — el
+ * documento sigue en PilotOS, que es lo que importa.
+ */
+function subirCopiaADrive(
+    documentoId: string,
+    clienteId: string,
+    urlLocal: string,
+    tipo: string,
+    fecha: Date,
+): void {
+    (async () => {
+        const { subirDocumentoADrive, driveDisponible } = await import('./drive.service');
+        if (!driveDisponible()) return;
+
+        const nombreFichero = urlLocal.split('?')[0].split('/').pop() ?? '';
+        const rutaLocal = path.join(process.cwd(), 'uploads', nombreFichero);
+        const nombreVisible = `${fecha.toISOString().slice(0, 10)} - ${tipo.replace(/_/g, ' ').toLowerCase()}`;
+
+        const r = await subirDocumentoADrive(clienteId, rutaLocal, nombreVisible, tipo, fecha);
+        if (r.ok && r.webViewLink) {
+            await prisma.documento.update({
+                where: { id: documentoId },
+                data: { drive_web_link: r.webViewLink },
+            });
+        } else if (r.error && r.error !== 'sin_conexion_drive' && r.error !== 'drive_no_configurado') {
+            // "No lo tiene conectado" no es un fallo: es lo normal.
+            console.warn('[DRIVE] No se pudo subir el documento', documentoId, '->', r.error);
+        }
+    })().catch((e) => console.warn('[DRIVE] Subida en segundo plano fallida:', e?.message));
 }
