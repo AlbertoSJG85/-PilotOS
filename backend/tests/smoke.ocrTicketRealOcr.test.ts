@@ -107,3 +107,76 @@ describe('parser contra la salida REAL de Tesseract (ticket 08/08/2026)', () => 
         expect(r.parc_dist_total).toBeUndefined();
     });
 });
+
+/**
+ * Salida literal de Tesseract sobre el SEGUNDO ticket real (10/08/2026, mismo
+ * vehículo), el que subió Alberto el 2026-08-12 y disparó las alertas falsas
+ * de C-056. Interesa por lo que el OCR hace MAL aquí y que el del 08/08 no
+ * tenía: pierde la coma de la distancia acumulada, añade un dígito al
+ * contador de borrados y lee un 5 como 9 en el importe del turno.
+ */
+const OCR_REAL_10_08 = `FECHA: 10708726 18
+
+Ne LICENCIA: 562 S.CRUZ
+Num. Servicios: 18807
+Carreras: 144655, 60
+Surlementos: 4391.80
+Total: 149047, 40
+Dist. Total: 1831080
+Dist. Ocupado: 80159,5
+Dist. Libre: 78257,9
+Dist, OFF: 9999999, 9
+Tiemro Ocurado: 269018
+Tiempo On: 510680
+Borrados: 2937
+P Ne de servus: 6
+P Carreras: 49. 75
+P SurPlementos: 1.80
+P Total: 91-55
+P Dist. Total: 64,9
+P Dist. Ocurado 21.6
+P Dist. Libre: 22.2
+P Dist. OFF: 21.1
+P Tiemro Ocupado 41
+P Tiempo On: 109
+`;
+
+describe('parser contra la salida REAL de Tesseract (ticket 10/08/2026)', () => {
+    const r = validarTicketTaximetro(OCR_REAL_10_08);
+
+    /**
+     * `Total: 149047, 40` — separador bien leído pero con un espacio detrás.
+     * El patrón de importe exige separador + 2 dígitos PEGADOS, así que el
+     * campo se perdía entero. Sin importe acumulado, la comparación entre
+     * tickets no puede distinguir "trabajo no declarado" de ruido de OCR y
+     * siempre caía en el mensaje alarmista de kilómetros.
+     */
+    it('recupera el importe acumulado pese al espacio tras la coma', () => {
+        expect(r.acum_total).toBeCloseTo(149047.40, 2);
+    });
+
+    it('sigue leyendo carreras y suplementos acumulados (mismo defecto de espacio)', () => {
+        expect(r.acum_carreras).toBeCloseTo(144655.60, 2);
+        expect(r.acum_suplementos).toBeCloseTo(4391.80, 2);
+    });
+
+    it('lee bien lo que está bien impreso: km y servicios del turno', () => {
+        expect(r.parc_dist_total).toBeCloseTo(64.9, 1);
+        expect(r.parc_num_servicios).toBe(6);
+    });
+
+    /**
+     * Estas tres son las lecturas MALAS del ticket, y se documentan tal cual
+     * a propósito: el parser no puede saber que están mal (`2937` es un
+     * número perfectamente formado). Quien tiene que darse cuenta es el motor
+     * de comparación — ver smoke.ocrFiabilidad.test.ts, que usa exactamente
+     * estos valores.
+     */
+    it('lecturas erróneas conocidas: el parser las devuelve, el motor de alertas debe filtrarlas', () => {
+        expect(r.acum_borrados).toBe(2937);       // el ticket pone 297
+        expect(r.acum_dist_total).toBe(1831080);  // el ticket pone 183.108,0
+        expect(r.parc_total).toBeCloseTo(91.55, 2); // el ticket pone 51,55
+        // La prueba de que 91,55 está mal está en el propio ticket:
+        expect(r.parc_carreras! + r.parc_suplementos!).toBeCloseTo(51.55, 2);
+    });
+});

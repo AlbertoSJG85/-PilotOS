@@ -664,3 +664,29 @@ La lista tenía `gasoil` pero no `gasoleo`, que es como lo escriben casi todas l
 Resultado: 401 y foto rota, siempre. `next.config.ts` **ya proxeaba** `/uploads/:path*` al backend, así que bastaba con pedir la foto por la ruta del propio dominio: misma petición, mismo origen, cookie enviada. Helper `urlDocumento()` que se queda con el `pathname` — arregla también las fotos ya guardadas sin tocar ninguna fila, y deja pasar sin cambios cualquier URL que no sea de `/uploads`.
 - Verificado: 146/146 tests, con `smoke.ocrGasoilRealOcr.test.ts` usando el texto **literal** de Tesseract sobre la factura real.
 - **Prevención:** el fixture sintético de combustible que escribí en C-054 pasaba al 100% y no valía para nada — tres fallos reales pasaron por debajo. Cada tipo de documento nuevo necesita **su** fixture real antes de darse por bueno. Es la tercera vez en el mismo día que esta lección cuesta dinero.
+
+### C-056 · Las alertas acusaban al conductor de cifras que el OCR había leído mal
+- Fecha: 2026-08-12
+- Área: `backend/src/services/ocrComparacion.service.ts`, `backend/src/services/ocr.service.ts`
+- **Problema detectado.** Alberto subió un parte el 11/08 por la noche (fecha trabajada 08/08) y otro el 12/08 por la mañana (fecha trabajada 10/08). Las alertas que salieron eran falsas de arriba abajo:
+  - Parte del 10/08: *«El taxímetro registra **2640 borrados** más de los 1 parte(s) declarados. El vehículo se ha movido **1.648.004,9 km** sin que ningún parte lo declare»*. En dos días.
+  - Parte del 08/08: *«7 borrados más… **180.511,3 km** sin declarar»*, comparando contra un ticket de mayo cuyo acumulado el OCR había leído como 179,8 km.
+  - Además: *«El total del parte (32 €) no coincide con el P Total del ticket (91,55 €)»*, cuando el ticket pone 51,55.
+- **Causa.** Ninguna de las tres es un problema de los datos del conductor; las tres son lecturas malas de Tesseract que el motor de comparación se creyó sin preguntar. Salida literal del ticket del 10/08:
+```
+Total: 149047, 40      <- acum_total se perdía: el patrón exige separador + 2 dígitos PEGADOS
+Dist. Total: 1831080   <- el ticket pone 183.108,0 (= 183.043,1 del anterior + 64,9 del turno)
+Borrados: 2937         <- el ticket pone 297 (296 + 1 turno)
+Surlementos: 4391.80   <- "Suplementos" con la p leída como r -> campo perdido
+P Total: 91-55         <- el ticket pone 51,55 (= P Carreras 49,75 + P Suplementos 1,80)
+```
+  El motor no tenía **ningún** control de plausibilidad: convertía un dígito de más en una acusación de trabajo no declarado y disparaba un WhatsApp al patrón. Y como `acum_total` nunca se extraía (el espacio tras la coma), la rama que distingue «trabajo no declarado» de «solo km» no podía usar el dinero jamás: siempre caía en el mensaje alarmista de kilómetros.
+- **Solución aplicada.**
+  1. `evaluarFiabilidadAcumulados()` (función pura): un contador de taxímetro solo sube y sube a un ritmo acotado. Si entre dos tickets los borrados retroceden o suben más de `4 + 6/día`, o los km saltan más de 1000/día, o el importe más de 1500/día, esa cifra **no sirve de prueba**. Si lo que falla es el contador de borrados, no se compara nada: anomalía NORMAL diciendo que se revise la foto, y **sin WhatsApp**.
+  2. `importeTurnoTicket()`: comprueba la coherencia interna del propio ticket (P Carreras + P Suplementos = P Total) y, cuando no cuadra, descarta el P Total —dos lecturas que suman bien pesan más que una suelta—. En el caso real esto convierte una diferencia falsa de 59,55 € en la de verdad: 51,55 del ticket contra 32 declarados.
+  3. Tickets separados más de 15 días: la cuenta «borrados esperados = anteriores + partes declarados» deja de ser concluyente (seguro que hubo turnos sin parte). Se informa como NORMAL, no se acusa.
+  4. CRÍTICA (que es la que avisa por WhatsApp) solo si hay prueba contrastable. Si ni km ni € se han podido contrastar, un borrado suelto queda como aviso NORMAL en el panel.
+  5. Parser: recuperado el decimal con espacio detrás (`149047, 40`) y tolerancia a `Su?lementos` mal leído.
+- **Verificado:** 163/163 tests, con `smoke.ocrFiabilidad.test.ts` y el fixture literal de Tesseract del ticket del 10/08 añadido a `smoke.ocrTicketRealOcr.test.ts`. Los dos partes de producción recalculados tras el despliegue.
+- **Aparte, y no es de código:** los dos avisos al patrón fallaron con `(#132001) Template name does not exist` — la plantilla Meta `anomalia_taximetro` sigue sin estar aprobada. Ninguna alerta crítica ha salido nunca por WhatsApp.
+- **Prevención.** Regla para todo lo que salga del OCR: *antes de acusar, comprobar que la cifra es posible*. Un número bien formado (`2937`) no es un número correcto, y el parser no puede saberlo — quien tiene que darse cuenta es quien compara. Ningún dato imposible puede terminar en un mensaje a una persona.

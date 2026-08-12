@@ -149,6 +149,14 @@ function normalizarNumerosOcr(t: string): string {
         .replace(/(\d)\s*[»«>·—–]\s*(\d)/g, '$1.$2')
         // guion entre cifras cuando hace de decimal: 1967-05 -> 1967.05
         .replace(/(\d)-(\d{1,2})(?!\d)/g, '$1.$2')
+        // decimal con el separador BIEN leido pero un espacio detras:
+        // "Total: 149047, 40" -> 149047.40. Sin esto el patron de importe
+        // (que exige separador + 2 digitos pegados) no casa y el campo se
+        // pierde entero -- asi se perdio `acum_total` en el ticket del
+        // 2026-08-10, y sin importe acumulado la comparacion de acumulados
+        // no puede distinguir "trabajo no declarado" de ruido de OCR.
+        // Solo en la MISMA linea (no \s) para no unir cifras de dos filas.
+        .replace(/(\d)[.,][ \t]+(\d{2})(?!\d)/g, '$1.$2')
         // los DOS PUNTOS de la etiqueta leídos como otra cosa, justo antes de
         // la cifra: "carreras! 144605", "P-Carrerasi 1967". Sin esto la
         // etiqueta no casa y el campo se pierde aunque el número esté bien.
@@ -395,9 +403,14 @@ export function validarTicketTaximetro(texto: string): DatosTaximetro {
         /carreras?\s*[:.]?\s*([\d]+[.,][\d]{2})/i,
     ]) ?? undefined;
 
+    // "su.{0,2}lementos": en el ticket real del 10/08/2026 Tesseract escribió
+    // "Surlementos" (acumulado) y "SurPlementos" (turno). Con "suplementos"
+    // literal el campo se perdía, y sin suplementos no se puede comprobar la
+    // coherencia interna del ticket (Carreras + Suplementos = Total), que es
+    // lo que destapa un P Total mal leído (C-056).
     const acum_suplementos = extractNumCurrency(acumText, [
-        /suplementos?\s*[:.]?\s*([\d]+[.,][\d]{2})/i,
-        /suplem\s*[:.]?\s*([\d]+[.,][\d]{2})/i,
+        /su.{0,2}lementos?\s*[:.]?\s*([\d]+[.,][\d]{2})/i,
+        /su.{0,2}lem\w*\s*[:.]?\s*([\d]+[.,][\d]{2})/i,
     ]) ?? undefined;
 
     const acum_dist_ocupado = extractNumDistance(acumText, [
@@ -458,7 +471,7 @@ export function validarTicketTaximetro(texto: string): DatosTaximetro {
     ]) ?? undefined;
 
     const parc_suplementos = extractNumCurrency(parcText, [
-        /suplementos?\s*[:.]?\s*([\d]+[.,][\d]{2})/i,
+        /su.{0,2}lementos?\s*[:.]?\s*([\d]+[.,][\d]{2})/i,
     ]) ?? undefined;
 
     const parc_dist_ocupado = extractNumDistance(parcText, [

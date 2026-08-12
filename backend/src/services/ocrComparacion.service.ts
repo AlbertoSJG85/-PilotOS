@@ -24,6 +24,12 @@
  *      (turnos nocturnos cruzan medianoche, el ticket puede salir al día siguiente).
  *
  * Si el OCR no extrae un campo (campo undefined), no se compara — no es un fallo.
+ *
+ * REGLA DE ORO (2026-08-12, C-056): antes de acusar, comprobar que las cifras
+ * son creíbles. El OCR se equivoca leyendo dígitos, y una cifra imposible
+ * nunca puede terminar en un WhatsApp acusando a un conductor. Ver
+ * `evaluarFiabilidadAcumulados` (plausibilidad física entre tickets) e
+ * `importeTurnoTicket` (coherencia interna: Carreras + Suplementos = Total).
  */
 import { prisma } from '../lib/prisma';
 import type { DatosTaximetro } from './ocr.service';
@@ -40,6 +46,28 @@ const TOLERANCIA_FECHA_DIAS = 1;
 // reales todavía — ajustar aquí cuando haya experiencia con tickets reales.
 const TOLERANCIA_KM_ACUMULADO = 20;
 const TOLERANCIA_EUR_ACUMULADO = 5;
+
+// ── Límites de plausibilidad física (2026-08-12, C-056) ────────────────
+// El motor de acumulados se creía el OCR a pies juntillas: con un ticket
+// real leído como "Borrados: 2937" (el ticket pone 297) y "Dist. Total:
+// 1831080" (pone 183.108,0 — se perdió la coma), acusó al conductor de
+// 2.640 borrados sin declarar y 1.648.004,9 km en dos días. Ningún dato
+// imposible puede terminar en una acusación: si los acumulados no son
+// físicamente plausibles, el fallo es de LECTURA, no del conductor.
+const MAX_KM_POR_DIA = 1000;
+const MAX_EUR_POR_DIA = 1500;
+const MAX_BORRADOS_POR_DIA = 6;
+const MARGEN_BORRADOS = 4;
+
+// Con muchos días entre tickets, "borrados esperados = borrados anteriores +
+// partes declarados" deja de ser concluyente: casi seguro que hubo turnos sin
+// parte (o el sistema no estaba en uso). Se sigue informando, pero como aviso
+// normal, sin acusación ni WhatsApp al patrón.
+const MAX_DIAS_ENTRE_TICKETS = 15;
+
+// Coherencia interna del turno: P Carreras + P Suplementos = P Total. Si no
+// cuadra, alguna de las tres cifras se leyó mal.
+const TOLERANCIA_COHERENCIA_EUR = 1;
 
 export type CampoDiscrepancia = 'total' | 'km' | 'fecha' | 'combustible' | 'borrados';
 export type SeveridadDiscrepancia = 'NORMAL' | 'CRITICA';
@@ -107,6 +135,112 @@ function formatFecha(d: Date): string {
 }
 
 // ─────────────────────────────────────────────────────────
+// Fiabilidad de la lectura (C-056)
+// ─────────────────────────────────────────────────────────
+
+export interface FiabilidadAcumulados {
+    /** false = el salto de borrados entre los dos tickets es imposible → no se compara nada. */
+    borrados: boolean;
+    /** false = el salto de km acumulados es imposible → no se usa como prueba. */
+    km: boolean;
+    /** false = el salto de importe acumulado es imposible → no se usa como prueba. */
+    eur: boolean;
+    motivos: string[];
+}
+
+/**
+ * Un contador de taxímetro solo sube, y sube a un ritmo acotado por la
+ * realidad física. Esta función NO decide si hay anomalía: decide si los
+ * números leídos pueden servir de prueba. Función pura (testeable sin BD).
+ *
+ * Un campo ausente en cualquiera de los dos tickets se marca como no
+ * utilizable — que el OCR no lo leyera no es culpa de nadie, pero tampoco
+ * permite acusar.
+ */
+export function evaluarFiabilidadAcumulados(
+    ant: DatosTaximetro,
+    act: DatosTaximetro,
+    diasEntreTickets: number,
+): FiabilidadAcumulados {
+    const dias = Math.max(1, diasEntreTickets);
+    const motivos: string[] = [];
+
+    let borrados = true;
+    if (ant.acum_borrados === undefined || act.acum_borrados === undefined) {
+        borrados = false;
+        motivos.push('no se leyó el contador de borrados en uno de los dos tickets');
+    } else {
+        const salto = act.acum_borrados - ant.acum_borrados;
+        const techo = MARGEN_BORRADOS + MAX_BORRADOS_POR_DIA * dias;
+        if (salto < 0) {
+            borrados = false;
+            motivos.push(`el contador de borrados baja (${ant.acum_borrados} → ${act.acum_borrados}), y un contador de taxímetro no retrocede`);
+        } else if (salto > techo) {
+            borrados = false;
+            motivos.push(`el contador de borrados sube ${salto} en ${dias} día(s) (${ant.acum_borrados} → ${act.acum_borrados}), imposible`);
+        }
+    }
+
+    let km = true;
+    if (ant.acum_dist_total === undefined || act.acum_dist_total === undefined) {
+        km = false;
+        motivos.push('no se leyó la distancia acumulada en uno de los dos tickets');
+    } else {
+        const salto = act.acum_dist_total - ant.acum_dist_total;
+        if (salto < 0 || salto > MAX_KM_POR_DIA * dias) {
+            km = false;
+            motivos.push(`la distancia acumulada salta ${salto.toFixed(1)} km en ${dias} día(s), imposible`);
+        }
+    }
+
+    let eur = true;
+    if (ant.acum_total === undefined || act.acum_total === undefined) {
+        eur = false;
+        motivos.push('no se leyó el importe acumulado en uno de los dos tickets');
+    } else {
+        const salto = act.acum_total - ant.acum_total;
+        if (salto < 0 || salto > MAX_EUR_POR_DIA * dias) {
+            eur = false;
+            motivos.push(`el importe acumulado salta ${salto.toFixed(2)} € en ${dias} día(s), imposible`);
+        }
+    }
+
+    return { borrados, km, eur, motivos };
+}
+
+/**
+ * Importe del turno según el ticket, con la coherencia interna comprobada:
+ * P Carreras + P Suplementos tiene que dar P Total.
+ *
+ * Cuando no cuadra, la cifra que se descarta es P Total: son tres lecturas
+ * independientes y dos que suman bien pesan más que una suelta. Caso real
+ * del 2026-08-10: `P Carreras: 49.75` + `P Suplementos: 1.80` = 51,55 pero
+ * `P Total: 91-55` (el 5 leído como 9). Comparando contra los 91,55 el
+ * sistema levantaba una diferencia de 59,55 € que no existía — y comparando
+ * contra 51,55 aparece la que sí existe: el parte declaraba 32 €.
+ *
+ * Devuelve null si no hay ninguna cifra utilizable.
+ */
+export function importeTurnoTicket(
+    datos: DatosTaximetro,
+): { valor: number; reconstruido: boolean } | null {
+    const pTotal = datos.parc_total ?? datos.importe;
+    const suma = datos.parc_carreras !== undefined && datos.parc_suplementos !== undefined
+        ? datos.parc_carreras + datos.parc_suplementos
+        : undefined;
+
+    if (pTotal === undefined) {
+        return suma !== undefined ? { valor: suma, reconstruido: true } : null;
+    }
+    if (suma === undefined) return { valor: pTotal, reconstruido: false };
+
+    if (Math.abs(suma - pTotal) > TOLERANCIA_COHERENCIA_EUR) {
+        return { valor: suma, reconstruido: true };
+    }
+    return { valor: pTotal, reconstruido: false };
+}
+
+// ─────────────────────────────────────────────────────────
 // Función principal
 // ─────────────────────────────────────────────────────────
 
@@ -159,18 +293,22 @@ export async function compararDocumentosConParte(parte_diario_id: string): Promi
         if (!datos) continue;
         const discrepancias: Discrepancia[] = [];
 
-        // 1. Total
-        const pTotal = datos.parc_total ?? datos.importe;
-        if (pTotal !== undefined && ingresoDeclarado > 0) {
+        // 1. Total — con la coherencia interna del ticket comprobada (C-056).
+        const importeTurno = importeTurnoTicket(datos);
+        if (importeTurno !== null && ingresoDeclarado > 0) {
+            const pTotal = importeTurno.valor;
             const diff = Math.abs(pTotal - ingresoDeclarado);
             if (diff > TOLERANCIA_TAXIMETRO_EUR) {
+                const origen = importeTurno.reconstruido
+                    ? `P Carreras + P Suplementos del ticket (${pTotal.toFixed(2)} €; el P Total impreso no cuadra con esas dos cifras, revisa la foto)`
+                    : `el P Total del ticket (${pTotal.toFixed(2)} €)`;
                 const d: Discrepancia = {
                     campo: 'total',
                     severidad: 'NORMAL',
                     declarado: ingresoDeclarado,
                     detectado: pTotal,
                     diff: Number(diff.toFixed(2)),
-                    mensaje: `El total del parte (${ingresoDeclarado.toFixed(2)} €) no coincide con el P Total del ticket (${pTotal.toFixed(2)} €). Diferencia: ${diff.toFixed(2)} €.`,
+                    mensaje: `El total del parte (${ingresoDeclarado.toFixed(2)} €) no coincide con ${origen}. Diferencia: ${diff.toFixed(2)} €.`,
                 };
                 discrepancias.push(d);
                 await crearAnomalia(parte.conductor_id, d.mensaje, parte.id, doc.id, 'NORMAL');
@@ -375,6 +513,24 @@ async function compararAcumulados(
     if (!anterior) return null;
     const { parteAnterior, datosAnt } = anterior;
 
+    // ── Filtro previo: ¿son creíbles las cifras leídas? (C-056) ──
+    // Antes de esto, un dígito mal leído se convertía directamente en una
+    // acusación de fraude por WhatsApp al patrón.
+    const diasEntreTickets = Math.max(1, Math.round(diffDias(parte.fecha_trabajada, parteAnterior.fecha_trabajada)));
+    const fiabilidad = evaluarFiabilidadAcumulados(datosAnt, datosActual, diasEntreTickets);
+
+    if (!fiabilidad.borrados) {
+        const mensaje = `No se ha podido contrastar el ticket con el anterior: ${fiabilidad.motivos[0]}. Es un problema de LECTURA del ticket, no del turno: revisa la foto y, si hace falta, vuelve a subirla.`;
+        await crearAnomalia(parte.conductor_id, mensaje, parte.id, docId, 'NORMAL');
+        return {
+            campo: 'borrados',
+            severidad: 'NORMAL',
+            declarado: datosAnt.acum_borrados ?? '—',
+            detectado: datosActual.acum_borrados ?? '—',
+            mensaje,
+        };
+    }
+
     const partesEntreTickets = await prisma.parteDiario.findMany({
         where: {
             vehiculo_id: parte.vehiculo_id,
@@ -392,11 +548,32 @@ async function compararAcumulados(
 
     if (diffBorrados === 0) return null; // todo cuadra, sin aviso
 
+    // Muchos días sin ticket: la cuenta de borrados deja de ser concluyente
+    // (casi seguro hubo turnos sin parte). Se informa, no se acusa (C-056).
+    if (diasEntreTickets > MAX_DIAS_ENTRE_TICKETS) {
+        const mensaje = `Han pasado ${diasEntreTickets} días desde el ticket anterior de este vehículo, con ${numPartes} parte(s) declarado(s) por medio. La cuenta de borrados no cuadra (esperados ${borradosEsperados}, ticket ${datosActual.acum_borrados}), pero con tanto tiempo sin ticket no es una prueba de nada: lo normal es que falten partes por registrar. Sube el ticket con cada parte para que la comparación sirva.`;
+        await crearAnomalia(parte.conductor_id, mensaje, parte.id, docId, 'NORMAL');
+        return {
+            campo: 'borrados',
+            severidad: 'NORMAL',
+            declarado: borradosEsperados,
+            detectado: datosActual.acum_borrados,
+            diff: diffBorrados,
+            mensaje,
+        };
+    }
+
     // `mensaje`: detallado, para el panel del patrón (Anomalia.descripcion).
     // `motivoCorto`: para el parámetro de la plantilla de WhatsApp — los
     // templates de Meta no admiten párrafos largos como parámetro.
     let mensaje: string;
     let motivoCorto: string;
+    // CRITICA (= acusa y avisa por WhatsApp) solo cuando hay prueba, o cuando
+    // la prueba se ha podido mirar y no aparece nada. Si los km y el importe
+    // acumulado NO se han podido contrastar (campos no leídos o cifras
+    // imposibles), un borrado suelto no basta para acusar a nadie: queda como
+    // aviso NORMAL en el panel (C-056).
+    let severidad: SeveridadDiscrepancia = 'CRITICA';
 
     if (diffBorrados < 0) {
         // Menos borrados de los que los propios partes ya explicarían: el
@@ -406,15 +583,13 @@ async function compararAcumulados(
     } else {
         // diffBorrados > 0: hay borrado(s) que ningún parte explica.
         // Ver si además hay km y/o € sin declarar para calibrar el mensaje.
-        const saltoKm = datosActual.acum_dist_total !== undefined && datosAnt.acum_dist_total !== undefined
-            ? datosActual.acum_dist_total - datosAnt.acum_dist_total
-            : undefined;
+        // Solo son prueba los saltos que la comprobación de plausibilidad ha
+        // dado por buenos (fiabilidad.km / .eur).
+        const saltoKm = fiabilidad.km ? datosActual.acum_dist_total! - datosAnt.acum_dist_total! : undefined;
         const kmSinDeclarar = saltoKm !== undefined ? saltoKm - kmDeclarados : undefined;
         const hayKmSinDeclarar = kmSinDeclarar !== undefined && Math.abs(kmSinDeclarar) > TOLERANCIA_KM_ACUMULADO;
 
-        const saltoEur = datosActual.acum_total !== undefined && datosAnt.acum_total !== undefined
-            ? datosActual.acum_total - datosAnt.acum_total
-            : undefined;
+        const saltoEur = fiabilidad.eur ? datosActual.acum_total! - datosAnt.acum_total! : undefined;
         const eurSinDeclarar = saltoEur !== undefined ? saltoEur - eurDeclarados : undefined;
         const hayEurSinDeclarar = eurSinDeclarar !== undefined && Math.abs(eurSinDeclarar) > TOLERANCIA_EUR_ACUMULADO;
 
@@ -426,18 +601,26 @@ async function compararAcumulados(
         } else if (hayKmSinDeclarar) {
             mensaje = `${baseMensaje} El vehículo se ha movido ${kmSinDeclarar!.toFixed(1)} km sin que ningún parte lo declare, pero el importe acumulado cuadra (sin dinero de más). Puede ser uso del vehículo fuera de trabajo (taller, ITV, cambio de ruedas...) — pregúntaselo al asalariado.`;
             motivoCorto = `${kmSinDeclarar!.toFixed(0)} km sin declarar, sin dinero de más — revisa con tu asalariado`;
-        } else {
+        } else if (fiabilidad.km || fiabilidad.eur) {
             mensaje = `${baseMensaje} Sin diferencia relevante de km o importe acumulado.`;
+            motivoCorto = `${diffBorrados} borrado(s) sin turno que lo explique`;
+        } else {
+            // Ni km ni € contrastables: hay un borrado de más, pero no hay con
+            // qué respaldarlo. Se informa sin acusar y sin WhatsApp.
+            severidad = 'NORMAL';
+            mensaje = `${baseMensaje} No se ha podido comprobar si hay km o dinero sin declarar (${fiabilidad.motivos.join('; ')}). Revisa la foto del ticket antes de sacar conclusiones.`;
             motivoCorto = `${diffBorrados} borrado(s) sin turno que lo explique`;
         }
     }
 
-    const anomalia = await crearAnomalia(parte.conductor_id, mensaje, parte.id, docId, 'CRITICA');
-    await notificarPatronAnomalia(ctx, parte.id, anomalia.id, mensaje, motivoCorto);
+    const anomalia = await crearAnomalia(parte.conductor_id, mensaje, parte.id, docId, severidad);
+    if (severidad === 'CRITICA') {
+        await notificarPatronAnomalia(ctx, parte.id, anomalia.id, mensaje, motivoCorto);
+    }
 
     return {
         campo: 'borrados',
-        severidad: 'CRITICA',
+        severidad,
         declarado: borradosEsperados,
         detectado: datosActual.acum_borrados,
         diff: diffBorrados,
