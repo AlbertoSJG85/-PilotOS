@@ -122,6 +122,61 @@ async function main() {
         },
     });
 
+    const configAsalariado = await prisma.configuracionEconomica.findFirstOrThrow({ where: { conductor_id: condAsalariado.id } });
+
+    // ── Un mes de trabajo de verdad ───────────────────────────────────────
+    // Sin varios días no se puede juzgar el panel del asalariado: las medias
+    // por km y por día, y la forma del mes, necesitan un mes.
+    // Cifras variadas a propósito (días buenos, días flojos, un día sin
+    // repostar) para que las estadísticas digan algo.
+    const jornadas = [
+        { dias: 14, km: 210, bruto: 168.30, datafono: 61.20, combustible: 24.10 },
+        { dias: 13, km: 155, bruto: 121.75, datafono: 30.00, combustible: 18.40 },
+        { dias: 12, km: 288, bruto: 231.60, datafono: 118.90, combustible: 31.20 },
+        { dias: 11, km: 96,  bruto: 74.50,  datafono: 0,      combustible: 0 },
+        { dias: 10, km: 245, bruto: 203.15, datafono: 88.40,  combustible: 27.60 },
+        { dias: 9,  km: 176, bruto: 142.80, datafono: 45.10,  combustible: 21.30 },
+        { dias: 8,  km: 262, bruto: 218.40, datafono: 96.75,  combustible: 29.90 },
+        { dias: 7,  km: 134, bruto: 112.60, datafono: 38.20,  combustible: 16.80 },
+        { dias: 6,  km: 301, bruto: 254.90, datafono: 141.30, combustible: 34.50 },
+        { dias: 5,  km: 188, bruto: 151.20, datafono: 52.60,  combustible: 22.70 },
+    ];
+
+    let kmCursor = 118000;
+    for (const j of jornadas) {
+        const inicio = kmCursor;
+        const fin = kmCursor + j.km;
+        kmCursor = fin;
+        const parte = await prisma.parteDiario.create({
+            data: {
+                fecha_trabajada: dia(-j.dias),
+                vehiculo_id: vehiculo.id,
+                conductor_id: condAsalariado.id,
+                km_inicio: inicio,
+                km_fin: fin,
+                ingreso_bruto: j.bruto,
+                ingreso_datafono: j.datafono,
+                combustible: j.combustible || null,
+                estado: 'ENVIADO',
+            },
+        });
+        const neto = j.bruto - j.combustible;
+        await prisma.calculoParte.create({
+            data: {
+                parte_diario_id: parte.id,
+                configuracion_id: configAsalariado.id,
+                bruto_diario: j.bruto,
+                combustible: j.combustible,
+                neto_diario: neto,
+                parte_conductor: neto / 2,
+                parte_patron: neto / 2,
+                modelo_reparto_aplicado: 'PORCENTAJE',
+                porcentaje_conductor_aplicado: 50,
+                porcentaje_patron_aplicado: 50,
+            },
+        });
+    }
+
     // ── Parte limpio: cuenta en los globales ──────────────────────────────
     const parteLimpio = await prisma.parteDiario.create({
         data: {
@@ -139,7 +194,7 @@ async function main() {
     await prisma.calculoParte.create({
         data: {
             parte_diario_id: parteLimpio.id,
-            configuracion_id: (await prisma.configuracionEconomica.findFirstOrThrow({ where: { conductor_id: condAsalariado.id } })).id,
+            configuracion_id: configAsalariado.id,
             bruto_diario: 186.40,
             combustible: 22.50,
             neto_diario: 163.90,
@@ -170,7 +225,7 @@ async function main() {
     await prisma.calculoParte.create({
         data: {
             parte_diario_id: parteRetenido.id,
-            configuracion_id: (await prisma.configuracionEconomica.findFirstOrThrow({ where: { conductor_id: condAsalariado.id } })).id,
+            configuracion_id: configAsalariado.id,
             bruto_diario: 95.00,
             combustible: 18.00,
             neto_diario: 77.00,
@@ -246,7 +301,7 @@ Escenario listo — empresa ficticia "Taxis Ficticios S.L." (vehículo 0000DMO)
   DUEÑO       teléfono ${TEL_DUENO}   contraseña ${PASSWORD_DEMO}
   ASALARIADO  teléfono ${TEL_ASALARIADO}   contraseña ${PASSWORD_DEMO}
 
-  · Parte del ${dia(-2).toISOString().slice(0, 10)} — limpio, 186,40 € (cuenta en los totales)
+  · ${jornadas.length + 1} partes limpios repartidos por el mes (para que el panel del asalariado tenga qué enseñar)
   · Parte del ${dia(-1).toISOString().slice(0, 10)} — RETENIDO, 95,00 € declarados frente a
     148,60 € del ticket y 100 km frente a 143,2 km (NO cuenta hasta que el dueño decida)
 `);
