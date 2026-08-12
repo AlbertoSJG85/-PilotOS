@@ -777,3 +777,19 @@ La home del asalariado es para **trabajar**: avisos, el parte de hoy y poco más
 **Lo que hace que esto no vuelva a pasar:** las dos fotos están ahora en `tests/fixtures/` y `smoke.ocrImagenReal.test.ts` pasa la tubería COMPLETA —imagen → OCR → parser— comparando con lo que se lee mirando el papel. Es lento (unos 16 segundos) y da igual: es la única prueba que detecta esta clase de fallo. Los tests sobre texto siguen ahí, pero ya sabemos que no bastan.
 
 - **Prevención, y van cuatro:** *un fallo de lectura no se arregla mirando solo el texto.* Cuando el dato llega mal, hay que subir un escalón y preguntarse qué le estamos dando al motor. Y toda mejora de OCR se valida contra **todas** las fotos reales disponibles, nunca contra una — si solo hay una, no está validada.
+
+### C-061 · Un documento mandado por GlorIA se quedaba en RECIBIDO para siempre
+- Fecha: 2026-08-12
+- Área: `backend/src/routes/internal.routes.ts`, `backend/src/services/ocrDocumentoVehiculo.service.ts`, `backend/src/routes/documentoVehiculo.routes.ts`
+
+**El hallazgo.** Repasando qué quedaba pendiente tras el bloque de trabajo del día, se encontró que `POST /internal/documentos-vehiculo` —el endpoint por el que GlorIA mete una foto que llega por WhatsApp— guardaba la imagen y creaba el `Documento` con `estado: 'RECIBIDO'` y `estado_ocr: 'PENDIENTE'`, y ahí se quedaba. Nada volvía a tocarlo: ni un cron, ni un job en cola, nada. Ese documento nunca aparecía en "Esperan tu confirmación" (que filtra por `PENDIENTE_CONFIRMACION`), así que una factura mandada por WhatsApp desaparecía en la práctica sin que nadie lo notara.
+
+**Por qué pasó desapercibido tanto tiempo.** El endpoint es de julio/agosto (2026-08-11), anterior al circuito de confirmación (§5.4.1, del mismo día 12 por la mañana). Cuando se construyó ese circuito, el camino de la app (`POST /api/documentos-vehiculo`) sí quedó completo —lee la imagen, saca la propuesta, deja el documento listo—, pero nadie volvió a este endpoint más viejo para conectarlo al análisis nuevo. Los dos caminos existían, pero solo uno hacía el trabajo entero.
+
+**La corrección.** Se extrajo el análisis completo (leer la imagen, `analizarDocumentoVehiculo`, crear el `Documento` en `PENDIENTE_CONFIRMACION`) a una función compartida — `analizarYRegistrarDocumento` en `ocrDocumentoVehiculo.service.ts` — y los dos endpoints la usan ahora. Que la factura entre por WhatsApp o por la app no puede cambiar si se procesa.
+
+**Verificado de punta a punta**, no solo con tests: se disparó una llamada real al endpoint interno con la imagen real de un ticket (la misma fixture de C-060), con el token interno de verdad. Resultado: `HTTP 201`, documento creado en `PENDIENTE_CONFIRMACION` con `estado_ocr: COMPLETADO`, y **aparece en `GET /api/documentos-vehiculo?estado=PENDIENTE_CONFIRMACION`**, que es exactamente lo que pinta la pantalla del dueño.
+
+- 11/11 tests del endpoint interno actualizados (antes afirmaban `estado: 'RECIBIDO'` como comportamiento correcto — ahora afirman que se analiza).
+- 240/240 en la batería completa.
+- **Prevención.** Cuando se construye un circuito nuevo con dos puntos de entrada (app y canal externo), comprobar que el segundo también quedó conectado al final del circuito, no solo al principio. Un endpoint que "guarda algo" y ya no hace nada más es indistinguible de uno que funciona, hasta que alguien mira qué pasa después.

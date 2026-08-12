@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { clienteTieneFeaturePro } from '../middleware/billing-access.middleware';
 import { procesarYGuardarImagen } from '../services/storage.service';
+import { analizarYRegistrarDocumento, hashDeBuffer } from '../services/ocrDocumentoVehiculo.service';
 
 const router = Router();
 
@@ -463,6 +464,10 @@ router.post('/documentos-vehiculo', express.json({ limit: '15mb' }), async (req:
         //     teléfonos y de conversaciones; qué coche tiene cada persona es
         //     dominio de PilotOS, así que se decide aquí y no allí.
         let vehiculo: { id: string } | null = null;
+        // Quién lo mandó, si se pudo resolver por teléfono. Se guarda en el
+        // documento como `subido_por_usuario_id` — la misma traza que deja
+        // la app cuando sube alguien autenticado (C-061).
+        let usuarioResuelto: { id: number } | null = null;
 
         if (vehiculo_id) {
             vehiculo = await prisma.vehiculo.findUnique({ where: { id: vehiculo_id }, select: { id: true } });
@@ -478,6 +483,7 @@ router.post('/documentos-vehiculo', express.json({ limit: '15mb' }), async (req:
                 res.status(404).json({ status: 'FAIL', error: 'usuario_no_encontrado' });
                 return;
             }
+            usuarioResuelto = { id: user.id };
 
             const conductor = await prisma.conductor.findFirst({
                 where: { usuario_id: user.id, activo: true },
@@ -534,22 +540,27 @@ router.post('/documentos-vehiculo', express.json({ limit: '15mb' }), async (req:
         const url = publicBase
             ? `${publicBase}/uploads/${procesado.filename}`
             : `${req.protocol}://${req.get('host')}/uploads/${procesado.filename}`;
-        const hash_sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+        const hash_sha256 = hashDeBuffer(buffer);
 
-        const documento = await prisma.documento.create({
-            data: {
-                tipo: 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR',
-                url,
-                hash_sha256,
-                estado: 'RECIBIDO',
-                estado_ocr: 'PENDIENTE',
-                vehiculo_id: vehiculo!.id,
-            },
+        // C-061 (2026-08-12): antes esto creaba el documento en RECIBIDO/
+        // PENDIENTE y ahí se quedaba — nada volvía a tocarlo, ni un cron ni
+        // nada. Una factura mandada por WhatsApp desaparecía en la práctica:
+        // el dueño nunca llegaba a ver que había algo que confirmar.
+        //
+        // Ahora corre el MISMO análisis que la app: lee la imagen, saca la
+        // propuesta y deja el documento en PENDIENTE_CONFIRMACION. Que la
+        // factura entre por WhatsApp o por la app no puede cambiar si se lee.
+        const { documento, propuesta } = await analizarYRegistrarDocumento({
+            rutaLocal: procesado.path,
+            url,
+            vehiculoId: vehiculo!.id,
+            hashSha256: hash_sha256,
+            subidoPorUsuarioId: usuarioResuelto?.id ?? null,
         });
 
-        console.log(`[INTERNAL] Documento sin clasificar recibido para vehiculo ${vehiculo!.id}${subido_por_telefono ? ` (via ${subido_por_telefono})` : ''}: ${documento.id}`);
+        console.log(`[INTERNAL] Documento recibido y analizado para vehiculo ${vehiculo!.id}${subido_por_telefono ? ` (via ${subido_por_telefono})` : ''}: ${documento.id} (${documento.tipo})`);
 
-        res.status(201).json({ status: 'OK', data: { documento_id: documento.id, url } });
+        res.status(201).json({ status: 'OK', data: { documento_id: documento.id, url, tipo: documento.tipo, propuesta } });
     } catch (err: any) {
         console.error('[INTERNAL] Error en /documentos-vehiculo:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });

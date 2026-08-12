@@ -23,7 +23,9 @@
  * como fixture. Mientras tanto, el paso de confirmación es lo que sostiene el
  * dato: si el OCR no encuentra un campo, la persona lo escribe y ya está.
  */
-import { validarTicketGasoil } from './ocr.service';
+import crypto from 'crypto';
+import { prisma } from '../lib/prisma';
+import { analizarImagen, extraerTextoImagen, validarTicketGasoil } from './ocr.service';
 
 export type TipoDocumentoVehiculo = 'CERTIFICADO_ITV' | 'FACTURA_TALLER' | 'POLIZA_SEGURO' | 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR';
 
@@ -237,4 +239,71 @@ export function analizarDocumentoVehiculo(
     }
 
     return propuesta;
+}
+
+// ─────────────────────────────────────────────────────────
+// Registro completo: imagen → análisis → Documento en PENDIENTE_CONFIRMACION
+// ─────────────────────────────────────────────────────────
+
+/**
+ * Analiza una imagen y crea el `Documento` con su propuesta lista para
+ * confirmar (2026-08-12, C-061).
+ *
+ * ÚNICO punto que hace el análisis completo. Antes existían dos caminos para
+ * subir documentación del vehículo:
+ *
+ *   1. La app (`POST /api/documentos-vehiculo`) — corría el OCR y creaba el
+ *      documento en `PENDIENTE_CONFIRMACION`.
+ *   2. GlorIA (`POST /internal/documentos-vehiculo`) — guardaba la imagen y
+ *      dejaba el documento en `RECIBIDO` / `PENDIENTE`, y ahí se quedaba.
+ *      Nada volvía a tocarlo: ni un cron, ni un job, nada. Una factura
+ *      enviada por WhatsApp desaparecía en la práctica — el dueño nunca
+ *      llegaba a ver que había algo que confirmar.
+ *
+ * Con esta función, los dos caminos hacen exactamente lo mismo: leer la
+ * imagen, sacar la propuesta, y dejar el documento donde el dueño (o el
+ * asalariado) lo puede confirmar. Que el documento haya llegado por WhatsApp
+ * o por la app no puede cambiar si se procesa.
+ */
+export interface ResultadoRegistro {
+    documento: { id: string; tipo: string; estado: string };
+    propuesta: PropuestaDocumento;
+}
+
+export async function analizarYRegistrarDocumento(datos: {
+    rutaLocal: string;
+    url: string;
+    vehiculoId: string;
+    hashSha256: string;
+    tipoForzado?: TipoDocumentoVehiculo;
+    subidoPorUsuarioId?: number | null;
+}): Promise<ResultadoRegistro> {
+    const analisis = await analizarImagen(datos.rutaLocal);
+    const ocr = analisis.procesable
+        ? await extraerTextoImagen(datos.rutaLocal)
+        : { texto: '', confianza: 0, legible: false };
+
+    const propuesta = analizarDocumentoVehiculo(ocr.texto, datos.tipoForzado);
+
+    const documento = await prisma.documento.create({
+        data: {
+            tipo: propuesta.tipo,
+            url: datos.url,
+            hash_sha256: datos.hashSha256,
+            estado: 'PENDIENTE_CONFIRMACION',
+            estado_ocr: analisis.procesable ? 'COMPLETADO' : 'ILEGIBLE',
+            ocr_texto: ocr.texto || null,
+            ocr_confianza: ocr.confianza ?? null,
+            ocr_datos_extraidos: propuesta as any,
+            vehiculo_id: datos.vehiculoId,
+            subido_por_usuario_id: datos.subidoPorUsuarioId ?? null,
+        },
+    });
+
+    return { documento, propuesta };
+}
+
+/** SHA-256 de un buffer, para deduplicar documentos que llegan como bytes crudos (GlorIA). */
+export function hashDeBuffer(buffer: Buffer): string {
+    return crypto.createHash('sha256').update(buffer).digest('hex');
 }

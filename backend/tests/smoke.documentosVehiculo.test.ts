@@ -1,9 +1,14 @@
 /**
- * Tests de humo — POST /internal/documentos-vehiculo (2026-08-11).
+ * Tests de humo — POST /internal/documentos-vehiculo (2026-08-11, actualizado
+ * el 2026-08-12 en C-061).
  *
- * Terreno para "el propietario manda una foto por WhatsApp y el sistema la
- * encaja sola" — este endpoint es SOLO recepción y guardado, sin
- * clasificación ni extracción (eso espera una foto real de referencia).
+ * El propietario (o el asalariado) manda una foto por WhatsApp y el sistema
+ * la encaja sola. Hasta el 2026-08-12 este endpoint SOLO guardaba la imagen
+ * y dejaba el documento en RECIBIDO — nada volvía a tocarlo nunca, así que
+ * una factura mandada por GlorIA desaparecía en la práctica. Ahora corre el
+ * MISMO análisis que la subida desde la app (`analizarYRegistrarDocumento`,
+ * mockeado aquí porque su lógica ya está probada en
+ * smoke.documentoVehiculo.test.ts).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response } from 'express';
@@ -19,6 +24,12 @@ vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }));
 
 const procesarYGuardarImagenMock = vi.fn();
 vi.mock('../src/services/storage.service', () => ({ procesarYGuardarImagen: procesarYGuardarImagenMock }));
+
+const analizarYRegistrarDocumentoMock = vi.fn();
+vi.mock('../src/services/ocrDocumentoVehiculo.service', () => ({
+    analizarYRegistrarDocumento: analizarYRegistrarDocumentoMock,
+    hashDeBuffer: vi.fn().mockReturnValue('hash-de-prueba'),
+}));
 
 vi.mock('../src/middleware/billing-access.middleware', () => ({ clienteTieneFeaturePro: vi.fn().mockResolvedValue(true) }));
 
@@ -48,6 +59,10 @@ describe('POST /internal/documentos-vehiculo', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         procesarYGuardarImagenMock.mockResolvedValue({ filename: 'foto-123.jpg', size: 500000, path: '/app/uploads/foto-123.jpg' });
+        analizarYRegistrarDocumentoMock.mockResolvedValue({
+            documento: { id: 'doc-1', tipo: 'FACTURA_TALLER', estado: 'PENDIENTE_CONFIRMACION' },
+            propuesta: { tipo: 'FACTURA_TALLER', mantenimientos_detectados: [], faltantes: [] },
+        });
     });
 
     it('sin vehiculo_id o imagen_base64 → 400', async () => {
@@ -65,9 +80,8 @@ describe('POST /internal/documentos-vehiculo', () => {
         expect(procesarYGuardarImagenMock).not.toHaveBeenCalled();
     });
 
-    it('caso feliz: guarda la imagen y crea el Documento sin clasificar, enlazado al vehículo', async () => {
+    it('caso feliz: guarda la imagen, la ANALIZA y crea el Documento listo para confirmar', async () => {
         prismaMock.vehiculo.findUnique.mockResolvedValue({ id: 'v1' });
-        prismaMock.documento.create.mockResolvedValue({ id: 'doc-1' });
         const res = mockRes();
 
         await manejadorDe('post', '/documentos-vehiculo')(
@@ -76,35 +90,36 @@ describe('POST /internal/documentos-vehiculo', () => {
         );
 
         expect(procesarYGuardarImagenMock).toHaveBeenCalledTimes(1);
-        expect(prismaMock.documento.create).toHaveBeenCalledWith(expect.objectContaining({
-            data: expect.objectContaining({
-                tipo: 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR',
-                estado: 'RECIBIDO',
-                vehiculo_id: 'v1',
-            }),
+        // CLAVE (C-061): ya no basta con guardar el fichero — tiene que
+        // analizarse, o el documento no aparece nunca para confirmar.
+        expect(analizarYRegistrarDocumentoMock).toHaveBeenCalledTimes(1);
+        expect(analizarYRegistrarDocumentoMock).toHaveBeenCalledWith(expect.objectContaining({
+            rutaLocal: '/app/uploads/foto-123.jpg',
+            vehiculoId: 'v1',
+            hashSha256: 'hash-de-prueba',
         }));
         expect(res.status).toHaveBeenCalledWith(201);
         expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
             status: 'OK',
-            data: expect.objectContaining({ documento_id: 'doc-1' }),
+            data: expect.objectContaining({ documento_id: 'doc-1', tipo: 'FACTURA_TALLER' }),
         }));
     });
 
-    it('imagen_base64 vacía o corrupta → 400, no crea Documento', async () => {
+    it('imagen_base64 vacía o corrupta → 400, no llega a analizar nada', async () => {
         prismaMock.vehiculo.findUnique.mockResolvedValue({ id: 'v1' });
         const res = mockRes();
         await manejadorDe('post', '/documentos-vehiculo')(mockReq({ vehiculo_id: 'v1', imagen_base64: '' }), res);
         expect(res.status).toHaveBeenCalledWith(400);
-        expect(prismaMock.documento.create).not.toHaveBeenCalled();
+        expect(analizarYRegistrarDocumentoMock).not.toHaveBeenCalled();
     });
 
-    it('si Sharp no puede procesar la imagen → 415, no crea Documento', async () => {
+    it('si Sharp no puede procesar la imagen → 415, no llega a analizar nada', async () => {
         prismaMock.vehiculo.findUnique.mockResolvedValue({ id: 'v1' });
         procesarYGuardarImagenMock.mockRejectedValue(new Error('formato no soportado'));
         const res = mockRes();
         await manejadorDe('post', '/documentos-vehiculo')(mockReq({ vehiculo_id: 'v1', imagen_base64: 'aGVsbG8=' }), res);
         expect(res.status).toHaveBeenCalledWith(415);
-        expect(prismaMock.documento.create).not.toHaveBeenCalled();
+        expect(analizarYRegistrarDocumentoMock).not.toHaveBeenCalled();
     });
 });
 
@@ -116,10 +131,13 @@ describe('POST /internal/documentos-vehiculo — resolución por teléfono', () 
     beforeEach(() => {
         vi.clearAllMocks();
         procesarYGuardarImagenMock.mockResolvedValue({ filename: 'f.jpg', size: 1000, path: '/app/uploads/f.jpg' });
-        prismaMock.documento.create.mockResolvedValue({ id: 'doc-1' });
+        analizarYRegistrarDocumentoMock.mockResolvedValue({
+            documento: { id: 'doc-1', tipo: 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR', estado: 'PENDIENTE_CONFIRMACION' },
+            propuesta: { tipo: 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR', mantenimientos_detectados: [], faltantes: [] },
+        });
     });
 
-    it('un solo vehículo → lo resuelve y guarda el documento', async () => {
+    it('un solo vehículo → lo resuelve, lo analiza y deja quién lo mandó', async () => {
         prismaMock.minosUser.findFirst.mockResolvedValue({ id: 42 });
         prismaMock.conductor.findFirst.mockResolvedValue({ cliente_id: 'cli-1' });
         prismaMock.vehiculo.findMany.mockResolvedValue([{ id: 'v1', matricula: '1234ABC' }]);
@@ -129,8 +147,9 @@ describe('POST /internal/documentos-vehiculo — resolución por teléfono', () 
             mockReq({ subido_por_telefono: '+34600111222', imagen_base64: 'aGVsbG8=' }), res,
         );
 
-        expect(prismaMock.documento.create).toHaveBeenCalledWith(expect.objectContaining({
-            data: expect.objectContaining({ vehiculo_id: 'v1' }),
+        expect(analizarYRegistrarDocumentoMock).toHaveBeenCalledWith(expect.objectContaining({
+            vehiculoId: 'v1',
+            subidoPorUsuarioId: 42,
         }));
         expect(res.status).toHaveBeenCalledWith(201);
     });

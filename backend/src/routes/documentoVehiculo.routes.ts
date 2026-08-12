@@ -28,8 +28,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { requireAuth, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
-import { extraerTextoImagen, analizarImagen } from '../services/ocr.service';
-import { analizarDocumentoVehiculo, TipoDocumentoVehiculo } from '../services/ocrDocumentoVehiculo.service';
+import { TipoDocumentoVehiculo, analizarYRegistrarDocumento } from '../services/ocrDocumentoVehiculo.service';
 import { aplicarDocumentoConfirmado, DatosDocumentoConfirmados } from '../services/aplicarDocumento.service';
 
 const router = Router();
@@ -70,17 +69,6 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
             return;
         }
 
-        const rutaLocal = urlToLocalPath(url);
-        const analisis = await analizarImagen(rutaLocal);
-        const ocr = analisis.procesable
-            ? await extraerTextoImagen(rutaLocal)
-            : { texto: '', confianza: 0, legible: false };
-
-        const propuesta = analizarDocumentoVehiculo(
-            ocr.texto,
-            TIPOS_VEHICULO.includes(tipo) ? (tipo as TipoDocumentoVehiculo) : undefined,
-        );
-
         // Hash para deduplicar (PilotOS_Master.md §5.4): la misma factura
         // subida dos veces no puede reiniciar dos veces el contador.
         const hash = crypto.createHash('sha256').update(url).digest('hex');
@@ -96,19 +84,15 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
             return;
         }
 
-        const doc = await prisma.documento.create({
-            data: {
-                tipo: propuesta.tipo,
-                url,
-                hash_sha256: hash,
-                estado: 'PENDIENTE_CONFIRMACION',
-                estado_ocr: analisis.procesable ? 'COMPLETADO' : 'ILEGIBLE',
-                ocr_texto: ocr.texto || null,
-                ocr_confianza: ocr.confianza ?? null,
-                ocr_datos_extraidos: propuesta as any,
-                vehiculo_id,
-                subido_por_usuario_id: req.usuario?.id ?? null,
-            },
+        // Mismo análisis, entre por donde entre el documento: por la app o
+        // por GlorIA (C-061). Ver analizarYRegistrarDocumento.
+        const { documento: doc, propuesta } = await analizarYRegistrarDocumento({
+            rutaLocal: urlToLocalPath(url),
+            url,
+            vehiculoId: vehiculo_id,
+            hashSha256: hash,
+            tipoForzado: TIPOS_VEHICULO.includes(tipo) ? (tipo as TipoDocumentoVehiculo) : undefined,
+            subidoPorUsuarioId: req.usuario?.id ?? null,
         });
 
         res.status(201).json({ status: 'OK', data: doc, propuesta });
