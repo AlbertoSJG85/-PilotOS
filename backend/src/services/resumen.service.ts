@@ -116,6 +116,8 @@ export interface ResumenOutput {
     /** Los días que ha conducido el propio dueño. Su importe va íntegro para él. */
     patron: DetalleAsalariado | null;
     beneficio_estimado: number;
+    /** Lo que ingresa el dueno antes de gastos: lo suyo integro + su parte de lo del asalariado. */
+    ingreso_patron: number;
     partes_count: number;
     rango: { desde: string | null; hasta: string | null };
 }
@@ -229,7 +231,24 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
     // si así lo tiene configurado) y NO se divide con nadie. Por eso va
     // aparte y no mezclado con los asalariados.
     const patron = todos.find((d) => d.es_patron) ?? null;
-    const beneficio = partePatron - gastosVariables - gastosFijosProrrateados - ss.total;
+    // ── Lo que gana el dueño (2026-08-12, corregido) ─────────────────────
+    // Antes esto era `partePatron - gastos - SS`, y tenía DOS errores que se
+    // tapaban entre ellos:
+    //
+    //  1. `partePatron` solo recoge la parte del patrón en el reparto. Los
+    //     días que conduce ÉL van a `parte_conductor` (su config es 100/0),
+    //     así que su propio trabajo no entraba en su beneficio. Con dos
+    //     jornadas suyas se perdían 290 € de sus ingresos.
+    //  2. Se restaba la Seguridad Social como si fuera un coste suyo, pero
+    //     la cuota se le descuenta al asalariado de su liquidación: el dueño
+    //     la retiene y la paga al Estado. Entra y sale — es neutra para él.
+    //     Restarla otra vez era cobrársela dos veces.
+    //
+    // Ahora: lo que trabaja él (íntegro) + su parte de lo que trabaja el
+    // asalariado − sus gastos. La SS no aparece porque no es dinero suyo.
+    const ingresoDelPatron = (patron?.reparto ?? 0)
+        + asalariados.reduce((acc, a) => acc + a.para_el_patron, 0);
+    const beneficio = ingresoDelPatron - gastosVariables - gastosFijosProrrateados;
 
     // Efectivo estimado = bruto - datafono. Clampamos a 0 por seguridad
     // si en algún parte se introduce datafono > bruto (input incorrecto).
@@ -251,6 +270,7 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
         ss_modo_descuento: modoSS,
         seguridad_social_detalle: ss.detalle,
         beneficio_estimado: beneficio,
+        ingreso_patron: ingresoDelPatron,
         partes_count: partes.length,
         rango: {
             desde: desde ? desde.toISOString().slice(0, 10) : null,
