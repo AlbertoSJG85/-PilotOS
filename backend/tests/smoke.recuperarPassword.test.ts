@@ -25,6 +25,14 @@ vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }));
 const enviarAvisoGlorMock = vi.fn();
 vi.mock('../src/services/notificacion.service', () => ({ enviarAvisoGloria: enviarAvisoGlorMock }));
 
+// El codigo va por EMAIL desde el 2026-08-12: WhatsApp dependia de que Meta
+// aprobara una plantilla, y a esa fecha no habian aprobado ninguna.
+const enviarEmailMock = vi.fn();
+vi.mock('../src/services/email.service', async (original) => ({
+    ...(await original() as object),
+    enviarEmail: enviarEmailMock,
+}));
+
 process.env.JWT_SECRET = 'secreto-de-prueba-para-los-tests';
 const { default: authRoutes } = await import('../src/routes/auth.routes');
 const { hashPassword } = await import('../src/lib/password');
@@ -42,12 +50,15 @@ function mockRes() {
     return res as Response & { json: any; status: any };
 }
 
-const USUARIO = { id: 25, telefono: '+34615380646', nombre: 'Alberto', role: 'landlord', password_hash: '$2b$10$loquesea' };
+const USUARIO = { id: 25, telefono: '+34615380646', email: 'alberto@nexostudios.digital', nombre: 'Alberto', role: 'landlord', password_hash: '$2b$10$loquesea' };
+/** Alta antigua de asalariado: email sintetico, no existe, no se le puede escribir. */
+const USUARIO_SIN_EMAIL_REAL = { ...USUARIO, id: 26, email: '+34600111222@pilotos.app' };
 
 describe('POST /recuperar — no debe revelar quién tiene cuenta', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         enviarAvisoGlorMock.mockResolvedValue({ ok: true });
+        enviarEmailMock.mockResolvedValue({ ok: true });
         prismaMock.passwordReset.updateMany.mockResolvedValue({ count: 0 });
         prismaMock.passwordReset.create.mockResolvedValue({ id: 'r1' });
     });
@@ -57,8 +68,9 @@ describe('POST /recuperar — no debe revelar quién tiene cuenta', () => {
         const res = mockRes();
         await manejadorDe('/recuperar')({ body: { telefono: '+34615380646' } } as Request, res);
 
-        expect(enviarAvisoGlorMock).toHaveBeenCalledTimes(1);
-        expect(enviarAvisoGlorMock.mock.calls[0][1]).toBe('codigo_recuperacion');
+        expect(enviarEmailMock).toHaveBeenCalledTimes(1);
+        expect(enviarEmailMock.mock.calls[0][0]).toBe('alberto@nexostudios.digital');
+        expect(enviarEmailMock.mock.calls[0][1]).toMatch(/contrase/i);
         expect(res.json.mock.calls[0][0].message).toMatch(/Si el telefono corresponde/i);
     });
 
@@ -67,14 +79,27 @@ describe('POST /recuperar — no debe revelar quién tiene cuenta', () => {
         const res = mockRes();
         await manejadorDe('/recuperar')({ body: { telefono: '+34600000000' } } as Request, res);
 
-        expect(enviarAvisoGlorMock).not.toHaveBeenCalled();
+        expect(enviarEmailMock).not.toHaveBeenCalled();
         expect(res.json.mock.calls[0][0].message).toMatch(/Si el telefono corresponde/i);
         expect(res.status).not.toHaveBeenCalledWith(404);
     });
 
-    it('CLAVE: si el envío de WhatsApp falla, tampoco se nota por fuera', async () => {
+    it('cuenta con el email sintético del onboarding antiguo → ni se intenta enviar, y la respuesta no cambia', async () => {
+        // Los asalariados dados de alta antes del 2026-08-12 llevan
+        // telefono@pilotos.app, un buzón que no existe. No se puede recuperar
+        // por correo, pero por fuera tiene que verse exactamente igual.
+        prismaMock.minosUser.findMany.mockResolvedValue([USUARIO_SIN_EMAIL_REAL]);
+        const res = mockRes();
+        await manejadorDe('/recuperar')({ body: { telefono: '+34600111222' } } as Request, res);
+
+        expect(enviarEmailMock).not.toHaveBeenCalled();
+        expect(prismaMock.passwordReset.create).not.toHaveBeenCalled();
+        expect(res.json.mock.calls[0][0].message).toMatch(/Si el telefono corresponde/i);
+    });
+
+    it('CLAVE: si el envío del correo falla, tampoco se nota por fuera', async () => {
         prismaMock.minosUser.findMany.mockResolvedValue([USUARIO]);
-        enviarAvisoGlorMock.mockResolvedValue({ ok: false, error: 'plantilla no aprobada' });
+        enviarEmailMock.mockResolvedValue({ ok: false, error: 'smtp_no_configurado' });
         const res = mockRes();
         await manejadorDe('/recuperar')({ body: { telefono: '+34615380646' } } as Request, res);
 
@@ -96,8 +121,9 @@ describe('POST /recuperar — no debe revelar quién tiene cuenta', () => {
         const res = mockRes();
         await manejadorDe('/recuperar')({ body: { telefono: '+34615380646' } } as Request, res);
 
+        // El código viaja dentro del cuerpo del correo, no como parámetro suelto.
         const guardado = prismaMock.passwordReset.create.mock.calls[0][0].data;
-        const enviado = enviarAvisoGlorMock.mock.calls[0][2].codigo;
+        const enviado = (enviarEmailMock.mock.calls[0][2] as string).match(/(\d{6})/)![1];
         expect(guardado.codigo_hash).not.toBe(enviado);
         expect(guardado.codigo_hash.startsWith('$2')).toBe(true);
         expect(enviado).toMatch(/^\d{6}$/);

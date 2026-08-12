@@ -9,6 +9,7 @@ import { generarToken, requireAuth, AuthRequest } from '../middleware/auth.middl
 import crypto from 'crypto';
 import { esPlaceholder, hashPassword, validarFortalezaPassword, verificarPassword } from '../lib/password';
 import { enviarAvisoGloria } from '../services/notificacion.service';
+import { enviarEmail, esEmailEntregable, cuerpoCodigoRecuperacion } from '../services/email.service';
 
 const router = Router();
 
@@ -283,9 +284,12 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
 // agosto, y otra vez el 11) — es la causa de fondo, no la anécdota.
 //
 // Decisiones que gobiernan estos dos endpoints:
-//   - El código se manda por WhatsApp con GlorIA, que ya es el canal del
-//     producto. Verifica posesión del número, que es justo lo que le faltaba
-//     a `establecer-password` (ver su nota de seguridad).
+//   - El código se manda por EMAIL (2026-08-12). Antes iba por WhatsApp, lo
+//     que ataba una función crítica a que Meta apruebe una plantilla: a día de
+//     hoy no han aprobado ninguna de las cuatro enviadas, así que el canal de
+//     recuperación estaba de adorno. El correo solo depende de nosotros.
+//     Se sigue identificando la cuenta por TELÉFONO (es lo que el usuario
+//     recuerda y con lo que entra); el email es a dónde llega el código.
 //   - La respuesta de `/recuperar` es SIEMPRE la misma exista o no la cuenta.
 //     Si dijera "ese teléfono no está registrado" cualquiera podría averiguar
 //     quién usa PilotOS probando números.
@@ -304,14 +308,14 @@ function generarCodigo(): string {
 
 /**
  * POST /api/auth/recuperar   { telefono }
- * Manda un código por WhatsApp. Responde igual exista o no la cuenta.
+ * Manda un código por email. Responde igual exista o no la cuenta.
  */
 router.post('/recuperar', authLimiter, async (req: Request, res: Response) => {
     // Respuesta única, se use el camino que se use. Definida una sola vez para
     // que sea imposible que una rama conteste distinto sin querer.
     const respuestaNeutra = {
         status: 'OK',
-        message: 'Si el telefono corresponde a una cuenta, recibiras un codigo por WhatsApp.',
+        message: 'Si el telefono corresponde a una cuenta, recibiras un codigo en tu correo.',
     };
 
     try {
@@ -322,7 +326,17 @@ router.post('/recuperar', authLimiter, async (req: Request, res: Response) => {
         }
 
         const usuario = await resolverCandidatoPilotOS(String(telefono).trim());
-        if (!usuario || !usuario.telefono) {
+        // Sin cuenta, o con un email al que no se puede escribir (los
+        // asalariados dados de alta antes del 2026-08-12 llevan el sintético
+        // telefono@pilotos.app), no hay a dónde mandar el código. Se responde
+        // igual —no se revela nada— pero queda en el log, porque significa que
+        // esa persona no puede recuperar su contraseña sola.
+        if (!usuario) {
+            res.json(respuestaNeutra);
+            return;
+        }
+        if (!esEmailEntregable(usuario.email)) {
+            console.error(`[AUTH] El usuario ${usuario.id} no tiene un email al que escribir (${usuario.email}): no puede recuperar la contrasena solo.`);
             res.json(respuestaNeutra);
             return;
         }
@@ -343,10 +357,8 @@ router.post('/recuperar', authLimiter, async (req: Request, res: Response) => {
             },
         });
 
-        const envio = await enviarAvisoGloria(usuario.telefono, 'codigo_recuperacion', {
-            codigo,
-            minutos: String(RESET_VIGENCIA_MIN),
-        });
+        const { asunto, cuerpo } = cuerpoCodigoRecuperacion(codigo, RESET_VIGENCIA_MIN);
+        const envio = await enviarEmail(usuario.email, asunto, cuerpo);
         if (!envio.ok) {
             // No se le cuenta al usuario (revelaría que la cuenta existe), pero
             // tiene que verse en el log: si esto falla, nadie puede recuperar.

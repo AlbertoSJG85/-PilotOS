@@ -184,14 +184,25 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
             });
 
             // 4. Crear asalariados desde JSON (Fase 3)
-            // Los asalariados usan email sintético telefono@pilotos.app (no necesitan Google Drive propio)
+            //
+            // El email del asalariado es SUYO desde el 2026-08-12. Antes se le
+            // inventaba uno sintético `telefono@pilotos.app` porque "no
+            // necesita Google Drive propio" — cierto, pero el buzón tampoco
+            // existía, así que el día que perdía la contraseña no había forma
+            // de recuperarla sin editar el hash en la base de datos. Ahora que
+            // el código de recuperación va por correo, ese email es la única
+            // puerta de vuelta que tiene.
+            //
+            // Si un alta antigua no trae email, se conserva el sintético para
+            // no romperla: se detecta en /recuperar y queda en el log.
             const asalariados = (onboarding.asalariados as any[]) || [];
             const conductoresAsalariados = [];
 
             for (const asala of asalariados) {
                 if (!asala.telefono) continue;
 
-                const asalaEmail = `${asala.telefono}@pilotos.app`;
+                const emailDado = typeof asala.email === 'string' ? asala.email.trim().toLowerCase() : '';
+                const asalaEmail = emailDado || `${asala.telefono}@pilotos.app`;
 
                 const asalariadoUser = await tx.minosUser.upsert({
                     where: { email: asalaEmail },

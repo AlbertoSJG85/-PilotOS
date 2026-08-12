@@ -690,3 +690,27 @@ P Total: 91-55         <- el ticket pone 51,55 (= P Carreras 49,75 + P Suplement
 - **Verificado:** 163/163 tests, con `smoke.ocrFiabilidad.test.ts` y el fixture literal de Tesseract del ticket del 10/08 añadido a `smoke.ocrTicketRealOcr.test.ts`. Los dos partes de producción recalculados tras el despliegue.
 - **Aparte, y no es de código:** los dos avisos al patrón fallaron con `(#132001) Template name does not exist` — la plantilla Meta `anomalia_taximetro` sigue sin estar aprobada. Ninguna alerta crítica ha salido nunca por WhatsApp.
 - **Prevención.** Regla para todo lo que salga del OCR: *antes de acusar, comprobar que la cifra es posible*. Un número bien formado (`2937`) no es un número correcto, y el parser no puede saberlo — quien tiene que darse cuenta es quien compara. Ningún dato imposible puede terminar en un mensaje a una persona.
+
+### C-057 · Un parte con diferencias contaba igual, y la recuperación de contraseña dependía de Meta
+- Fecha: 2026-08-12
+- Área: `backend/src/services/retencionParte.service.ts`, `backend/src/routes/parteDiario.routes.ts`, `backend/src/services/email.service.ts`, `backend/src/routes/auth.routes.ts`, `app/src/components/features/partes-retenidos.tsx`, `app/src/app/(conductor)/conductor/page.tsx`
+
+**1. El control que no controlaba nada.**
+Un parte con discrepancias generaba su incidencia en el panel, el dueño pulsaba «Marcar revisada» y desaparecía — pero el dinero de ese parte estaba en los totales desde el primer momento. El botón no decidía nada: solo apagaba el aviso.
+- Solución: estado `PENDIENTE_VALIDACION`. El parte existe, se lista y se ve, pero queda fuera de `calcularResumen` y de los cierres hasta que el dueño elige una de dos:
+  - **Aceptar** → pasa a ENVIADO, entra en globales, sus anomalías quedan revisadas (no borradas, R-AN-002).
+  - **Pedir que se rehaga** → el parte y sus tickets se borran para que el asalariado registre ese día otra vez. Queda `PARTE_RECHAZADO` en el ledger con copia de las cifras.
+- Detalle que costó pensar y es el que protege el dato: **el km del vehículo se recalcula al rechazar**. El parte rechazado pudo ser el que subió el contador; si no se devuelve al máximo de los partes que sobreviven, el parte nuevo arrancaría con kilómetros que nadie ha recorrido.
+- Otro: un parte retenido **sigue contando como turno físico** para la comparación de acumulados del taxímetro. Si se excluyera, el motor vería un borrado que ningún parte explica — el falso positivo de C-056 otra vez, por la puerta de atrás.
+- Y otro: un parte que el dueño ya aceptó **no se vuelve a retener solo**. Su decisión pesa más que una relectura del OCR.
+- El asalariado ve en su panel que su parte tiene diferencias, que **todavía no cuenta**, y qué cifras concretas no cuadran. Antes se habría enterado al cuadrar la nómina.
+
+**2. La vista del dueño empezaba por lo que menos hace.**
+El home ofrecía «Nuevo parte» como acción dominante y el panel de gestión como un enlace al final. Un dueño entra a controlar el negocio; conducir es la excepción. Invertido: panel de gestión como acción principal, nuevo parte como secundaria. El asalariado mantiene el parte primero, que es lo suyo.
+
+**3. La recuperación de contraseña dependía de un tercero.**
+El código salía por WhatsApp con una plantilla de Meta. A 12 de agosto no habían aprobado ninguna de las cuatro enviadas: la función existía y no servía para nadie. Se pasa a email (SMTP), que solo depende de nosotros — **la misma decisión que ya tomó NexOS Pay el 2026-08-08 y por el mismo motivo**.
+- `email.service.ts` repite el enfoque de Pay (transporte inyectable, nunca lanza, sin credenciales no envía y lo dice) en vez de importarlo, porque hoy no hay paquete compartido para esto. Anotado: al tercer consumidor, esto sube a `NexOS/core`.
+- **Hallazgo de paso, y es el que de verdad importaba:** el onboarding **nunca pidió email al asalariado** — le inventaba `telefono@pilotos.app`, un buzón que no existe. Con el reset por correo, ese asalariado no habría podido recuperar nada. Ahora el email es obligatorio en el alta; las altas antiguas se detectan en `/recuperar` y quedan en el log (por fuera la respuesta no cambia, no se revela quién tiene cuenta).
+- Verificado: 187/187 tests.
+- **Prevención.** Dos lecciones distintas: (a) un aviso que no cambia el estado de nada es decoración — si el sistema detecta que algo no cuadra, tiene que retener el efecto, no solo pintar un cartel; (b) una función crítica no puede depender de la aprobación de un tercero, y si depende, hay que saber que está apagada, no descubrirlo el día que alguien la necesita.

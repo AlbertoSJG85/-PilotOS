@@ -72,7 +72,7 @@ export default function LoginPage() {
       // El backend responde igual exista o no la cuenta, a proposito: si
       // dijera "ese telefono no esta registrado", cualquiera podria averiguar
       // quien usa PilotOS probando numeros. Aqui reflejamos eso tal cual.
-      setAviso('Si el telefono corresponde a una cuenta, recibiras un codigo por WhatsApp.');
+      setAviso('Si el telefono corresponde a una cuenta, recibiras un codigo en tu correo.');
       setModo('restablecer');
     } catch (err: unknown) {
       setError(err instanceof ApiError ? err.message : 'No se pudo enviar el codigo');
@@ -214,7 +214,7 @@ export default function LoginPage() {
           ) : modo === 'pedir-codigo' ? (
             <>
               <p className="mb-6 text-sm text-zinc-400 text-center">
-                Te enviaremos un codigo por WhatsApp al numero de tu cuenta.
+                Te enviaremos un codigo al correo de tu cuenta.
               </p>
 
               <form onSubmit={handlePedirCodigo} className="space-y-5">
