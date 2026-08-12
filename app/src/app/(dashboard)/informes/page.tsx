@@ -1,6 +1,7 @@
 'use client';
 
-import { use, Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/layout';
 import { PeriodFilter } from '@/components/features/period-filter';
 import { Card, StatCard, Skeleton, Button } from '@/components/ui';
@@ -10,12 +11,23 @@ import { formatCurrency } from '@/lib/utils';
 import { getSessionUser } from '@/lib/auth';
 import { FileDown, Calculator, DollarSign, Fuel, Users, Wallet } from 'lucide-react';
 
-interface Props {
-    searchParams: Promise<{ desde?: string; hasta?: string }>;
-}
-
-function InformesContent({ searchParams }: { searchParams: { desde?: string; hasta?: string } }) {
-    const { desde, hasta } = searchParams;
+/**
+ * El filtro de periodo NO se leía (2026-08-12).
+ *
+ * Esta pantalla cogía las fechas del prop `searchParams` que Next pasa a la
+ * página. Ese prop se resuelve una vez y NO se recalcula cuando el filtro
+ * cambia la URL con `router.replace` — que es justo lo que hace PeriodFilter.
+ * Resultado: la URL cambiaba, el desplegable mostraba el periodo nuevo, y los
+ * números seguían siendo los del primer render. Parecía que "siempre enseña
+ * el histórico".
+ *
+ * `useSearchParams()` —el mismo que usa el panel, donde sí funcionaba— sí se
+ * entera de cada cambio de URL y vuelve a pedir los datos.
+ */
+function InformesContent() {
+    const searchParams = useSearchParams();
+    const desde = searchParams.get('desde') || undefined;
+    const hasta = searchParams.get('hasta') || undefined;
     const [resumen, setResumen] = useState<ResumenDashboard | null>(null);
     const [loading, setLoading] = useState(true);
     const user = getSessionUser();
@@ -119,9 +131,7 @@ function InformesContent({ searchParams }: { searchParams: { desde?: string; has
     );
 }
 
-export default function InformesPage({ searchParams }: Props) {
-    const params = use(searchParams);
-
+export default function InformesPage() {
     return (
         <>
             <PageHeader
@@ -132,7 +142,7 @@ export default function InformesPage({ searchParams }: Props) {
             </PageHeader>
 
             <Suspense fallback={<div className="animate-pulse space-y-4"><div className="h-32 bg-zinc-800 rounded-xl" /></div>}>
-                <InformesContent searchParams={params} />
+                <InformesContent />
             </Suspense>
         </>
     );
