@@ -20,6 +20,8 @@ const prismaMock: any = {
     documentoEnlace: { findMany: vi.fn(), deleteMany: vi.fn() },
     documento: { deleteMany: vi.fn() },
     ledgerEvento: { create: vi.fn() },
+    minosUser: { findUnique: vi.fn() },
+    notificacionConductor: { create: vi.fn() },
     vehiculo: { update: vi.fn() },
 };
 prismaMock.$transaction = vi.fn(async (fn: any) => fn(prismaMock));
@@ -111,7 +113,10 @@ describe('aplicarRetencion', () => {
 
 describe('POST /api/partes/:id/validar (el dueño acepta)', () => {
     const handler = manejadorFinalDe('post', '/:id/validar');
-    beforeEach(() => vi.clearAllMocks());
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.minosUser.findUnique.mockResolvedValue({ nombre: 'Manuel Ficticio' });
+    });
 
     it('pasa a ENVIADO, deja traza de quién lo aceptó y cierra sus anomalías', async () => {
         prismaMock.parteDiario.findUnique.mockResolvedValue(PARTE_RETENIDO);
@@ -157,6 +162,7 @@ describe('POST /api/partes/:id/rehacer (el dueño lo rechaza)', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        prismaMock.minosUser.findUnique.mockResolvedValue({ nombre: 'Manuel Ficticio' });
         prismaMock.documentoEnlace.findMany.mockResolvedValue([{ documento_id: 'doc-1' }, { documento_id: 'doc-2' }]);
         prismaMock.parteDiario.findMany.mockResolvedValue([{ km_fin: 252068 }]);
     });
@@ -216,5 +222,54 @@ describe('POST /api/partes/:id/rehacer (el dueño lo rechaza)', () => {
         await handler({ params: { id: 'parte-1' }, usuario: PATRON, body: {} } as any, res);
 
         expect(prismaMock.vehiculo.update).not.toHaveBeenCalled();
+    });
+});
+
+/**
+ * Avisos al asalariado (2026-08-12). Antes, cuando el dueño decidía, el
+ * asalariado se enteraba por las bravas: si le pedían rehacerlo, el parte
+ * desaparecía de su pantalla sin una palabra.
+ */
+describe('el asalariado se entera de la decisión', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.minosUser.findUnique.mockResolvedValue({ nombre: 'Manuel Ficticio' });
+        prismaMock.documentoEnlace.findMany.mockResolvedValue([]);
+        prismaMock.parteDiario.findMany.mockResolvedValue([{ km_fin: 252068 }]);
+        prismaMock.parteDiario.findUnique.mockResolvedValue(PARTE_RETENIDO);
+        prismaMock.parteDiario.update.mockResolvedValue(PARTE_RETENIDO);
+    });
+
+    it('al ACEPTAR: aviso con el nombre de quien lo aceptó y la fecha del parte', async () => {
+        const handler = manejadorFinalDe('post', '/:id/validar');
+        await handler({ params: { id: 'parte-1' }, usuario: PATRON } as any, mockRes());
+
+        const aviso = prismaMock.notificacionConductor.create.mock.calls[0][0].data;
+        expect(aviso.conductor_id).toBe('cond-1');
+        expect(aviso.tipo).toBe('PARTE_ACEPTADO');
+        expect(aviso.mensaje).toContain('Manuel Ficticio');
+        expect(aviso.mensaje).toContain('10/08/2026');
+        expect(aviso.mensaje).toMatch(/contabilizado/i);
+    });
+
+    it('al REHACER: se le dice que lo repita, con el motivo si lo hay', async () => {
+        const handler = manejadorFinalDe('post', '/:id/rehacer');
+        await handler({ params: { id: 'parte-1' }, usuario: PATRON, body: { motivo: 'faltan tickets' } } as any, mockRes());
+
+        const aviso = prismaMock.notificacionConductor.create.mock.calls[0][0].data;
+        expect(aviso.tipo).toBe('REHACER_PARTE');
+        expect(aviso.mensaje).toContain('Manuel Ficticio');
+        expect(aviso.mensaje).toContain('10/08/2026');
+        expect(aviso.mensaje).toContain('faltan tickets');
+    });
+
+    it('CLAVE: el aviso se crea ANTES de borrar el parte', async () => {
+        const handler = manejadorFinalDe('post', '/:id/rehacer');
+        await handler({ params: { id: 'parte-1' }, usuario: PATRON, body: {} } as any, mockRes());
+
+        const ordenAviso = prismaMock.notificacionConductor.create.mock.invocationCallOrder[0];
+        const ordenBorrado = prismaMock.parteDiario.delete.mock.invocationCallOrder[0];
+        // Si fallara el borrado, al menos el asalariado sabe que algo pasa.
+        expect(ordenAviso).toBeLessThan(ordenBorrado);
     });
 });

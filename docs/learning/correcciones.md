@@ -739,3 +739,23 @@ Se sube el papel → el OCR **propone** (tipo, fecha, importe, validez, qué man
 **4. Mini-panel del asalariado.** Lo que ha entregado neto (bruto − combustible, la misma definición que usa el motor de cálculo), días trabajados, km, €/km y €/día. No ve su reparto: eso es del dueño. Los partes retenidos no suman, y se dice.
 - Verificado: 205/205 tests.
 - **Prevención:** antes de dar por buena una pantalla, preguntar qué está enseñando de más. "Documentos" llevaba meses siendo un duplicado de "Partes" y nadie lo miró; el detalle de las discrepancias se coló porque parecía transparencia y era ventaja para quien tiene que dar explicaciones.
+
+### C-059 · El asalariado no se enteraba de la decisión del dueño, y el datáfono era obligatorio
+- Fecha: 2026-08-12
+- Área: `backend/src/services/notificacionConductor.service.ts`, `backend/src/routes/notificacion.routes.ts`, `backend/src/routes/parteDiario.routes.ts`, `app/src/components/features/avisos-conductor.tsx`, `app/src/app/(conductor)/conductor/panel/page.tsx`
+
+**1. Las decisiones se tomaban a espaldas de quien las sufre.**
+Al montar la retención (C-057) se resolvió el lado del dueño —aceptar o mandar rehacer— pero no el del asalariado: si le pedían rehacerlo, **el parte desaparecía de su pantalla sin una palabra**. Ahora los dos caminos avisan, con el nombre de quien decidió:
+- Aceptado → *"Manuel Ficticio ha aceptado tu parte del 11/08/2026. Ya está contabilizado."*
+- Rehacer → *"…ha pedido que vuelvas a registrar el parte del 11/08/2026. El anterior se ha eliminado"*, con el motivo si lo hay y un botón directo para registrarlo otra vez.
+- Tabla nueva `notificaciones_conductor`. La referencia al parte es **blanda a propósito** (sin FK): en el caso "rehacer" el parte se borra, y el aviso tiene que sobrevivirle — si no, el asalariado se quedaría sin la explicación justo en el caso que la necesita.
+- El aviso se crea **antes** de borrar el parte, y hay un test que lo comprueba por orden de llamada. Si el borrado fallara, al menos la persona sabe que algo pasa.
+
+**2. El datáfono era obligatorio y no tenía por qué.**
+Un turno puede ser todo en efectivo o todo con tarjeta. El formulario exigía rellenarlo igual, así que el conductor escribía un 0 a mano o se lo inventaba. Ahora es opcional (vacío = 0) en el backend y en el formulario. La regla R-PD-014 (bruto ≥ datáfono) sigue viva cuando sí se rellena.
+
+**3. Las vistas, cada una en lo suyo.**
+La home del asalariado es para **trabajar**: avisos, el parte de hoy y poco más. Todo lo demás —cómo va el mes, su vehículo, sus partes, subir un documento— se muda a `/conductor/panel`. Es la simétrica de la decisión del dueño: cada uno arranca en lo que hace el 90% de las veces.
+- En su panel, además, los **acumulados del mes por datáfono y en efectivo**: el efectivo es lo que de verdad tiene que entregar, y verlo separado le ahorra la cuenta a mano.
+- Verificado: 208/208 tests, y el ciclo completo probado con las dos sesiones del entorno ficticio.
+- **Prevención:** cuando una función tenga dos lados (quien decide y quien lo sufre), construir los dos a la vez. La retención se dio por terminada con el lado del dueño resuelto, y estaba a medias.

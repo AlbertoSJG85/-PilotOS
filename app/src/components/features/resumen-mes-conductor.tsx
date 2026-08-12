@@ -16,7 +16,7 @@
  * baila solo.
  */
 
-import { CalendarDays, Route, TrendingUp, Wallet } from 'lucide-react';
+import { CalendarDays, Route, TrendingUp, Wallet, CreditCard, Banknote } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import type { ParteDiario } from '@/types';
 
@@ -54,6 +54,13 @@ export function ResumenMesConductor({ partes, loading }: Props) {
   const km = computables.reduce((acc, p) => acc + Math.max(0, (p.km_fin ?? 0) - (p.km_inicio ?? 0)), 0);
   const dias = computables.length;
 
+  // Acumulados de cobro del mes: cuánto ha entrado por tarjeta y cuánto en
+  // mano. El efectivo es lo que de verdad tiene que entregar, así que verlo
+  // separado le evita cuentas a mano (2026-08-12).
+  const datafono = computables.reduce((acc, p) => acc + Number(p.ingreso_datafono ?? 0), 0);
+  const bruto = computables.reduce((acc, p) => acc + Number(p.ingreso_bruto ?? 0), 0);
+  const efectivo = Math.max(0, bruto - datafono);
+
   const eurPorKm = km > 0 ? neto / km : null;
   const eurPorDia = dias > 0 ? neto / dias : null;
 
@@ -86,6 +93,8 @@ export function ResumenMesConductor({ partes, loading }: Props) {
             <Metrica icono={Route} valor={`${km.toLocaleString('es-ES')} km`} etiqueta="recorridos" />
             <Metrica icono={TrendingUp} valor={eurPorKm !== null ? `${eurPorKm.toFixed(2)} €` : '—'} etiqueta="por km" />
             <Metrica icono={Wallet} valor={eurPorDia !== null ? formatCurrency(eurPorDia) : '—'} etiqueta="por día" />
+            <Metrica icono={CreditCard} valor={formatCurrency(datafono)} etiqueta="por datáfono" />
+            <Metrica icono={Banknote} valor={formatCurrency(efectivo)} etiqueta="en efectivo" />
           </div>
 
           {retenidos > 0 && (

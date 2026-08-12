@@ -39,6 +39,11 @@ function dia(offsetDias: number): Date {
 
 async function limpiar() {
     // Orden inverso a las dependencias. Solo toca la BD demo.
+    // El orden importa y ha costado un error: el seguimiento de mantenimiento
+    // y los documentos del vehículo apuntan a filas que se borran después.
+    await prisma.notificacionConductor.deleteMany({});
+    await prisma.seguimientoMantenimiento.deleteMany({});
+    await prisma.gasto.deleteMany({});
     await prisma.anomalia.deleteMany({});
     await prisma.calculoParte.deleteMany({});
     await prisma.documentoEnlace.deleteMany({});

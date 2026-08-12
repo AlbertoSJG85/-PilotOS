@@ -21,6 +21,7 @@ import { requireAuth, requirePatron, isSameTenant, AuthRequest } from '../middle
 import { crearOActualizarCalculo } from '../services/calculo.service';
 import { compararDocumentosConParte } from '../services/ocrComparacion.service';
 import { aplicarRetencion, ESTADO_RETENIDO, ESTADOS_ENVIADOS } from '../services/retencionParte.service';
+import { notificarConductor, textoParteAceptado, textoRehacerParte } from '../services/notificacionConductor.service';
 
 const router = Router();
 
@@ -73,7 +74,8 @@ interface ParteDiarioInput {
     km_inicio: number;
     km_fin: number;
     ingreso_bruto: number;
-    ingreso_datafono: number;
+    /** Opcional desde 2026-08-12: un turno puede ser todo efectivo o todo tarjeta. */
+    ingreso_datafono?: number;
     combustible?: number;
     varios?: number;
     concepto_varios?: string;
@@ -88,7 +90,8 @@ function validarParte(data: ParteDiarioInput): { valid: boolean; errors: string[
     if (data.km_inicio === undefined) errors.push('km_inicio es obligatorio');
     if (data.km_fin === undefined) errors.push('km_fin es obligatorio');
     if (data.ingreso_bruto === undefined) errors.push('ingreso_bruto es obligatorio');
-    if (data.ingreso_datafono === undefined) errors.push('ingreso_datafono es obligatorio');
+    // El datafono NO es obligatorio (2026-08-12): puede no haber cobrado nada
+    // con tarjeta ese dia. Ausente = 0, que es la verdad del turno, no un hueco.
     if (data.km_fin !== undefined && data.km_inicio !== undefined && data.km_fin <= data.km_inicio) {
         errors.push('km_fin debe ser mayor que km_inicio (R-PD-013)');
     }
@@ -146,7 +149,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                         km_inicio: data.km_inicio,
                         km_fin: data.km_fin,
                         ingreso_bruto: data.ingreso_bruto,
-                        ingreso_datafono: data.ingreso_datafono,
+                        ingreso_datafono: data.ingreso_datafono ?? 0,
                         combustible: data.combustible ?? null,
                         varios: data.varios ?? null,
                         concepto_varios: data.concepto_varios ?? null,
@@ -182,7 +185,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                     km_inicio: data.km_inicio,
                     km_fin: data.km_fin,
                     ingreso_bruto: data.ingreso_bruto,
-                    ingreso_datafono: data.ingreso_datafono,
+                    ingreso_datafono: data.ingreso_datafono ?? 0,
                     combustible: data.combustible ?? null,
                     varios: data.varios ?? null,
                     concepto_varios: data.concepto_varios ?? null,
@@ -203,7 +206,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                     km_inicio: data.km_inicio,
                     km_fin: data.km_fin,
                     ingreso_bruto: data.ingreso_bruto,
-                    ingreso_datafono: data.ingreso_datafono,
+                    ingreso_datafono: data.ingreso_datafono ?? 0,
                     combustible: data.combustible ?? null,
                     varios: data.varios ?? null,
                     concepto_varios: data.concepto_varios ?? null,
@@ -461,11 +464,27 @@ router.post('/:id/validar', requireAuth, requirePatron, async (req: AuthRequest,
         const parte = await cargarParteRetenido(req, res);
         if (!parte) return;
 
+        // El asalariado tiene que enterarse de que su parte ya cuenta, y de
+        // quién lo ha aceptado (2026-08-12).
+        const dueno = await prisma.minosUser.findUnique({
+            where: { id: req.usuario!.id }, select: { nombre: true },
+        });
+        const nombreDueno = dueno?.nombre || 'El dueño';
+
         const actualizado = await prisma.$transaction(async (tx) => {
             const p = await tx.parteDiario.update({
                 where: { id: parte.id },
                 data: { estado: 'ENVIADO', validado_por: req.usuario!.id, validado_at: new Date() },
             });
+
+            const texto = textoParteAceptado(nombreDueno, parte.fecha_trabajada);
+            await notificarConductor({
+                conductorId: parte.conductor_id,
+                tipo: 'PARTE_ACEPTADO',
+                ...texto,
+                entidadTipo: 'PARTE_DIARIO',
+                entidadId: parte.id,
+            }, tx);
             await tx.anomalia.updateMany({
                 where: { parte_diario_id: parte.id, estado: 'ACTIVA' },
                 data: { estado: 'RESUELTA', revisada_at: new Date(), revisada_por: req.usuario!.id },
@@ -506,7 +525,25 @@ router.post('/:id/rehacer', requireAuth, requirePatron, async (req: AuthRequest,
         if (!parte) return;
         const motivo = typeof req.body?.motivo === 'string' ? req.body.motivo.slice(0, 500) : null;
 
+        // Sin esto, el asalariado veía desaparecer su parte sin saber por qué
+        // ni que le toca volver a hacerlo (2026-08-12).
+        const duenoRechaza = await prisma.minosUser.findUnique({
+            where: { id: req.usuario!.id }, select: { nombre: true },
+        });
+        const nombreQuienRechaza = duenoRechaza?.nombre || 'El dueño';
+
         await prisma.$transaction(async (tx) => {
+            // El aviso se crea ANTES de borrar el parte: si algo falla, no
+            // queremos haber borrado y dejado al asalariado sin explicación.
+            const texto = textoRehacerParte(nombreQuienRechaza, parte.fecha_trabajada, motivo);
+            await notificarConductor({
+                conductorId: parte.conductor_id,
+                tipo: 'REHACER_PARTE',
+                ...texto,
+                entidadTipo: 'PARTE_DIARIO',
+                entidadId: parte.id,
+            }, tx);
+
             const enlaces = await tx.documentoEnlace.findMany({
                 where: { entidad_tipo: 'PARTE_DIARIO', entidad_id: parte.id },
                 select: { documento_id: true },

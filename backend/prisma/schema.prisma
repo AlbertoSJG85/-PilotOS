@@ -90,6 +90,7 @@ model Conductor {
   created_at         DateTime                 @default(now())
   updated_at         DateTime                 @updatedAt
   anomalias          Anomalia[]
+  notificaciones     NotificacionConductor[]
   cliente            Cliente                  @relation(fields: [cliente_id], references: [id])
   usuario            MinosUser                @relation(fields: [usuario_id], references: [id])
   configuraciones    ConfiguracionEconomica[]
@@ -308,6 +309,26 @@ model DocumentoHistorial {
   documento    Documento @relation(fields: [documento_id], references: [id])
 
   @@map("documento_historial")
+  @@schema("pilotos")
+}
+
+model NotificacionConductor {
+  id           String    @id @default(uuid())
+  conductor_id String
+  tipo         String
+  titulo       String
+  mensaje      String
+  /// Referencia blanda: el parte puede haberse borrado (caso "rehacer"), asi
+  /// que no hay FK. La notificacion sobrevive al parte a proposito.
+  entidad_tipo String?
+  entidad_id   String?
+  leida_at     DateTime?
+  created_at   DateTime  @default(now())
+  conductor    Conductor @relation(fields: [conductor_id], references: [id])
+
+  @@index([conductor_id])
+  @@index([leida_at])
+  @@map("notificaciones_conductor")
   @@schema("pilotos")
 }
 

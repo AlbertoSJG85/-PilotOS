@@ -8,7 +8,7 @@ import { getSessionUser, clearSession } from '@/lib/auth';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { FileText, LogOut, CheckCircle, Clock, AlertCircle, AlertTriangle, LayoutDashboard, ArrowRight } from 'lucide-react';
 import type { ParteDiario, Vehiculo } from '@/types';
-import { ResumenMesConductor } from '@/components/features/resumen-mes-conductor';
+import { AvisosConductor } from '@/components/features/avisos-conductor';
 
 /** Primer día del mes en curso, en YYYY-MM-DD (filtro del listado de partes). */
 function primerDiaDelMes(): string {
@@ -103,8 +103,8 @@ export default function ConductorHome() {
       {/* Main content */}
       <main className="flex-1 px-5 py-6 space-y-5">
 
-        {/* Vehículo */}
-        {loading ? (
+        {/* Vehículo — en la home solo del dueño; el asalariado lo tiene en su panel. */}
+        {esPatron && (loading ? (
           <div className="rounded-2xl bg-zinc-900 border border-zinc-800 px-5 py-4 animate-pulse">
             <div className="h-3 w-20 bg-zinc-800 rounded mb-3" />
             <div className="h-7 w-32 bg-zinc-800 rounded mb-2" />
@@ -117,11 +117,10 @@ export default function ConductorHome() {
             <p className="text-sm text-zinc-400">{vehiculo.marca} {vehiculo.modelo}</p>
             <p className="text-xs text-zinc-600 mt-1">{vehiculo.km_actuales?.toLocaleString('es-ES')} km</p>
           </div>
-        ) : null}
+        ) : null)}
 
-        {/* Lo que lleva este mes — solo para el asalariado: el dueño tiene
-            el panel de gestión entero. */}
-        {!esPatron && <ResumenMesConductor partes={partes} loading={loading} />}
+        {/* Avisos del dueño sobre sus partes: lo primero que tiene que ver. */}
+        {!loading && !esPatron && <AvisosConductor />}
 
         {/* Acción principal del DUEÑO: su trabajo es controlar el negocio.
             Registrar un parte lo hará solo si además conduce, así que baja a
@@ -234,12 +233,29 @@ export default function ConductorHome() {
           )
         )}
 
+        {/* Su panel: cómo va el mes, su vehículo, sus partes y los documentos.
+            La home es para trabajar; lo demás está aquí a un toque. */}
+        {!loading && !esPatron && (
+          <Link
+            href="/conductor/panel"
+            className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 active:bg-zinc-800 transition-colors"
+          >
+            <LayoutDashboard className="h-5 w-5 text-pilot-lime shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-zinc-200">Mi panel</p>
+              <p className="text-xs text-zinc-500">Cómo llevo el mes, mis partes y documentos</p>
+            </div>
+            <ArrowRight className="ml-auto h-4 w-4 text-zinc-600" />
+          </Link>
+        )}
+
         {/* Loader */}
         {loading && (
           <div className="rounded-2xl bg-zinc-800/40 animate-pulse h-32" />
         )}
 
-        {/* Últimos partes */}
+        {/* Últimos partes — home del dueño. El asalariado los ve en su panel. */}
+        {esPatron && (
         <div>
           <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-3">
             Últimos partes
@@ -285,27 +301,11 @@ export default function ConductorHome() {
             </div>
           )}
         </div>
+        )}
 
         {/* El acceso al panel de gestión ya no vive aquí abajo: para el dueño
             es la acción principal y está arriba del todo. */}
 
-        {/* Documentación del taxi. El asalariado también sube: si va a pasar
-            la ITV o lleva el coche al taller, la foto la hace él (2026-08-12).
-            Lo que decide si hace falta que lo mire el dueño no es quién sube,
-            sino si contradice a la imagen — eso lo controla el backend. */}
-        {!loading && !esPatron && (
-          <Link
-            href="/documentos"
-            className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 active:bg-zinc-800 transition-colors"
-          >
-            <FileText className="h-5 w-5 text-pilot-lime shrink-0" />
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-zinc-200">Subir documento del taxi</p>
-              <p className="text-xs text-zinc-500">ITV, factura del taller, neumáticos…</p>
-            </div>
-            <ArrowRight className="ml-auto h-4 w-4 text-zinc-600" />
-          </Link>
-        )}
 
       </main>
 
