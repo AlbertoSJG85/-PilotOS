@@ -16,7 +16,7 @@ export interface ResumenDashboard {
     /** Donde se descuenta la SS: eleccion del patron para todos sus asalariados. */
     ss_modo_descuento?: 'parte' | 'cierre';
     /** Desglose por asalariado: genera, reparto, SS, percibe y lo que te queda. */
-    asalariados?: { conductor_id: string; nombre: string; partes: number; bruto: number; combustible: number; neto_generado: number; reparto: number; seguridad_social: number; percibe: number; para_el_patron: number }[];
+    asalariados?: { conductor_id: string; nombre: string; partes: number; bruto: number; combustible: number; datafono: number; efectivo: number; neto_generado: number; reparto: number; seguridad_social: number; percibe: number; para_el_patron: number }[];
     /** Los dias que ha conducido el propio dueno: integro para el. */
     /** Lo que ingresa el dueno antes de gastos. */
     ingreso_patron?: number;

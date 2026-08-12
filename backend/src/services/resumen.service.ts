@@ -83,6 +83,10 @@ export interface DetalleAsalariado {
     partes: number;
     bruto: number;
     combustible: number;
+    /** Lo que ha cobrado por tarjeta. */
+    datafono: number;
+    /** Lo que lleva en mano: bruto − datáfono. */
+    efectivo: number;
     neto_generado: number;
     /** Su parte del reparto ANTES de descontarle la Seguridad Social. */
     reparto: number;
@@ -205,12 +209,13 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
             conductor_id: id,
             nombre: p.conductor.usuario?.nombre ?? 'Asalariado',
             es_patron: p.conductor.es_patron,
-            partes: 0, bruto: 0, combustible: 0, neto_generado: 0,
+            partes: 0, bruto: 0, combustible: 0, datafono: 0, efectivo: 0, neto_generado: 0,
             reparto: 0, seguridad_social: 0, percibe: 0, para_el_patron: 0,
         };
         acumulado.partes += 1;
         acumulado.bruto += toNum(p.ingreso_bruto);
         acumulado.combustible += toNum(p.combustible);
+        acumulado.datafono += toNum(p.ingreso_datafono);
         // El reparto se toma ANTES de la SS: en modo "parte" el cálculo ya
         // se la descontó, así que se le vuelve a sumar para no restarla dos
         // veces al llegar abajo. Así la cifra final es la misma en los dos
@@ -222,6 +227,9 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
 
     for (const detalle of porAsalariado.values()) {
         detalle.neto_generado = detalle.bruto - detalle.combustible;
+        // El efectivo es lo que lleva encima al terminar: bruto menos lo que
+        // pasó por el datáfono. Es la cifra que se cuenta al entregar.
+        detalle.efectivo = Math.max(0, detalle.bruto - detalle.datafono);
         detalle.seguridad_social = ss.detalle.find((d) => d.conductor_id === detalle.conductor_id)?.total ?? 0;
         detalle.percibe = detalle.reparto - detalle.seguridad_social;
     }

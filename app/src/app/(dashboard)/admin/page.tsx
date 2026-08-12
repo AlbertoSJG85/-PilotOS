@@ -203,16 +203,10 @@ function AdminDashboardContent() {
         )}
       </Card>
 
-      {/* Las dos vías, en tarjetas como las de arriba: la del asalariado
-          (lo que genera, su reparto, su SS y lo que percibe) y la tuya (lo
-          tuyo íntegro, lo que te queda de él, tus gastos y tu beneficio). */}
-      <ViasPanel
-        asalariados={resumen?.asalariados ?? []}
-        patron={resumen?.patron ?? null}
-        gastos={gastosTotal}
-        beneficio={beneficioEstimado}
-        ingresoPatron={resumen?.ingreso_patron ?? 0}
-      />
+      {/* Solo la vía del asalariado, en tarjetas como las de arriba. La del
+          dueño no se repite: sus cifras ya están sumadas en las tarjetas
+          generales de arriba. */}
+      <ViasPanel asalariados={resumen?.asalariados ?? []} />
 
       {/* Desglose datáfono vs efectivo estimado del periodo */}
       <Card className="p-5 mb-8">
