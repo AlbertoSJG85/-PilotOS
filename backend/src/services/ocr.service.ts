@@ -1,6 +1,8 @@
 import Tesseract from 'tesseract.js';
 import sharp from 'sharp';
 import fs from 'fs';
+import path from 'path';
+import { transcribirImagen, lectorDisponible } from '../vendor/nexos-ocr-vision';
 
 const UMBRAL_CONFIANZA = 60;
 
@@ -17,9 +19,29 @@ export interface OCRResult {
     confianza: number;
     legible: boolean;
     error_ocr?: string;
-    /** Con qué preparación se leyó al final. Para poder diagnosticarlo después. */
-    tuberia?: 'ticket' | 'documento';
+    /** Con qué se leyó al final. Para poder diagnosticar una lectura mala. */
+    tuberia?: 'ticket' | 'documento' | 'vision';
+    /** Solo con visión: los trozos que el modelo dice no haber leído seguro. */
+    dudas?: string[];
+    /** Solo con visión: qué modelo lo leyó. */
+    modelo?: string;
 }
+
+/**
+ * Confianza que se le asigna a una lectura por visión.
+ *
+ * NO es una medida — es un valor de conveniencia, y conviene saberlo. Tesseract
+ * devuelve un porcentaje calculado; un modelo de visión no: declara si ha
+ * leído con seguridad (booleano) y enumera sus dudas. Como el resto del
+ * sistema habla en confianzas, se traduce a un número: 95 cuando dice que lo
+ * ha leído bien, 40 cuando declara dudas (por debajo del umbral de "legible",
+ * para que el documento pase por revisión humana).
+ *
+ * Lo que vale de verdad es `dudas`. Un número inventado no debe leerse como
+ * una medición: por eso está aquí escrito y no escondido en una constante.
+ */
+const CONFIANZA_VISION_SEGURA = 95;
+const CONFIANZA_VISION_CON_DUDAS = 40;
 
 /**
  * Por debajo de esta confianza, la primera lectura se da por mala y se
@@ -244,7 +266,89 @@ async function prepararDocumentoParaOcr(imagenPath: string): Promise<string> {
  * de documento lo hace peor —y con un ticket térmico lo hace mucho peor— su
  * resultado se descarta.
  */
-export async function extraerTextoImagen(imagenPath: string): Promise<OCRResult> {
+/**
+ * Lee el papel con un modelo de visión (2026-08-13, C-068).
+ *
+ * ── POR QUÉ ES EL PRIMER LECTOR ──────────────────────────────────────────
+ * Tesseract lleva cinco correcciones encima por el mismo síntoma (C-043,
+ * C-054, C-055, C-056, C-060, C-064): lee "2938" donde el papel pone "298".
+ * No es un fallo del parser ni del preprocesado — es que reconoce formas sin
+ * entender qué mira. Un modelo de visión sabe que "Borrados" lleva detrás un
+ * contador que sube de uno en uno.
+ *
+ * El 2026-08-12, con la tubería vieja: el ticket de las 23:21 leyó 2938 donde
+ * ponía 298, y generó dos alertas falsas. Ese es el caso que esto resuelve.
+ *
+ * ── SIGUE HABIENDO TESSERACT DETRÁS, Y NO ES PROVISIONAL ─────────────────
+ * Si no hay clave, si OpenAI está caído, si tarda demasiado o si devuelve
+ * algo raro, se lee como siempre. Un proveedor externo no puede ser un punto
+ * único de fallo para que un ticket entre en el sistema.
+ *
+ * ── APAGADO POR DEFECTO ──────────────────────────────────────────────────
+ * Sin `OPENAI_API_KEY` no se intenta siquiera. `OCR_VISION_ENABLED=false`
+ * lo apaga aunque la clave esté puesta — un interruptor para volver atrás en
+ * segundos sin desplegar nada.
+ */
+async function intentarConVision(imagenPath: string, contexto: string): Promise<OCRResult | null> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!lectorDisponible(apiKey)) return null;
+    if (process.env.OCR_VISION_ENABLED === 'false') return null;
+
+    const mimePorExtension: Record<string, string> = {
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp',
+    };
+    const extension = path.extname(imagenPath).toLowerCase();
+    const mime = mimePorExtension[extension];
+    if (!mime) return null; // formato que el modelo no acepta: a Tesseract
+
+    let base64: string;
+    try {
+        base64 = fs.readFileSync(imagenPath).toString('base64');
+    } catch {
+        return null;
+    }
+
+    // El módulo promete no lanzar nunca. Aun así se envuelve, y no es
+    // desconfianza gratuita: la promesa de una pieza es suya, la garantía de
+    // que el ticket entre es de aquí. Un test tumbó esta función el mismo día
+    // que se escribió por saltarse esto.
+    let t;
+    try {
+        t = await transcribirImagen(base64, mime, contexto, {
+            apiKey: apiKey!,
+            modelo: process.env.OCR_VISION_MODELO,
+            timeoutMs: Number(process.env.OCR_VISION_TIMEOUT_MS) || 30_000,
+        });
+    } catch (err: any) {
+        console.warn('[OCR] El lector por visión falló, se sigue con Tesseract:', err?.message ?? err);
+        return null;
+    }
+    if (!t) return null;
+
+    if (t.dudas.length > 0) {
+        console.log(`[OCR] Visión (${t.modelo}) con dudas: ${t.dudas.join(' · ')}`);
+    } else {
+        console.log(`[OCR] Leído con visión (${t.modelo})`);
+    }
+
+    return {
+        texto: t.texto,
+        confianza: t.legible && t.dudas.length === 0 ? CONFIANZA_VISION_SEGURA : CONFIANZA_VISION_CON_DUDAS,
+        legible: t.legible,
+        tuberia: 'vision',
+        dudas: t.dudas,
+        modelo: t.modelo,
+    };
+}
+
+export async function extraerTextoImagen(
+    imagenPath: string,
+    contexto = 'documento fotografiado',
+): Promise<OCRResult> {
+    // Primero el que entiende lo que lee. Si no puede, se sigue como siempre.
+    const porVision = await intentarConVision(imagenPath, contexto);
+    if (porVision) return porVision;
+
     const temporales: string[] = [];
     try {
         // Si la preparación falla (imagen rara, sin memoria...), se sigue con

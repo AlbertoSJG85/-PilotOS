@@ -69,6 +69,14 @@ async function recompararSiEnviado(parte_diario_id: string): Promise<number> {
 }
 
 const router = Router();
+
+/**
+ * Qué papel se está leyendo. El lector por visión lo usa para saber qué
+ * esperar (C-068): sabiendo que es un ticket de taxímetro, entiende que
+ * "Borrados" lleva detrás un contador que sube de uno en uno, y no lo lee
+ * como si fuera un importe.
+ */
+const CONTEXTO_TICKET = 'ticket de taxímetro o de gasolinera, impreso en papel térmico';
 const MAX_INTENTOS_REEMPLAZO = 2; // R-FT-003
 
 // ─────────────────────────────────────────────────────────
@@ -167,7 +175,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                 const localPathReproc = urlToLocalPath(existente.url);
                 const analisisReproc = await analizarImagen(localPathReproc);
                 const ocrReproc = analisisReproc.procesable
-                    ? await extraerTextoImagen(localPathReproc)
+                    ? await extraerTextoImagen(localPathReproc, CONTEXTO_TICKET)
                     : { texto: '', confianza: 0, legible: false, error_ocr: analisisReproc.motivo as string };
                 const validacionReproc = existente.tipo === 'TICKET_TAXIMETRO'
                     ? validarTicketTaximetro(ocrReproc.texto)
@@ -234,7 +242,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
         const analisis = await analizarImagen(localPath);
 
         const ocrResult = analisis.procesable
-            ? await extraerTextoImagen(localPath)
+            ? await extraerTextoImagen(localPath, CONTEXTO_TICKET)
             : { texto: '', confianza: 0, legible: false, error_ocr: analisis.motivo as string };
 
         const validacion = tipo === 'TICKET_TAXIMETRO'
@@ -320,7 +328,7 @@ router.post('/:id/reemplazar', requireAuth, async (req: AuthRequest, res: Respon
         const localPath = urlToLocalPath(url);
         const analisis = await analizarImagen(localPath);
         const ocrResult = analisis.procesable
-            ? await extraerTextoImagen(localPath)
+            ? await extraerTextoImagen(localPath, CONTEXTO_TICKET)
             : { texto: '', confianza: 0, legible: false, error_ocr: analisis.motivo as string };
         const validacion = docActual.tipo === 'TICKET_TAXIMETRO'
             ? validarTicketTaximetro(ocrResult.texto)
@@ -413,7 +421,7 @@ router.post('/:id/reintentar-ocr', requireAuth, async (req: AuthRequest, res: Re
         const localPath = urlToLocalPath(doc.url);
         const analisis = await analizarImagen(localPath);
         const ocrResult = analisis.procesable
-            ? await extraerTextoImagen(localPath)
+            ? await extraerTextoImagen(localPath, CONTEXTO_TICKET)
             : { texto: '', confianza: 0, legible: false, error_ocr: analisis.motivo as string };
         const validacion = doc.tipo === 'TICKET_TAXIMETRO'
             ? validarTicketTaximetro(ocrResult.texto)

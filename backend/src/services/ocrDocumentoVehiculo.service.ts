@@ -27,6 +27,9 @@ import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { analizarImagen, extraerTextoImagen, normalizarNumerosOcr } from './ocr.service';
 
+/** Qué papel es, para que el lector por visión sepa qué esperar (C-068). */
+const CONTEXTO_DOCUMENTO = 'documento de un vehículo: factura de taller, tarjeta de ITV o póliza de seguro';
+
 export type TipoDocumentoVehiculo = 'CERTIFICADO_ITV' | 'FACTURA_TALLER' | 'POLIZA_SEGURO' | 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR';
 
 export interface PropuestaDocumento {
@@ -429,7 +432,7 @@ export async function analizarYRegistrarDocumento(datos: {
 }): Promise<ResultadoRegistro> {
     const analisis = await analizarImagen(datos.rutaLocal);
     const ocr = analisis.procesable
-        ? await extraerTextoImagen(datos.rutaLocal)
+        ? await extraerTextoImagen(datos.rutaLocal, CONTEXTO_DOCUMENTO)
         : { texto: '', confianza: 0, legible: false };
 
     const matriculaVehiculo = await matriculaDe(datos.vehiculoId);
@@ -506,7 +509,7 @@ export async function analizarDocumentoRegistrado(
     try {
         const analisis = await analizarImagen(rutaLocal);
         const ocr = analisis.procesable
-            ? await extraerTextoImagen(rutaLocal)
+            ? await extraerTextoImagen(rutaLocal, CONTEXTO_DOCUMENTO)
             : { texto: '', confianza: 0, legible: false };
 
         const doc = await prisma.documento.findUnique({

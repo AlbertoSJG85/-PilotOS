@@ -970,3 +970,50 @@ Un clic. Diez minutos de arqueología para encontrarlo.
 
 - 267/267 tests, con uno nuevo que reproduce **la respuesta literal que devolvió Google en producción** y exige que el motivo sobreviva hasta el error guardado y hasta la fila de la conexión.
 - **Prevención:** *tragarse un error para no romper el producto no es lo mismo que tirarlo.* El patrón "esto nunca puede fallar hacia fuera" es correcto y se queda; lo que hay que añadir siempre es dónde queda constancia. Si una función se diseña para fallar en silencio, tiene que dejar el motivo en algún sitio que un humano mire — y ese sitio no es el log del servidor, es la pantalla de quien puede arreglarlo. Es hermana de la lección de C-063, donde otro `catch` silencioso costó una tarde.
+
+---
+
+### C-068 · Seis correcciones para el mismo síntoma: el problema era el OCR, no el parser
+- Fecha: 2026-08-13
+- Área: `NexOS/core/ocr-vision` (nuevo), `backend/src/services/ocr.service.ts`
+
+**El síntoma, otra vez.** El 2026-08-12 a las 23:21 entró un ticket. Tesseract leyó `Borrados: 2938` donde el papel pone **298**, y `P Total: 92,55` donde pone **52,55**. Resultado: **tres alertas falsas** en el panel de Alberto, dos por el contador de borrados y una acusando al parte de no cuadrar con el ticket. Ninguna era real. Las tres eran del OCR.
+
+**La cuenta que había que hacer y no se hizo antes.** Este mismo fallo lleva seis correcciones:
+
+| | |
+|---|---|
+| C-043, C-054, C-055 | ajustar el parser contra un texto que ya venía roto |
+| C-056 | una lectura mala acusó a un conductor de trabajo no declarado |
+| C-060 | el problema no era el parser: era la resolución de la imagen |
+| C-064 | una factura A4 necesitó una segunda tubería de imagen entera |
+
+Seis intentos, un solo síntoma. Cada uno razonable por separado; juntos, la señal de que se estaba arreglando la pieza equivocada. **Tesseract es un reconocedor de formas: compara manchas de tinta con plantillas de letras y no sabe qué está mirando.** No puede saber que "Borrados" lleva detrás un contador que sube de uno en uno, ni que un 2938 después del 297 de ayer es imposible. Ningún preprocesado arregla eso, porque no es un problema de nitidez.
+
+Lo dijo Alberto, y tenía razón: *"si tú y ChatGPT leéis los tickets bien a la primera, ¿por qué seguimos con eso?"*.
+
+**La corrección.** Un modelo de visión lee el papel **antes** que Tesseract. Entiende lo que ve, así que no confunde un 2 con un 29. Sobre la misma foto que falló:
+
+```
+Tesseract   → Borrados: 2938   P Total: 92,55   (fecha: no la encontró)
+Visión      → Borrados: 298    P Total: 52,55   fecha 12/08/2026, 0 errores
+```
+
+Cuatro decisiones que importan más que el cambio en sí:
+
+1. **Vive en la capa compartida** (`NexOS/core/ocr-vision`), no dentro de PilotOS. Leer papeles no es un problema del taxi: RentOS lee facturas, ClinicOS documentos, IngresOS facturas de autónomos. Está ahí para que el sexto producto no repita estas seis correcciones desde cero.
+2. **Transcribe, no interpreta.** Devuelve el texto del papel; las reglas de PilotOS —que llevan meses de correcciones encima— siguen aplicándose igual. Cambiar de OCR no tira a la basura lo aprendido.
+3. **Tesseract sigue detrás, y no es provisional.** Sin clave, con OpenAI caído, con timeout o con una respuesta rara, se lee como siempre. Un proveedor externo no puede ser un punto único de fallo para que un ticket entre en el sistema.
+4. **Una duda declarada baja la confianza.** El modelo dice qué no ha leído seguro, y eso manda el documento a revisión humana en vez de colarlo como bueno. Es C-056 aplicada al lector nuevo: mejor un "no estoy seguro" que un número seguro y equivocado.
+
+**Se reutiliza el proveedor que el ecosistema ya paga** (OpenAI, la misma `OPENAI_API_KEY` que usan LucIA y GlorIA). Coste: unos 4 céntimos por documento, entre 1 y 2 € al mes al volumen de un taxi.
+
+**Dos fallos propios cazados por el camino, y los dos dicen lo mismo:**
+
+- *El módulo promete no lanzar nunca, así que no lo envolví en un `try`.* Un test lo tumbó el mismo día: la promesa de una pieza es suya, la garantía de que el ticket entre es de quien la usa.
+- *Los tests simulaban `output_text`, que es un atajo de los SDK y **no existe en la API HTTP**.* Siete tests en verde contra una forma inventada; el módulo no habría leído nada en producción. Lo cazó la primera llamada de verdad. Ahora el simulador imita la respuesta literal que devolvió OpenAI, y está en el test para que nadie la "simplifique".
+
+- 274/274 tests (14 en el módulo compartido, 7 nuevos en PilotOS).
+- **Prevención, y es la cara de las seis:** *cuando el mismo síntoma vuelve por tercera vez, deja de arreglarlo y cambia la pieza.* Tres correcciones sobre lo mismo no son mala suerte: son la señal de que el problema está una capa más abajo de donde se está mirando. Aquí costó seis, un conductor acusado injustamente y tres días de Alberto.
+- **Corolario, de C-063 y repetido hoy:** una llamada real vale más que siete tests verdes. Los tests solo comprueban lo que crees que devuelve el proveedor; el proveedor devuelve lo que devuelve.
+- **Deuda declarada:** el módulo está copiado dentro de PilotOS (`src/vendor/`) porque Coolify construye el repositorio solo y no hay registro npm privado del ecosistema. El original es el de `NexOS/core`; falta la forma de consumirlo (registro privado o dependencia de git). El segundo producto que lea papeles debe partir del original, no de la copia.
