@@ -8,11 +8,31 @@ import { formatKm, formatDate } from '@/lib/utils';
 import { getSessionUser } from '@/lib/auth';
 import type { Vehiculo, MantenimientoVehiculo } from '@/types';
 
-const ESTADO_BADGE: Record<string, 'success' | 'warning' | 'danger'> = {
-  PENDIENTE: 'warning',
-  VENCIDO: 'danger',
-  RESUELTO: 'success',
-};
+/**
+ * Cómo se etiqueta un mantenimiento en la lista (2026-08-12).
+ *
+ * El estado de la base de datos no se puede enseñar tal cual, y esto costó un
+ * susto: Alberto subió la factura del kit de distribución, se aplicó bien
+ * —fecha 13/05/2026, próximo a 342.133 km— y aun así dijo "el mantenimiento
+ * de distribución no se ha resuelto". Tenía razón en lo que veía: la pantalla
+ * lo seguía enseñando en "Pendientes" con el mismo badge amarillo que uno que
+ * no se ha hecho nunca.
+ *
+ * Y es que un mantenimiento recurrente NUNCA queda 'RESUELTO' en la base de
+ * datos: al hacerlo, arranca un ciclo nuevo y vuelve a 'PENDIENTE' con su
+ * próxima cita. 'RESUELTO' se lo quedan solo los que no se repiten (un
+ * embrague). Enseñar ese estado en crudo hace que "hecho hace tres meses" y
+ * "sin hacer jamás" se vean exactamente igual.
+ *
+ * Así que la etiqueta se calcula por lo que le importa a quien lo lee:
+ * ¿toca ya? ¿está al día? ¿o no se ha hecho nunca?
+ */
+function etiquetaDe(m: MantenimientoVehiculo): { texto: string; variant: 'success' | 'warning' | 'danger' } {
+  if (m.vencido_real || m.estado === 'VENCIDO') return { texto: 'TOCA YA', variant: 'danger' };
+  if (m.estado === 'RESUELTO') return { texto: 'HECHO', variant: 'success' };
+  if (m.ultima_ejecucion_fecha) return { texto: 'AL DÍA', variant: 'success' };
+  return { texto: 'SIN HACER', variant: 'warning' };
+}
 
 export default function MantenimientosPage() {
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
@@ -107,8 +127,13 @@ export default function MantenimientosPage() {
   }
 
   const currentMants = selectedVehiculo ? (mantenimientos[selectedVehiculo] || []) : [];
-  const pendientes = currentMants.filter((m) => m.estado !== 'RESUELTO');
-  const resueltos = currentMants.filter((m) => m.estado === 'RESUELTO');
+  // "Pendiente" en la base de datos no significa "sin hacer" (ver etiquetaDe).
+  // Lo que separa las dos listas es si hay algo que hacer, no el estado crudo:
+  // arriba lo que reclama atención, abajo lo que está al día.
+  const pendientes = currentMants.filter(
+    (m) => (m.estado !== 'RESUELTO' && !m.ultima_ejecucion_fecha) || m.vencido_real === true || m.estado === 'VENCIDO',
+  );
+  const resueltos = currentMants.filter((m) => !pendientes.includes(m));
 
   const isPatron = user?.es_patron || user?.role === 'admin';
 
@@ -141,7 +166,7 @@ export default function MantenimientosPage() {
           {pendientes.length > 0 && (
             <div className="mb-6">
               <h2 className="mb-3 text-lg font-semibold text-zinc-100">
-                Pendientes ({pendientes.length})
+                Te reclaman ({pendientes.length})
               </h2>
               <div className="space-y-2">
                 {pendientes.map((m) => (
@@ -150,13 +175,21 @@ export default function MantenimientosPage() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-zinc-100">{m.catalogo.nombre}</span>
-                          <Badge variant={ESTADO_BADGE[m.estado]}>{m.estado}</Badge>
+                          <Badge variant={etiquetaDe(m).variant}>{etiquetaDe(m).texto}</Badge>
                           {!m.activo && <Badge variant="danger">INACTIVO</Badge>}
                         </div>
                         <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-zinc-500">
                           <span>{m.catalogo.tipo}</span>
                           {m.proximo_km != null && <span>Próximo: {formatKm(m.proximo_km)}</span>}
                           {m.proxima_fecha && <span>Fecha: {formatDate(m.proxima_fecha)}</span>}
+                          {/* Cuándo se hizo la última vez. Sin esto, uno hecho
+                              hace tres meses y uno sin hacer nunca se leen igual. */}
+                          {m.ultima_ejecucion_fecha && (
+                            <span className="text-emerald-400/80">
+                              Hecho el {formatDate(m.ultima_ejecucion_fecha)}
+                              {m.ultima_ejecucion_km != null && ` · ${formatKm(m.ultima_ejecucion_km)}`}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="flex gap-2 shrink-0">
@@ -351,7 +384,7 @@ export default function MantenimientosPage() {
           {resueltos.length > 0 && (
             <div>
               <h2 className="mb-3 text-lg font-semibold text-zinc-100">
-                Resueltos ({resueltos.length})
+                Al día ({resueltos.length})
               </h2>
               <div className="space-y-2">
                 {resueltos.map((m) => (
@@ -359,11 +392,14 @@ export default function MantenimientosPage() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-zinc-100">{m.catalogo.nombre}</span>
-                        <Badge variant="success">RESUELTO</Badge>
+                        <Badge variant={etiquetaDe(m).variant}>{etiquetaDe(m).texto}</Badge>
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-zinc-500">
-                        {m.ultima_ejecucion_km != null && <span>Ultimo: {formatKm(m.ultima_ejecucion_km)}</span>}
-                        {m.ultima_ejecucion_fecha && <span>{formatDate(m.ultima_ejecucion_fecha)}</span>}
+                        {m.ultima_ejecucion_fecha && <span>Hecho el {formatDate(m.ultima_ejecucion_fecha)}</span>}
+                        {m.ultima_ejecucion_km != null && <span>a {formatKm(m.ultima_ejecucion_km)}</span>}
+                        {/* Lo que hace que "al día" signifique algo: hasta cuándo. */}
+                        {m.proximo_km != null && <span className="text-zinc-400">Próximo: {formatKm(m.proximo_km)}</span>}
+                        {m.proxima_fecha && <span className="text-zinc-400">Próximo: {formatDate(m.proxima_fecha)}</span>}
                       </div>
                     </div>
                   </Card>

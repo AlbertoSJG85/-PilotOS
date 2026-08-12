@@ -74,8 +74,13 @@ function AdminDashboardContent() {
   // La Seguridad Social NO va aquí: se le descuenta al asalariado y el dueño
   // solo la retiene para pagarla al Estado. Entra y sale — no es gasto suyo.
   // Vive en la vía del asalariado, que es de donde sale.
-  const gastosTotal = (resumen?.gastos_variables ?? 0) + (resumen?.gastos_fijos_prorrateados ?? 0);
-  const subtituloGastos = 'Variables + fijos del periodo';
+  const gastosVariables = resumen?.gastos_variables ?? 0;
+  const gastosFijos = resumen?.gastos_fijos_prorrateados ?? 0;
+  const gastosTotal = gastosVariables + gastosFijos;
+  // Con las dos cifras a la vista se ve de dónde sale el total. Sin ellas, un
+  // gasto que no aparece (porque su factura es de otro mes) es indistinguible
+  // de un gasto que no se ha registrado.
+  const subtituloGastos = `${formatCurrency(gastosVariables)} variables · ${formatCurrency(gastosFijos)} fijos`;
   const beneficioEstimado = resumen?.beneficio_estimado ?? 0;
   const totalDatafono = resumen?.datafono ?? 0;
   const totalEfectivo = resumen?.efectivo_estimado ?? 0;
@@ -207,69 +212,6 @@ function AdminDashboardContent() {
           dueño no se repite: sus cifras ya están sumadas en las tarjetas
           generales de arriba. */}
       <ViasPanel asalariados={resumen?.asalariados ?? []} />
-
-      {/* Desglose datáfono vs efectivo estimado del periodo */}
-      <Card className="p-5 mb-8">
-        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4 border-b border-zinc-800 pb-3">
-          <h2 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider">
-            Desglose de cobros del periodo
-          </h2>
-          <span className="text-xs text-zinc-500">
-            Total bruto: <span className="text-zinc-200 font-medium">{formatCurrency(totalBruto)}</span>
-          </span>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-500/10 flex-shrink-0">
-              <CreditCard className="w-5 h-5 text-sky-400" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs text-zinc-500 uppercase tracking-wider">Datáfono</p>
-              <p className="text-2xl font-bold text-zinc-100">{formatCurrency(totalDatafono)}</p>
-              <p className="text-[11px] text-zinc-500">{pctDatafono}% del bruto</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/10 flex-shrink-0">
-              <Banknote className="w-5 h-5 text-emerald-400" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs text-zinc-500 uppercase tracking-wider">Efectivo estimado</p>
-              <p className="text-2xl font-bold text-zinc-100">{formatCurrency(totalEfectivo)}</p>
-              <p className="text-[11px] text-zinc-500">
-                {pctEfectivo}% del bruto
-                {soloEfectivo && <span className="ml-1 text-emerald-400">· todo en efectivo</span>}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Barra proporcional */}
-        {totalBruto > 0 && (
-          <div className="mt-4">
-            <div className="flex h-2 w-full overflow-hidden rounded-full bg-zinc-800">
-              <div
-                className="bg-sky-500 transition-all"
-                style={{ width: `${pctDatafono}%` }}
-                title={`Datáfono: ${pctDatafono}%`}
-              />
-              <div
-                className="bg-emerald-500 transition-all"
-                style={{ width: `${pctEfectivo}%` }}
-                title={`Efectivo: ${pctEfectivo}%`}
-              />
-            </div>
-            <p className="mt-2 text-[11px] text-zinc-500">
-              Efectivo estimado se calcula como <span className="text-zinc-400">bruto − datáfono</span>. No cambia ningún otro cálculo.
-            </p>
-          </div>
-        )}
-        {totalBruto === 0 && (
-          <p className="text-xs text-zinc-500 mt-2">Sin partes en este periodo.</p>
-        )}
-      </Card>
 
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-6">

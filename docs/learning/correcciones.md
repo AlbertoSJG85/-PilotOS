@@ -881,3 +881,31 @@ No es un detalle cosmético: si el dueño le da a *aceptar*, eso se registra com
 - **Prevención.** Dos cosas. La primera: *el OCR no puede proponer un número que no sepa nombrar.* Coger "una cifra que había por ahí" es peor que dejar el campo vacío — es la misma lección de C-056 (los borrados del taxímetro) y de C-055 (el descuento de la gasolinera), y ya van tres. Si el dato no viene etiquetado, se pregunta.
   La segunda: *un formato nuevo de documento es un problema nuevo, no un parámetro más.* Facturas A4 y tickets térmicos no comparten preprocesado y no hay ajuste que sirva para los dos; intentar unificarlos rompe el que ya funcionaba. Cuando entre el primer PDF, o la primera tarjeta ITV real, habrá que volver aquí y repetir el ejercicio con su fixture.
 - **Deuda declarada:** la tubería de documento está ajustada contra UNA sola factura. Se eligió a propósito un punto con vecinos buenos en el barrido (sigma 25 / umbral 150) en vez del máximo aislado, pero sigue siendo una foto. La segunda factura real que entre va a decir la verdad.
+
+---
+
+### C-065 · El sistema hizo bien las tres cosas y la pantalla no contó ninguna
+- Fecha: 2026-08-12
+- Área: `backend/src/index.ts`, `backend/src/services/propiedadArchivo.service.ts`, `app/src/app/(dashboard)/{mantenimientos,gastos,admin}/page.tsx`
+
+**El síntoma.** Alberto confirmó la factura de taller ya leída bien (C-064) y reportó cuatro cosas de golpe: el mantenimiento de distribución "no se ha resuelto", "Ver documento" abría una pantalla en negro, el gasto aparecía en el total acumulado pero no en la lista de variables, y la tarjeta de desglose de cobros salía dos veces.
+
+Lo llamativo: **el backend había hecho su trabajo entero y correctamente en los tres primeros casos.** En base de datos, la correa de distribución tenía `ultima_ejecucion_fecha = 13/05/2026` y `proximo_km = 342.133`; el gasto de 397,31 € estaba creado; el fichero estaba en disco. Lo que falló fue contarlo.
+
+**1. El mantenimiento que sí estaba hecho.** Un mantenimiento recurrente **nunca** queda en estado `RESUELTO`: al hacerlo arranca un ciclo nuevo y vuelve a `PENDIENTE` con su próxima cita. `RESUELTO` se lo quedan solo los que no se repiten (un embrague). La pantalla enseñaba el estado crudo de la base de datos, así que "hecho hace tres meses" y "sin hacer jamás" se veían **exactamente igual**: badge amarillo, sección "Pendientes".
+
+Ahora la etiqueta se calcula por lo que le importa a quien lee: `TOCA YA` / `AL DÍA` / `SIN HACER` / `HECHO`, y en cada línea se ve cuándo se hizo la última vez y cuándo toca la siguiente. Las secciones pasan a ser "Te reclaman" y "Al día", que es la pregunta real.
+
+**2. La pantalla en negro.** El guardia de `/uploads` resuelve de quién es un fichero siguiendo `Documento → enlace → ParteDiario → vehículo`. Esa es la cadena de los **tickets del parte**. Los papeles del vehículo —ITV, factura de taller, póliza— no tienen enlace a ningún parte: cuelgan del vehículo directamente. Para ellos no encontraba dueño, devolvía 403, y el navegador pintaba negro sobre la propia factura del dueño, con sesión válida y fichero intacto.
+
+Se añade el camino directo por `documento.vehiculo.cliente_id`, y —más importante— **la función sale de `index.ts` a su propio servicio** (`propiedadArchivo.service.ts`) para que se pueda probar. Metida junto al arranque del servidor no la cubría ni un test; ahora hay seis, y cubren las dos direcciones del guardia: denegar de más deja al dueño sin ver su factura, permitir de más enseña las fotos de un cliente a otro.
+
+**3. El gasto que estaba en un total y no en la lista.** La pantalla de Gastos mezclaba dos escalas de tiempo sin avisar: la tarjeta "Total acumulado" llamaba a `/gastos/resumen`, que **ignora el filtro de periodo y no cuenta los fijos**, mientras la lista de debajo sí respetaba el periodo. Con una factura del 13/05 subida en agosto, el resultado era que el gasto aparecía en un sitio y no en el otro. Parecía dinero perdido.
+
+Tres cambios: la tarjeta ahora sale del **mismo cálculo que el panel** (`/dashboard/resumen`) y muestra variables + fijos por separado; se avisa explícitamente de los gastos que el periodo está tapando ("hay 1 gasto fuera del periodo, por 397,31 €"); y cada gasto enseña "registrado el X" cuando la fecha de alta no es la del documento. Un gasto ya no se puede esconder en silencio.
+
+**4. La tarjeta duplicada.** Copia y pega literal: el mismo bloque de "Desglose de cobros del periodo", idéntico carácter a carácter, dos veces en `admin/page.tsx`.
+
+- 262/262 tests.
+- **Prevención, y es la lección:** *el backend puede estar en lo cierto y el producto estar roto igual.* Los tres primeros fallos habrían pasado cualquier test de backend —los datos eran correctos—, y ninguno era discutible para quien miraba la pantalla. Cuando se cierra un circuito nuevo, la verificación tiene que llegar **hasta lo que ve la persona**, no hasta la fila de la base de datos. Es la hermana de la lección de C-063 ("un endpoint verificado no es un circuito verificado"), un paso más allá.
+- **Corolario concreto:** *nunca enseñar un enum de la base de datos tal cual.* `PENDIENTE` significaba dos cosas opuestas según si había una ejecución anterior. Si un estado necesita contexto para entenderse, la pantalla tiene que dar ese contexto o traducirlo.

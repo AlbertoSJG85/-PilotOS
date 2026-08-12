@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/layout';
 import { Card, Badge, Skeleton, Button, Input } from '@/components/ui';
-import { getGastos, getGastosFijos, getGastosResumen, updateGastoFijo } from '@/lib/api';
+import { getGastos, getGastosFijos, getResumenDashboard, updateGastoFijo } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { getSessionUser } from '@/lib/auth';
 import type { Gasto, GastoFijo } from '@/types';
@@ -27,8 +27,10 @@ function GastosPageContent() {
   const hasta = searchParams.get('hasta') || undefined;
 
   const [gastos, setGastos] = useState<Gasto[]>([]);
+  const [gastosFuera, setGastosFuera] = useState<Gasto[]>([]);
   const [gastosFijos, setGastosFijos] = useState<GastoFijo[]>([]);
-  const [resumenTotal, setResumenTotal] = useState(0);
+  const [variablesPeriodo, setVariablesPeriodo] = useState(0);
+  const [fijosPeriodo, setFijosPeriodo] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'variables' | 'fijos'>('variables');
@@ -44,8 +46,18 @@ function GastosPageContent() {
     setUser(getSessionUser());
     Promise.all([
       getGastos({ desde, hasta }).then((r) => { if (r.data) setGastos(r.data); }),
+      // Todos los gastos, sin filtro de fecha: sirve para avisar de los que
+      // el periodo seleccionado está tapando (ver más abajo).
+      getGastos().then((r) => { if (r.data) setGastosFuera(r.data); }),
       getGastosFijos().then((r) => { if (r.data) setGastosFijos(r.data); }),
-      getGastosResumen().then((r) => { if (r.total) setResumenTotal(r.total.importe); }),
+      // El total sale del MISMO cálculo que el panel (`/dashboard/resumen`),
+      // no de un endpoint propio. Antes esta pantalla llamaba a
+      // /gastos/resumen, que ignora el periodo y no cuenta los fijos: la
+      // tarjeta decía un número y el panel decía otro, los dos "totales".
+      getResumenDashboard({ desde, hasta }).then((r) => {
+        setVariablesPeriodo(r.data?.gastos_variables ?? 0);
+        setFijosPeriodo(r.data?.gastos_fijos_prorrateados ?? 0);
+      }),
     ])
       .then(() => setError(null))
       .catch((err) => setError(err.message || 'Error al cargar gastos.'))
@@ -73,6 +85,20 @@ function GastosPageContent() {
   }
 
   const isPatron = user?.es_patron || user?.role === 'admin';
+  const totalPeriodo = variablesPeriodo + fijosPeriodo;
+
+  /**
+   * Gastos que existen pero que el periodo seleccionado deja fuera.
+   *
+   * Esto no es cosmético (2026-08-12). Una factura de taller del 13/05 que se
+   * sube en agosto se registra con LA FECHA DE LA FACTURA, que es lo correcto
+   * contablemente. Pero el filtro por defecto es el mes en curso, así que el
+   * gasto no aparecía por ningún lado en esta pantalla y sí en un "total
+   * acumulado" que ignoraba el filtro: parecía que el dinero se había perdido.
+   */
+  const idsDelPeriodo = new Set(gastos.map((g) => g.id));
+  const ocultosPorElFiltro = gastosFuera.filter((g) => !idsDelPeriodo.has(g.id));
+  const importeOculto = ocultosPorElFiltro.reduce((acc, g) => acc + Number(g.importe), 0);
 
   if (loading) {
     return (
@@ -105,10 +131,22 @@ function GastosPageContent() {
         </Card>
       )}
 
-      {/* Total */}
-      <Card className="mb-6 flex items-center justify-between">
-        <span className="text-sm text-zinc-400">Total acumulado</span>
-        <span className="text-xl font-bold text-zinc-100">{formatCurrency(resumenTotal)}</span>
+      {/* Total del periodo — variables + fijos devengados, igual que el panel.
+          Los fijos NO se prorratean por días: cada mes que toca el periodo
+          devenga su cuota entera (ver resumen.service.ts). */}
+      <Card className="mb-6 p-5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <span className="text-sm text-zinc-400">Gastos del periodo</span>
+          <span className="text-2xl font-bold text-zinc-100">{formatCurrency(totalPeriodo)}</span>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-t border-zinc-800 pt-3 text-xs">
+          <span className="text-zinc-500">
+            Variables <span className="ml-1 font-medium text-zinc-300">{formatCurrency(variablesPeriodo)}</span>
+          </span>
+          <span className="text-zinc-500">
+            Fijos <span className="ml-1 font-medium text-zinc-300">{formatCurrency(fijosPeriodo)}</span>
+          </span>
+        </div>
       </Card>
 
       {/* Tabs */}
@@ -131,24 +169,52 @@ function GastosPageContent() {
 
       {/* Variable expenses */}
       {tab === 'variables' && (
-        gastos.length === 0 ? (
-          <Card className="py-8 text-center text-zinc-500">Sin gastos variables registrados</Card>
-        ) : (
-          <div className="space-y-2">
-            {gastos.map((g) => (
-              <Card key={g.id} className="flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <Badge variant={TIPO_BADGE[g.tipo] || 'default'}>{g.tipo}</Badge>
-                    <span className="text-sm text-zinc-200 truncate">{g.descripcion}</span>
+        <>
+          {ocultosPorElFiltro.length > 0 && (
+            <Card className="mb-3 border-amber-500/40 bg-amber-950/10 p-4">
+              <p className="text-sm text-amber-200">
+                Hay {ocultosPorElFiltro.length} gasto{ocultosPorElFiltro.length > 1 ? 's' : ''} fuera
+                del periodo seleccionado, por {formatCurrency(importeOculto)} en total.
+              </p>
+              <p className="mt-1 text-xs text-amber-200/70">
+                Un gasto se guarda con la fecha del documento, no con la del día que lo subiste.
+                {ocultosPorElFiltro[0] && (
+                  <> El más antiguo es del {formatDate(ocultosPorElFiltro[ocultosPorElFiltro.length - 1].fecha)}.</>
+                )}{' '}
+                Cambia el periodo de arriba para verlos.
+              </p>
+            </Card>
+          )}
+
+          {gastos.length === 0 ? (
+            <Card className="py-8 text-center text-zinc-500">
+              Sin gastos variables en este periodo
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {gastos.map((g) => (
+                <Card key={g.id} className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={TIPO_BADGE[g.tipo] || 'default'}>{g.tipo}</Badge>
+                      <span className="text-sm text-zinc-200 truncate">{g.descripcion}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {formatDate(g.fecha)}
+                      {/* Cuándo entró en el sistema, solo si no es el mismo día
+                          que la fecha del documento. Es la diferencia entre
+                          "esto pasó en mayo" y "esto lo subí hoy". */}
+                      {g.created_at && formatDate(g.created_at) !== formatDate(g.fecha) && (
+                        <span className="text-zinc-600"> · registrado el {formatDate(g.created_at)}</span>
+                      )}
+                    </p>
                   </div>
-                  <p className="mt-1 text-xs text-zinc-500">{formatDate(g.fecha)}</p>
-                </div>
-                <span className="shrink-0 text-lg font-bold text-zinc-100">{formatCurrency(g.importe)}</span>
-              </Card>
-            ))}
-          </div>
-        )
+                  <span className="shrink-0 text-lg font-bold text-zinc-100">{formatCurrency(g.importe)}</span>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Fixed expenses */}

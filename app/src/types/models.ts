@@ -137,10 +137,13 @@ export interface Gasto {
   tipo: string;
   descripcion: string;
   importe: number;
+  /** Fecha del GASTO (la del documento), que no tiene por qué ser la de alta. */
   fecha: string;
   estado: string;
   forma_pago?: string | null;
   url_factura?: string | null;
+  /** Cuándo entró en PilotOS. Una factura de mayo puede subirse en agosto. */
+  created_at?: string;
 }
 
 export interface GastoFijo {
@@ -167,6 +170,8 @@ export interface MantenimientoVehiculo {
   activo: boolean;
   frecuencia_km_personalizada: number | null;
   frecuencia_meses_personalizada: number | null;
+  /** Vencido recalculado en la lectura, sin depender del cron diario. */
+  vencido_real?: boolean;
   catalogo: {
     nombre: string;
     tipo: string;

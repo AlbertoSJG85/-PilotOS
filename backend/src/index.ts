@@ -7,6 +7,7 @@ import helmet from 'helmet';
 
 // DT-011: PrismaClient singleton
 import { prisma } from './lib/prisma';
+import { resolverClienteIdDeArchivo } from './services/propiedadArchivo.service';
 
 // Routes — Public API
 import authRoutes from './routes/auth.routes';
@@ -94,31 +95,8 @@ app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/upload', uploadRoutes);
 const uploadsDir = path.join(process.cwd(), 'uploads');
 
-/**
- * Fase 2 (seguridad, 2026-07-24): resuelve el cliente_id propietario de un
- * fichero de /uploads a partir de su nombre, siguiendo Documento -> enlace ->
- * ParteDiario -> vehiculo. Antes de esta fase, /uploads solo comprobaba que
- * el JWT fuera valido: cualquier usuario autenticado de CUALQUIER cliente
- * podia leer fotos/tickets de otro cliente si conocia (o adivinaba) el
- * nombre del fichero.
- */
-async function resolverClienteIdDeArchivo(filename: string): Promise<string | null> {
-    if (!filename) return null;
-    const documento = await prisma.documento.findFirst({
-        where: { url: { endsWith: filename } },
-        include: {
-            enlaces: {
-                include: { parteDiario: { include: { vehiculo: { select: { cliente_id: true } } } } },
-            },
-        },
-    });
-    if (!documento) return null;
-    for (const enlace of documento.enlaces) {
-        const clienteId = enlace.parteDiario?.vehiculo?.cliente_id;
-        if (clienteId) return clienteId;
-    }
-    return null;
-}
+// Quién es el dueño de un fichero de /uploads: en
+// services/propiedadArchivo.service.ts, para que se pueda probar (2026-08-12).
 
 app.use('/uploads', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const cookieHeader = req.headers.cookie || '';
