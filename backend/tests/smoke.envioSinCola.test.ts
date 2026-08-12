@@ -13,8 +13,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const enviarAvisoGlorMock = vi.fn();
-vi.mock('../src/services/notificacion.service', () => ({ enviarAvisoGloria: enviarAvisoGlorMock }));
+const avisarPatronMock = vi.fn();
+// Desde el 2026-08-12 el motor avisa por los DOS canales (WhatsApp + email)
+// a traves de avisarPatron: el WhatsApp depende de una plantilla que Meta no
+// ha aprobado, el correo no depende de nadie.
+vi.mock('../src/services/notificacion.service', () => ({ avisarPatron: avisarPatronMock }));
 
 const { procesarMantenimientos } = await import('../src/services/mantenimientoAlertas.service');
 
@@ -51,7 +54,7 @@ describe('reintento: el escalón no se quema si el envío falla', () => {
     });
 
     it('envío OK → el escalón avanza y NO se revierte', async () => {
-        enviarAvisoGlorMock.mockResolvedValue({ ok: true, estado: 'ENVIADO', message_id: 'wamid.X' });
+        avisarPatronMock.mockResolvedValue({ ok: true, estado: 'ENVIADO', message_id: 'wamid.X' });
         const prisma = prismaMock();
 
         await procesarMantenimientos(prisma as any);
@@ -61,7 +64,7 @@ describe('reintento: el escalón no se quema si el envío falla', () => {
     });
 
     it('CRITICO: envío falla → el escalón vuelve a su valor anterior (mañana reintenta)', async () => {
-        enviarAvisoGlorMock.mockResolvedValue({ ok: false, error: 'timeout' });
+        avisarPatronMock.mockResolvedValue({ ok: false, error: 'timeout' });
         const prisma = prismaMock();
 
         const resultado = await procesarMantenimientos(prisma as any);
@@ -74,7 +77,7 @@ describe('reintento: el escalón no se quema si el envío falla', () => {
     });
 
     it('el fallo queda con su motivo real y suma un intento', async () => {
-        enviarAvisoGlorMock.mockResolvedValue({ ok: false, error: 'plantilla no aprobada (meta:132001)' });
+        avisarPatronMock.mockResolvedValue({ ok: false, error: 'plantilla no aprobada (meta:132001)' });
         const prisma = prismaMock();
 
         await procesarMantenimientos(prisma as any);
@@ -96,7 +99,7 @@ describe('no duplicados: dedupe por hecho avisado', () => {
     });
 
     it('la clave es por mantenimiento + escalón, no por fecha', async () => {
-        enviarAvisoGlorMock.mockResolvedValue({ ok: true });
+        avisarPatronMock.mockResolvedValue({ ok: true });
         const prisma = prismaMock();
 
         await procesarMantenimientos(prisma as any);
@@ -112,19 +115,19 @@ describe('no duplicados: dedupe por hecho avisado', () => {
 
         const resultado = await procesarMantenimientos(prisma as any);
 
-        expect(enviarAvisoGlorMock).not.toHaveBeenCalled();
+        expect(avisarPatronMock).not.toHaveBeenCalled();
         expect(prisma.aviso.create).not.toHaveBeenCalled();
         expect(resultado.avisosEnviados).toBe(0);
     });
 
     it('intento anterior fallido → reutiliza la fila, no crea otra', async () => {
-        enviarAvisoGlorMock.mockResolvedValue({ ok: true });
+        avisarPatronMock.mockResolvedValue({ ok: true });
         const prisma = prismaMock({ id: 'aviso-fallido', enviado: false });
 
         await procesarMantenimientos(prisma as any);
 
         expect(prisma.aviso.create).not.toHaveBeenCalled();
-        expect(enviarAvisoGlorMock).toHaveBeenCalledTimes(1);
+        expect(avisarPatronMock).toHaveBeenCalledTimes(1);
         expect(prisma.aviso.update).toHaveBeenCalledWith(expect.objectContaining({
             where: { id: 'aviso-fallido' },
         }));

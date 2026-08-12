@@ -33,7 +33,7 @@
  */
 import { prisma } from '../lib/prisma';
 import type { DatosTaximetro } from './ocr.service';
-import { enviarAvisoGloria } from './notificacion.service';
+import { avisarPatron } from './notificacion.service';
 import { ESTADOS_ENVIADOS } from './retencionParte.service';
 
 
@@ -255,7 +255,7 @@ export async function compararDocumentosConParte(parte_diario_id: string): Promi
             vehiculo: {
                 select: {
                     matricula: true,
-                    cliente: { select: { id: true, patron: { select: { telefono: true } } } },
+                    cliente: { select: { id: true, patron: { select: { telefono: true, email: true } } } },
                 },
             },
         },
@@ -357,6 +357,7 @@ export async function compararDocumentosConParte(parte_diario_id: string): Promi
                 matricula: parte.vehiculo.matricula,
                 clienteId: parte.vehiculo.cliente.id,
                 telefonoPatron: parte.vehiculo.cliente.patron.telefono,
+                emailPatron: parte.vehiculo.cliente.patron.email,
             });
             if (discAcumulados) discrepancias.push(discAcumulados);
         }
@@ -500,6 +501,7 @@ interface ContextoAviso {
     matricula: string;
     clienteId: string;
     telefonoPatron: string | null;
+    emailPatron: string | null;
 }
 
 async function compararAcumulados(
@@ -654,7 +656,8 @@ async function notificarPatronAnomalia(
     motivoCorto: string,
 ): Promise<void> {
     try {
-        if (!ctx.telefonoPatron) return; // sin teléfono, no hay a quién avisar
+        // Sin ninguno de los dos canales no hay a quién avisar.
+        if (!ctx.telefonoPatron && !ctx.emailPatron) return;
 
         const dedupeKey = `pilotos:anomalia:${parteId}`;
         const previo = await prisma.aviso.findUnique({ where: { dedupe_key: dedupeKey } });
@@ -668,14 +671,32 @@ async function notificarPatronAnomalia(
                 mensaje: mensajeCompleto,
                 entidad_tipo: 'ANOMALIA',
                 entidad_id: anomaliaId,
-                canal: 'whatsapp',
+                canal: 'whatsapp+email',
                 intentos: 0,
                 dedupe_key: dedupeKey,
             },
         });
 
-        const templateParams = { matricula: ctx.matricula, motivo: motivoCorto };
-        const envio = await enviarAvisoGloria(ctx.telefonoPatron, 'anomalia_taximetro', templateParams);
+        // Los dos canales (2026-08-12). El WhatsApp depende de una plantilla
+        // que Meta no ha aprobado; el correo no depende de nadie. Con que
+        // salga por uno, el patrón se entera.
+        const envio = await avisarPatron(
+            { telefono: ctx.telefonoPatron, email: ctx.emailPatron },
+            {
+                tipo: 'anomalia_taximetro',
+                template_params: { matricula: ctx.matricula, motivo: motivoCorto },
+                asunto: `PilotOS · Anomalía en el taxímetro (${ctx.matricula})`,
+                cuerpo: [
+                    `Se ha detectado una anomalía revisando el parte del vehículo ${ctx.matricula}.`,
+                    '',
+                    mensajeCompleto,
+                    '',
+                    'El parte NO cuenta en tus totales hasta que lo revises: entra en PilotOS y decide si lo aceptas o pides que se rehaga.',
+                    '',
+                    '— PilotOS',
+                ].join('\n'),
+            },
+        );
 
         await prisma.aviso.update({
             where: { id: aviso.id },

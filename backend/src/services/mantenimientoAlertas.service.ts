@@ -19,7 +19,7 @@
  * codigo lo leia ni lo escribia.
  */
 import { PrismaClient } from '@prisma/client';
-import { enviarAvisoGloria } from './notificacion.service';
+import { avisarPatron } from './notificacion.service';
 
 // ── Escalones por defecto ───────────────────────────────────────────────
 // Km: 1000/500/250 antes de vencer (explicitos en el informe), y cada 250km
@@ -160,13 +160,18 @@ export async function procesarMantenimientos(
     const ahora = new Date();
     const resultado: ProcesarResultado = { evaluados: 0, avisosCreados: 0, avisosEnviados: 0, avisosFallidos: 0, avisosSilenciados: 0 };
 
-    // Sin configuracion de GlorIA no se puede enviar NADA. Salimos antes de
+    // Sin NINGUN canal configurado no se puede enviar nada. Salimos antes de
     // recorrer la flota: si siguieramos, cada mantenimiento reservaria su
     // escalon, el envio fallaria y -- aunque ahora revertimos -- estariamos
     // haciendo trabajo inutil y llenando la tabla de avisos fallidos en cada
     // pasada diaria. Es un fallo de despliegue, no de datos: que se vea.
-    if (!process.env.GLORIA_API_URL || !process.env.GLORIA_INTERNAL_TOKEN) {
-        console.error('[MANTENIMIENTOS] GLORIA_API_URL/GLORIA_INTERNAL_TOKEN sin configurar: no se procesa nada.');
+    //
+    // 2026-08-12: basta con UNO de los dos. Antes se exigia GlorIA, asi que un
+    // despliegue con correo y sin WhatsApp no habria avisado de nada.
+    const hayWhatsapp = !!(process.env.GLORIA_API_URL && process.env.GLORIA_INTERNAL_TOKEN);
+    const hayEmail = !!process.env.SMTP_URL;
+    if (!hayWhatsapp && !hayEmail) {
+        console.error('[MANTENIMIENTOS] Sin canal de aviso (falta GLORIA_API_URL/GLORIA_INTERNAL_TOKEN y SMTP_URL): no se procesa nada.');
         return resultado;
     }
 
@@ -183,7 +188,8 @@ export async function procesarMantenimientos(
 
     for (const vehiculo of vehiculos) {
         const patron = vehiculo.cliente?.patron;
-        if (!patron?.telefono) continue;
+        // Sin ninguno de los dos canales no hay a quien avisar (2026-08-12).
+        if (!patron?.telefono && !patron?.email) continue;
         if (!(await puedeProcesarCliente(patron.id))) continue;
 
         const prefs = resolverPreferenciasAvisos(vehiculo.cliente?.preferencias_avisos);
@@ -270,7 +276,7 @@ export async function procesarMantenimientos(
                     mensaje,
                     entidad_tipo: 'MANTENIMIENTO_VEHICULO',
                     entidad_id: mant.id,
-                    canal: 'whatsapp',
+                    canal: 'whatsapp+email',
                     intentos: 0,
                     dedupe_key: dedupeKey,
                 },
@@ -280,7 +286,25 @@ export async function procesarMantenimientos(
             const tipoAviso = vencido ? 'mantenimiento_vencido' : 'mantenimiento_proximo';
             const templateParams = { matricula: vehiculo.matricula, mantenimiento: mant.catalogo.nombre, motivo: motivoKm ?? motivoDias ?? '' };
 
-            const envio = await enviarAvisoGloria(patron.telefono, tipoAviso, templateParams);
+            // Los dos canales (2026-08-12): el WhatsApp sigue dependiendo de
+            // que Meta apruebe la plantilla, el correo no depende de nadie.
+            const envio = await avisarPatron(
+                { telefono: patron.telefono, email: patron.email },
+                {
+                    tipo: tipoAviso,
+                    template_params: templateParams,
+                    asunto: `PilotOS · ${titulo}`,
+                    cuerpo: [
+                        mensaje,
+                        '',
+                        vencido
+                            ? 'Está vencido: conviene resolverlo cuanto antes.'
+                            : 'Todavía no ha vencido, pero queda poco.',
+                        '',
+                        '— PilotOS',
+                    ].join('\n'),
+                },
+            );
 
             await prisma.aviso.update({
                 where: { id: aviso.id },

@@ -1,5 +1,7 @@
 node_modules
 .env
+# Entorno de prueba: lleva credenciales de la BD demo
+.env.demo
 prisma/dev.db
 ts_errors.txt
 *.bak

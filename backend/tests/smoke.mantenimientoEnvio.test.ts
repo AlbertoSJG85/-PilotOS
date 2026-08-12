@@ -11,8 +11,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const enviarAvisoGlorMock = vi.fn();
-vi.mock('../src/services/notificacion.service', () => ({ enviarAvisoGloria: enviarAvisoGlorMock }));
+const avisarPatronMock = vi.fn();
+// Desde el 2026-08-12 el motor avisa por los DOS canales (WhatsApp + email)
+// a traves de avisarPatron: el WhatsApp depende de una plantilla que Meta no
+// ha aprobado, el correo no depende de nadie.
+vi.mock('../src/services/notificacion.service', () => ({ avisarPatron: avisarPatronMock }));
 
 const { procesarMantenimientos } = await import('../src/services/mantenimientoAlertas.service');
 
@@ -60,16 +63,19 @@ describe('procesarMantenimientos → enviarAvisoGloria (llamada real, no solo es
     });
 
     it('mantenimiento próximo cruza escalón → llama a GlorIA con el teléfono del patrón y tipo correcto', async () => {
-        enviarAvisoGlorMock.mockResolvedValue({ ok: true });
+        avisarPatronMock.mockResolvedValue({ ok: true });
         const prisma = prismaMockCon({});
 
         const resultado = await procesarMantenimientos(prisma as any);
 
-        expect(enviarAvisoGlorMock).toHaveBeenCalledTimes(1);
-        expect(enviarAvisoGlorMock).toHaveBeenCalledWith(
-            '+34600111222',
-            'mantenimiento_proximo',
-            expect.objectContaining({ matricula: '1234ABC', mantenimiento: 'Cambio de aceite' }),
+        expect(avisarPatronMock).toHaveBeenCalledTimes(1);
+        expect(avisarPatronMock).toHaveBeenCalledWith(
+            expect.objectContaining({ telefono: '+34600111222' }),
+            expect.objectContaining({
+                tipo: 'mantenimiento_proximo',
+                template_params: expect.objectContaining({ matricula: '1234ABC', mantenimiento: 'Cambio de aceite' }),
+                asunto: expect.stringContaining('PilotOS'),
+            }),
         );
         expect(prisma.aviso.create).toHaveBeenCalledTimes(1);
         expect(prisma.aviso.update).toHaveBeenCalledWith(expect.objectContaining({
@@ -80,18 +86,19 @@ describe('procesarMantenimientos → enviarAvisoGloria (llamada real, no solo es
     });
 
     it('mantenimiento vencido → tipo mantenimiento_vencido', async () => {
-        enviarAvisoGlorMock.mockResolvedValue({ ok: true });
+        avisarPatronMock.mockResolvedValue({ ok: true });
         const prisma = prismaMockCon({ proximo_km: 8500 }); // ya pasado (km_actuales 9000)
 
         await procesarMantenimientos(prisma as any);
 
-        expect(enviarAvisoGlorMock).toHaveBeenCalledWith(
-            '+34600111222', 'mantenimiento_vencido', expect.anything(),
+        expect(avisarPatronMock).toHaveBeenCalledWith(
+            expect.objectContaining({ telefono: '+34600111222' }),
+            expect.objectContaining({ tipo: 'mantenimiento_vencido' }),
         );
     });
 
     it('si GlorIA falla, el Aviso queda con error_envio y el resultado lo cuenta como fallido', async () => {
-        enviarAvisoGlorMock.mockResolvedValue({ ok: false, error: 'GLORIA_API_URL/GLORIA_INTERNAL_TOKEN no configurados' });
+        avisarPatronMock.mockResolvedValue({ ok: false, error: 'GLORIA_API_URL/GLORIA_INTERNAL_TOKEN no configurados' });
         const prisma = prismaMockCon({});
 
         const resultado = await procesarMantenimientos(prisma as any);
@@ -116,6 +123,6 @@ describe('procesarMantenimientos → enviarAvisoGloria (llamada real, no solo es
 
         await procesarMantenimientos(prisma as any);
 
-        expect(enviarAvisoGlorMock).not.toHaveBeenCalled();
+        expect(avisarPatronMock).not.toHaveBeenCalled();
     });
 });

@@ -28,8 +28,10 @@ const prismaMock = {
 
 vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }));
 
-const enviarAvisoGlorMock = vi.fn();
-vi.mock('../src/services/notificacion.service', () => ({ enviarAvisoGloria: enviarAvisoGlorMock }));
+// Desde el 2026-08-12 el aviso sale por los DOS canales (WhatsApp + email)
+// a traves de avisarPatron.
+const avisarPatronMock = vi.fn();
+vi.mock('../src/services/notificacion.service', () => ({ avisarPatron: avisarPatronMock }));
 
 const { compararDocumentosConParte } = await import('../src/services/ocrComparacion.service');
 
@@ -102,7 +104,7 @@ describe('compararAcumulados (vía compararDocumentosConParte)', () => {
         prismaMock.aviso.findUnique.mockResolvedValue(null); // sin aviso previo -> se crea
         prismaMock.aviso.create.mockResolvedValue({ id: 'aviso-1' });
         prismaMock.aviso.update.mockResolvedValue({});
-        enviarAvisoGlorMock.mockResolvedValue({ ok: true });
+        avisarPatronMock.mockResolvedValue({ ok: true });
     });
 
     it('todo cuadra (borrado esperado exacto, km y € sin diferencia) → sin anomalía ni aviso', async () => {
@@ -115,7 +117,7 @@ describe('compararAcumulados (vía compararDocumentosConParte)', () => {
         const r = await compararDocumentosConParte('p2');
 
         expect(prismaMock.anomalia.create).not.toHaveBeenCalled();
-        expect(enviarAvisoGlorMock).not.toHaveBeenCalled();
+        expect(avisarPatronMock).not.toHaveBeenCalled();
         const disc = r.discrepancias_por_doc['doc2'] ?? [];
         expect(disc.find((d) => d.campo === 'borrados')).toBeUndefined();
     });
@@ -145,12 +147,15 @@ describe('compararAcumulados (vía compararDocumentosConParte)', () => {
         // Aviso al patrón: mismo canal que mantenimiento, plantilla nueva.
         expect(prismaMock.aviso.create).toHaveBeenCalledTimes(1);
         expect(prismaMock.aviso.create.mock.calls[0][0].data).toMatchObject({
-            cliente_id: 'cli-1', tipo: 'ANOMALIA', canal: 'whatsapp',
+            cliente_id: 'cli-1', tipo: 'ANOMALIA', canal: 'whatsapp+email',
         });
-        expect(enviarAvisoGlorMock).toHaveBeenCalledWith(
-            TELEFONO_PATRON,
-            'anomalia_taximetro',
-            expect.objectContaining({ matricula: MATRICULA, motivo: expect.stringMatching(/40 km.*sin dinero de más/i) }),
+        expect(avisarPatronMock).toHaveBeenCalledWith(
+            expect.objectContaining({ telefono: TELEFONO_PATRON }),
+            expect.objectContaining({
+                tipo: 'anomalia_taximetro',
+                template_params: expect.objectContaining({ matricula: MATRICULA, motivo: expect.stringMatching(/40 km.*sin dinero de más/i) }),
+                asunto: expect.stringContaining(MATRICULA),
+            }),
         );
         expect(prismaMock.aviso.update).toHaveBeenCalledWith(
             expect.objectContaining({ where: { id: 'aviso-1' } }),
@@ -172,10 +177,12 @@ describe('compararAcumulados (vía compararDocumentosConParte)', () => {
         expect(mensaje).toContain('15.00 €');
         expect(mensaje).toMatch(/trabajo no declarado/i);
 
-        expect(enviarAvisoGlorMock).toHaveBeenCalledWith(
-            TELEFONO_PATRON,
-            'anomalia_taximetro',
-            expect.objectContaining({ motivo: expect.stringMatching(/trabajo no declarado/i) }),
+        expect(avisarPatronMock).toHaveBeenCalledWith(
+            expect.objectContaining({ telefono: TELEFONO_PATRON }),
+            expect.objectContaining({
+                tipo: 'anomalia_taximetro',
+                template_params: expect.objectContaining({ motivo: expect.stringMatching(/trabajo no declarado/i) }),
+            }),
         );
     });
 
@@ -191,7 +198,7 @@ describe('compararAcumulados (vía compararDocumentosConParte)', () => {
         expect(prismaMock.anomalia.create).toHaveBeenCalledTimes(1);
         const mensaje = prismaMock.anomalia.create.mock.calls[0][0].data.descripcion as string;
         expect(mensaje).toMatch(/manipulación del contador/i);
-        expect(enviarAvisoGlorMock).toHaveBeenCalledTimes(1);
+        expect(avisarPatronMock).toHaveBeenCalledTimes(1);
     });
 
     it('ticket con varios partes de por medio: los borrados esperados suman todos los turnos, no solo +1', async () => {
@@ -210,7 +217,7 @@ describe('compararAcumulados (vía compararDocumentosConParte)', () => {
 
         // 2 partes explican 2 borrados (297+2=299=actual) y todo el km/€ → sin aviso.
         expect(prismaMock.anomalia.create).not.toHaveBeenCalled();
-        expect(enviarAvisoGlorMock).not.toHaveBeenCalled();
+        expect(avisarPatronMock).not.toHaveBeenCalled();
     });
 
     it('sin ticket anterior (primer ticket del vehículo) → no revienta, no compara, no avisa', async () => {
@@ -222,7 +229,7 @@ describe('compararAcumulados (vía compararDocumentosConParte)', () => {
         const r = await compararDocumentosConParte('p2');
 
         expect(prismaMock.anomalia.create).not.toHaveBeenCalled();
-        expect(enviarAvisoGlorMock).not.toHaveBeenCalled();
+        expect(avisarPatronMock).not.toHaveBeenCalled();
         expect(r.discrepancias_por_doc['doc2']?.find((d) => d.campo === 'borrados')).toBeUndefined();
     });
 
@@ -249,11 +256,11 @@ describe('compararAcumulados (vía compararDocumentosConParte)', () => {
 
         expect(prismaMock.anomalia.create).toHaveBeenCalledTimes(1);
         expect(prismaMock.aviso.create).not.toHaveBeenCalled();
-        expect(enviarAvisoGlorMock).not.toHaveBeenCalled();
+        expect(avisarPatronMock).not.toHaveBeenCalled();
     });
 
     it('si el envío a GlorIA falla, la Anomalia queda registrada igual (el fallo no rompe la comparación)', async () => {
-        enviarAvisoGlorMock.mockResolvedValue({ ok: false, error: 'timeout' });
+        avisarPatronMock.mockResolvedValue({ ok: false, error: 'timeout' });
         prismaMock.parteDiario.findUnique.mockResolvedValue(
             parteActual({ acum_borrados: 299, acum_dist_total: 183212.9, acum_total: 149098.95 }),
         );
