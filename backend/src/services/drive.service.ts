@@ -225,6 +225,37 @@ async function tokenValido(clienteId: string): Promise<string | null> {
 // Carpetas y subida
 // ─────────────────────────────────────────────────────────
 
+/**
+ * Lo que Google dice de verdad cuando algo falla (2026-08-13, C-067).
+ *
+ * Antes aquí solo se guardaba el número: `403`. Y con un 403 no se puede
+ * hacer nada, porque significa tres cosas muy distintas y con arreglos
+ * distintos: que la Drive API no está habilitada en el proyecto, que el token
+ * no tiene el scope, o que el cliente revocó el acceso. La primera vez que
+ * pasó de verdad hubo que entrar en el contenedor y repetir la llamada a mano
+ * para leer el motivo — que estaba ahí, en el cuerpo de la respuesta, y lo
+ * tirábamos.
+ *
+ * Google devuelve un `reason` corto (`accessNotConfigured`,
+ * `insufficientPermissions`, `storageQuotaExceeded`) y un mensaje largo que
+ * incluso trae el enlace para arreglarlo. Se guardan los dos.
+ */
+async function motivoGoogle(res: Response): Promise<string> {
+    try {
+        const cuerpo = (await res.json()) as {
+            error?: { message?: string; errors?: { reason?: string }[] };
+        };
+        const reason = cuerpo.error?.errors?.[0]?.reason;
+        const mensaje = cuerpo.error?.message;
+        if (reason || mensaje) {
+            return `${res.status} ${reason ?? ''} ${mensaje ?? ''}`.trim().slice(0, 400);
+        }
+    } catch {
+        // Respuesta sin JSON: nos quedamos con el número, como antes.
+    }
+    return String(res.status);
+}
+
 /** Busca una carpeta por nombre dentro de otra; si no existe, la crea. */
 async function carpeta(token: string, nombre: string, padreId?: string): Promise<string> {
     const filtros = [
@@ -252,7 +283,7 @@ async function carpeta(token: string, nombre: string, padreId?: string): Promise
             ...(padreId ? { parents: [padreId] } : {}),
         }),
     });
-    if (!crear.ok) throw new Error(`No se pudo crear la carpeta "${nombre}": ${crear.status}`);
+    if (!crear.ok) throw new Error(`No se pudo crear la carpeta "${nombre}": ${await motivoGoogle(crear)}`);
     return ((await crear.json()) as { id: string }).id;
 }
 
@@ -321,16 +352,47 @@ export async function subirDocumentoADrive(
         });
 
         if (!res.ok) {
-            const detalle = await res.text();
-            return { ok: false, error: `google_${res.status}: ${detalle.slice(0, 200)}` };
+            const error = `google_${await motivoGoogle(res)}`;
+            await anotarError(clienteId, error);
+            return { ok: false, error };
         }
+
+        // Salió bien: se borra el error anterior si lo había, para que la
+        // pantalla no siga avisando de algo que ya está resuelto.
+        await limpiarError(clienteId);
 
         const creado = (await res.json()) as { id: string; webViewLink?: string };
         return { ok: true, webViewLink: creado.webViewLink };
     } catch (err: any) {
         console.error('[DRIVE] Subida fallida (no bloquea):', err?.message);
-        return { ok: false, error: String(err?.message ?? 'error_desconocido').slice(0, 300) };
+        const error = String(err?.message ?? 'error_desconocido').slice(0, 300);
+        await anotarError(clienteId, error);
+        return { ok: false, error };
     }
+}
+
+/**
+ * Deja constancia de que una subida falló, para que la pantalla lo pueda
+ * decir (2026-08-13, C-067).
+ *
+ * Antes, un fallo de Drive solo existía en el log del servidor: la subida se
+ * hace sin `await` y con el error tragado a propósito —Drive nunca puede
+ * romper el producto—, así que el cliente veía "Tu Drive está conectado" para
+ * siempre mientras no llegaba ni un archivo. `ConexionDrive` ya sabía pintar
+ * `ultimo_error`; lo que faltaba era que alguien lo escribiera.
+ *
+ * Nunca lanza: esto es contabilidad de un extra, no puede estropear nada.
+ */
+async function anotarError(clienteId: string, error: string): Promise<void> {
+    await prisma.conexionDrive
+        .updateMany({ where: { cliente_id: clienteId }, data: { ultimo_error: error.slice(0, 300) } })
+        .catch(() => undefined);
+}
+
+async function limpiarError(clienteId: string): Promise<void> {
+    await prisma.conexionDrive
+        .updateMany({ where: { cliente_id: clienteId, NOT: { ultimo_error: null } }, data: { ultimo_error: null } })
+        .catch(() => undefined);
 }
 
 /** Estado de la conexión, para pintarlo en la app. */

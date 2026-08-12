@@ -941,3 +941,32 @@ Al mover la línea quedó el montaje viejo duplicado —el router montado dos ve
 - 266/266 tests, con tres nuevos que cubren esto por los dos lados: que el callback no lleva sesión delante, que los demás endpoints sí, y **que `/api/drive` se monta antes del guardia global**.
 - **Prevención, y es incómoda:** *un comentario no es una garantía.* Este decía exactamente lo correcto y llevaba meses siendo falso. Cuando un comentario afirma una propiedad del cableado ("esto va antes que aquello", "esto no pasa por aquí"), esa propiedad hay que **afirmarla en un test**, no en prosa. El test de este caso lee `index.ts` como texto y compara posiciones — poco elegante, pero es que `index.ts` abre el puerto al importarse y no se puede montar en una prueba, y ninguna prueba del router habría visto nada: el router siempre fue correcto.
 - **Corolario:** los fallos de orden de middleware no los ve ningún test unitario de la pieza afectada. Solo se ven ejecutando el circuito entero o afirmando el cableado. Otra vuelta de la lección de C-063.
+
+---
+
+### C-067 · Un 403 a secas no sirve para nada
+- Fecha: 2026-08-13
+- Área: `backend/src/services/drive.service.ts`
+
+**El síntoma.** Alberto conectó su Drive por fin (C-066) y la primera subida real falló. Lo que se guardó fue esto:
+
+```
+No se pudo crear la carpeta "PilotOS": 403
+```
+
+**El problema con ese mensaje.** Un 403 de la API de Drive significa como mínimo tres cosas distintas, y cada una se arregla en un sitio distinto: que la Drive API no está habilitada en el proyecto de Google Cloud (`accessNotConfigured`), que el token no lleva el scope necesario (`insufficientPermissions`), o que el cliente ha revocado el acceso desde su cuenta. Con el número pelado no se puede ni empezar.
+
+Hubo que entrar en el contenedor de producción, sacar el token descifrándolo a mano y repetir la llamada para leer lo que Google decía de verdad — que estaba en el cuerpo de la respuesta, incluía el `reason` **y hasta el enlace exacto para arreglarlo**, y lo estábamos tirando a la basura:
+
+> `accessNotConfigured` — *Google Drive API has not been used in project 472381664007 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=472381664007*
+
+Un clic. Diez minutos de arqueología para encontrarlo.
+
+**La segunda mitad, que era peor.** La subida a Drive se hace **sin `await` y con el error tragado a propósito**: Drive es un extra y no puede romper el producto (está en la cabecera del servicio y es correcto). Pero eso significaba que un fallo solo existía en el log del servidor. La pantalla seguía diciendo *"Tu Drive está conectado"* indefinidamente mientras no llegaba ni un archivo. El componente `ConexionDrive` ya sabía pintar `ultimo_error`; nadie lo escribía nunca.
+
+**La corrección.** Dos cosas pequeñas:
+- `motivoGoogle()` extrae el `reason` y el mensaje de la respuesta y los conserva, en vez de quedarse con el código.
+- Un fallo de subida se anota en `ConexionDrive.ultimo_error`, y una subida correcta lo borra. Sin `await` bloqueante y sin lanzar: sigue sin poder romper nada.
+
+- 267/267 tests, con uno nuevo que reproduce **la respuesta literal que devolvió Google en producción** y exige que el motivo sobreviva hasta el error guardado y hasta la fila de la conexión.
+- **Prevención:** *tragarse un error para no romper el producto no es lo mismo que tirarlo.* El patrón "esto nunca puede fallar hacia fuera" es correcto y se queda; lo que hay que añadir siempre es dónde queda constancia. Si una función se diseña para fallar en silencio, tiene que dejar el motivo en algún sitio que un humano mire — y ese sitio no es el log del servidor, es la pantalla de quien puede arreglarlo. Es hermana de la lección de C-063, donde otro `catch` silencioso costó una tarde.
