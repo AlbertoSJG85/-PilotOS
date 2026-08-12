@@ -8,6 +8,13 @@ import { getSessionUser, clearSession } from '@/lib/auth';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { FileText, LogOut, CheckCircle, Clock, AlertCircle, AlertTriangle, LayoutDashboard, ArrowRight } from 'lucide-react';
 import type { ParteDiario, Vehiculo } from '@/types';
+import { ResumenMesConductor } from '@/components/features/resumen-mes-conductor';
+
+/** Primer día del mes en curso, en YYYY-MM-DD (filtro del listado de partes). */
+function primerDiaDelMes(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
 
 /** Fecha local en formato YYYY-MM-DD, sin conversión UTC */
 function localDateString(date?: string | Date): string {
@@ -31,8 +38,11 @@ export default function ConductorHome() {
   useEffect(() => {
     const conductorId = user?.conductor_id;
     Promise.all([
-      getPartes({ conductor_id: conductorId || undefined })
-        .then((r) => setPartes((r.data || []).slice(0, 7)))
+      // Se piden los partes del mes en curso, no los 7 últimos: el mini-panel
+      // necesita el mes entero para sus medias, y la lista de abajo se recorta
+      // en pantalla.
+      getPartes({ conductor_id: conductorId || undefined, desde: primerDiaDelMes() })
+        .then((r) => setPartes(r.data || []))
         .catch(() => {}),
       getMe()
         .then((r) => {
@@ -108,6 +118,10 @@ export default function ConductorHome() {
             <p className="text-xs text-zinc-600 mt-1">{vehiculo.km_actuales?.toLocaleString('es-ES')} km</p>
           </div>
         ) : null}
+
+        {/* Lo que lleva este mes — solo para el asalariado: el dueño tiene
+            el panel de gestión entero. */}
+        {!esPatron && <ResumenMesConductor partes={partes} loading={loading} />}
 
         {/* Acción principal del DUEÑO: su trabajo es controlar el negocio.
             Registrar un parte lo hará solo si además conduce, así que baja a
@@ -244,7 +258,7 @@ export default function ConductorHome() {
             </div>
           ) : (
             <div className="space-y-2">
-              {partes.map((p) => (
+              {partes.slice(0, 7).map((p) => (
                 <Link
                   key={p.id}
                   href={`/conductor/parte/${p.id}`}
