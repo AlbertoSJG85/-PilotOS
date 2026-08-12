@@ -189,6 +189,50 @@ async function main() {
         });
     }
 
+    // ── Días que ha trabajado el DUEÑO con el mismo taxi ─────────────────
+    // Importa para el panel: lo que factura él va ÍNTEGRO para él (su
+    // configuración es 100/0), mientras que lo del asalariado se reparte al
+    // 50%. Sin partes del dueño no se puede ver esa diferencia.
+    const configDueno = await prisma.configuracionEconomica.findFirstOrThrow({ where: { conductor_id: condDueno.id } });
+    const jornadasDueno = [
+        { dias: 4, km: 178, bruto: 149.60, datafono: 47.30, combustible: 20.40 },
+        { dias: 3, km: 220, bruto: 187.25, datafono: 74.50, combustible: 25.80 },
+    ];
+    for (const j of jornadasDueno) {
+        const inicio = kmCursor;
+        const fin = kmCursor + j.km;
+        kmCursor = fin;
+        const parte = await prisma.parteDiario.create({
+            data: {
+                fecha_trabajada: dia(-j.dias),
+                vehiculo_id: vehiculo.id,
+                conductor_id: condDueno.id,
+                km_inicio: inicio,
+                km_fin: fin,
+                ingreso_bruto: j.bruto,
+                ingreso_datafono: j.datafono,
+                combustible: j.combustible,
+                estado: 'ENVIADO',
+            },
+        });
+        const neto = j.bruto - j.combustible;
+        await prisma.calculoParte.create({
+            data: {
+                parte_diario_id: parte.id,
+                configuracion_id: configDueno.id,
+                bruto_diario: j.bruto,
+                combustible: j.combustible,
+                neto_diario: neto,
+                // 100% para él: no reparte con nadie lo que trabaja de su mano.
+                parte_conductor: neto,
+                parte_patron: 0,
+                modelo_reparto_aplicado: 'PORCENTAJE',
+                porcentaje_conductor_aplicado: 100,
+                porcentaje_patron_aplicado: 0,
+            },
+        });
+    }
+
     // ── Parte limpio: cuenta en los globales ──────────────────────────────
     const parteLimpio = await prisma.parteDiario.create({
         data: {

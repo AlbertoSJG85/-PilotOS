@@ -78,6 +78,8 @@ export interface ResumenInput {
 export interface DetalleAsalariado {
     conductor_id: string;
     nombre: string;
+    /** true = son los días que ha conducido el propio dueño: su importe es íntegro suyo. */
+    es_patron: boolean;
     partes: number;
     bruto: number;
     combustible: number;
@@ -111,6 +113,8 @@ export interface ResumenOutput {
     seguridad_social_detalle: DetalleSS[];
     /** Desglose por asalariado: lo que genera, lo que se lleva y lo que te queda. */
     asalariados: DetalleAsalariado[];
+    /** Los días que ha conducido el propio dueño. Su importe va íntegro para él. */
+    patron: DetalleAsalariado | null;
     beneficio_estimado: number;
     partes_count: number;
     rango: { desde: string | null; hasta: string | null };
@@ -193,11 +197,12 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
     // él. Sin esto, el panel dice cuánto entra pero no de quién sale.
     const porAsalariado = new Map<string, DetalleAsalariado>();
     for (const p of partes) {
-        if (!p.conductor || p.conductor.es_patron) continue;
+        if (!p.conductor) continue;
         const id = p.conductor_id;
         const acumulado = porAsalariado.get(id) ?? {
             conductor_id: id,
             nombre: p.conductor.usuario?.nombre ?? 'Asalariado',
+            es_patron: p.conductor.es_patron,
             partes: 0, bruto: 0, combustible: 0, neto_generado: 0,
             reparto: 0, seguridad_social: 0, percibe: 0, para_el_patron: 0,
         };
@@ -218,7 +223,12 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
         detalle.seguridad_social = ss.detalle.find((d) => d.conductor_id === detalle.conductor_id)?.total ?? 0;
         detalle.percibe = detalle.reparto - detalle.seguridad_social;
     }
-    const asalariados = [...porAsalariado.values()].sort((a, b) => b.neto_generado - a.neto_generado);
+    const todos = [...porAsalariado.values()];
+    const asalariados = todos.filter((d) => !d.es_patron).sort((a, b) => b.neto_generado - a.neto_generado);
+    // Los días que ha trabajado el propio dueño: su reparto es el suyo (100%
+    // si así lo tiene configurado) y NO se divide con nadie. Por eso va
+    // aparte y no mezclado con los asalariados.
+    const patron = todos.find((d) => d.es_patron) ?? null;
     const beneficio = partePatron - gastosVariables - gastosFijosProrrateados - ss.total;
 
     // Efectivo estimado = bruto - datafono. Clampamos a 0 por seguridad
@@ -237,6 +247,7 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
         gastos_fijos_prorrateados: gastosFijosProrrateados,
         seguridad_social: ss.total,
         asalariados,
+        patron,
         ss_modo_descuento: modoSS,
         seguridad_social_detalle: ss.detalle,
         beneficio_estimado: beneficio,

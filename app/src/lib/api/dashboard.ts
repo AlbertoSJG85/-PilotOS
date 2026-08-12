@@ -17,6 +17,8 @@ export interface ResumenDashboard {
     ss_modo_descuento?: 'parte' | 'cierre';
     /** Desglose por asalariado: genera, reparto, SS, percibe y lo que te queda. */
     asalariados?: { conductor_id: string; nombre: string; partes: number; bruto: number; combustible: number; neto_generado: number; reparto: number; seguridad_social: number; percibe: number; para_el_patron: number }[];
+    /** Los dias que ha conducido el propio dueno: integro para el. */
+    patron?: { conductor_id: string; nombre: string; es_patron: boolean; partes: number; bruto: number; combustible: number; neto_generado: number; reparto: number; seguridad_social: number; percibe: number; para_el_patron: number } | null;
     seguridad_social_detalle?: { conductor_id: string; nombre: string; cuota_mensual: number; meses: number; total: number }[];
     beneficio_estimado: number;
     partes_count: number;

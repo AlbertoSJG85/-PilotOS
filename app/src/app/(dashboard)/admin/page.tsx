@@ -209,9 +209,9 @@ function AdminDashboardContent() {
 
       {/* El lado del asalariado: qué genera, qué se lleva y qué te queda.
           Debajo, dónde se le descuenta la Seguridad Social. */}
-      {((resumen?.asalariados?.length ?? 0) > 0 || (resumen?.seguridad_social ?? 0) > 0) && (
+      {((resumen?.asalariados?.length ?? 0) > 0 || (resumen?.patron?.partes ?? 0) > 0 || (resumen?.seguridad_social ?? 0) > 0) && (
         <div className="mb-8 grid gap-4 lg:grid-cols-2">
-          <AsalariadosResumen asalariados={resumen?.asalariados ?? []} />
+          <AsalariadosResumen asalariados={resumen?.asalariados ?? []} patron={resumen?.patron ?? null} />
           {(resumen?.seguridad_social ?? 0) > 0 && (
             <SeguridadSocial
               total={resumen!.seguridad_social!}

@@ -23,6 +23,8 @@ import { formatCurrency } from '@/lib/utils';
 export interface DetalleAsalariado {
   conductor_id: string;
   nombre: string;
+  /** true = son los días que has conducido tú: el importe es íntegro tuyo. */
+  es_patron?: boolean;
   partes: number;
   bruto: number;
   combustible: number;
@@ -55,17 +57,46 @@ function Linea({
   );
 }
 
-export function AsalariadosResumen({ asalariados }: { asalariados: DetalleAsalariado[] }) {
-  if (!asalariados || asalariados.length === 0) return null;
+export function AsalariadosResumen({
+  asalariados, patron,
+}: {
+  asalariados: DetalleAsalariado[];
+  /** Los días que ha conducido el propio dueño, si los hay. */
+  patron?: DetalleAsalariado | null;
+}) {
+  if ((!asalariados || asalariados.length === 0) && !patron) return null;
 
   return (
     <Card className="p-5">
       <h2 className="mb-4 flex items-center gap-2 border-b border-zinc-800 pb-3 text-sm font-semibold uppercase tracking-wider text-zinc-100">
         <UserRound className="h-4 w-4 text-zinc-500" />
-        Tus asalariados
+        Quién genera qué
       </h2>
 
       <div className="space-y-5">
+        {/* Los días del propio dueño van primero y aparte: lo que factura de
+            su mano es ÍNTEGRO suyo, no se reparte con nadie. Mezclarlo con el
+            asalariado daría a entender que se divide, y no es así. */}
+        {patron && patron.partes > 0 && (
+          <div>
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <p className="truncate font-semibold text-zinc-100">Tú</p>
+              <p className="shrink-0 text-xs text-zinc-500">
+                {patron.partes} {patron.partes === 1 ? 'parte' : 'partes'}
+              </p>
+            </div>
+            <div className="space-y-1.5 rounded-lg border border-pilot-lime/30 bg-pilot-lime/5 p-3">
+              <Linea etiqueta="Has generado (bruto − combustible)" valor={formatCurrency(patron.neto_generado)} tono="destacado" />
+              <div className="!mt-2 border-t border-zinc-800 pt-2">
+                <Linea etiqueta="Íntegro para ti" valor={formatCurrency(patron.reparto)} tono="patron" />
+              </div>
+            </div>
+            <p className="mt-1.5 text-[11px] text-zinc-500">
+              Lo que trabajas tú no se reparte con nadie.
+            </p>
+          </div>
+        )}
+
         {asalariados.map((a) => (
           <div key={a.conductor_id}>
             <div className="mb-2 flex items-baseline justify-between gap-2">
