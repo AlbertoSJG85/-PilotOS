@@ -17,7 +17,18 @@ export interface OCRResult {
     confianza: number;
     legible: boolean;
     error_ocr?: string;
+    /** Con qué preparación se leyó al final. Para poder diagnosticarlo después. */
+    tuberia?: 'ticket' | 'documento';
 }
+
+/**
+ * Por debajo de esta confianza, la primera lectura se da por mala y se
+ * reintenta con la tubería de documento (ver `extraerTextoImagen`). No es el
+ * umbral de "legible" (60): es el de "esto ha salido tan mal que merece la
+ * pena gastar otros diez segundos". Los dos tickets reales del repositorio
+ * salen a 64 y 73, así que un ticket normal NUNCA paga ese coste.
+ */
+const UMBRAL_SEGUNDO_INTENTO = 45;
 
 export type MotivoImagenNoProcesable =
     | 'imagen_corrupta'
@@ -162,37 +173,133 @@ async function prepararImagenParaOcr(imagenPath: string): Promise<string> {
     return salida;
 }
 
+/**
+ * Prepara un DOCUMENTO —una factura A4, una tarjeta ITV— antes de Tesseract
+ * (2026-08-12, C-064).
+ *
+ * POR QUÉ HACE FALTA OTRA. La tubería de arriba está afinada contra tickets
+ * térmicos: tira estrecha, letra grande, fondo uniforme. La primera factura
+ * real de taller que subió Alberto era lo contrario —un A4 con tabla de
+ * líneas, y encima fotografiado de la PANTALLA de un ordenador, con muaré—
+ * y salió a 31 de confianza: 3.465 caracteres de ruido de los que solo se
+ * salvaba alguna palabra suelta. La fecha no se leyó, el total tampoco.
+ *
+ * QUÉ HACE DISTINTO, y es lo que arregla el caso:
+ *   1. Divide la imagen por su propio fondo desenfocado. Eso quita de golpe
+ *      el gradiente de luz de la pantalla y buena parte del muaré, que es
+ *      justo lo que ahogaba el texto pequeño.
+ *   2. Binariza (`threshold`). En la tubería de tickets esto está PROHIBIDO
+ *      porque los mata; aquí es imprescindible.
+ *
+ * ── CÓMO SE ELIGIERON LOS NÚMEROS ────────────────────────────────────────
+ * Barriendo sigma (8/15/25) × umbral (140/150/160/170) contra la factura real
+ * y contando cuántos de 12 datos verificables aparecían (fecha, total, base,
+ * las cuatro piezas, el número de factura...):
+ *
+ *   sigma 8  / 150   10/12
+ *   sigma 15 / 140   10/12
+ *   sigma 25 / 140   11/12
+ *   sigma 25 / 150   12/12  ← esta, y sus vecinas también puntúan alto,
+ *                             así que es una meseta y no un pico afortunado
+ *   sigma 25 / 170    6/12
+ *
+ * ── HONESTIDAD ───────────────────────────────────────────────────────────
+ * Está ajustada contra UNA sola factura. Es exactamente la trampa de C-060
+ * (ajustar contra una foto y cantar victoria), y aquí no hay más remedio
+ * porque solo hay una. Por eso se eligió un punto con vecinos buenos en vez
+ * del máximo aislado, y por eso esta tubería NO sustituye a la de tickets:
+ * se probó, y deja los dos tickets reales en 0 de 4 datos correctos.
+ */
+async function prepararDocumentoParaOcr(imagenPath: string): Promise<string> {
+    const salida = imagenPath.replace(/\.(jpe?g|png|webp)$/i, '') + '.doc.png';
+    const gris = sharp(imagenPath).grayscale();
+    const { data, info } = await gris.clone().raw().toBuffer({ resolveWithObject: true });
+    const fondo = await gris.clone().blur(25).raw().toBuffer();
+
+    // Cada píxel dividido por su fondo local. El 200 deja el papel cerca del
+    // blanco sin saturar la tinta.
+    const plano = Buffer.alloc(data.length);
+    for (let i = 0; i < data.length; i++) {
+        plano[i] = Math.min(255, Math.round((data[i] / Math.max(fondo[i], 1)) * 200));
+    }
+
+    const anchoObjetivo = Math.min(Math.round(info.width * 2), 5000);
+    await sharp(plano, { raw: { width: info.width, height: info.height, channels: 1 } })
+        .normalize()
+        .resize({ width: anchoObjetivo, kernel: 'lanczos3' })
+        .threshold(150)
+        .png()
+        .toFile(salida);
+
+    return salida;
+}
+
+/**
+ * Lee la imagen, y si sale mal lo vuelve a intentar de otra manera.
+ *
+ * El segundo intento (C-064) solo se paga cuando la primera lectura es mala
+ * de verdad (confianza < 45): un ticket normal sale a 60-75 y no pasa por
+ * aquí. Se queda la lectura con más confianza de las dos, que es lo que
+ * impide que este reintento estropee un caso que ya funcionaba: si la tubería
+ * de documento lo hace peor —y con un ticket térmico lo hace mucho peor— su
+ * resultado se descarta.
+ */
 export async function extraerTextoImagen(imagenPath: string): Promise<OCRResult> {
-    let rutaPreparada: string | null = null;
+    const temporales: string[] = [];
     try {
         // Si la preparación falla (imagen rara, sin memoria...), se sigue con
         // la original: peor lectura, pero lectura al fin y al cabo.
+        let rutaPreparada: string | null = null;
         try {
             rutaPreparada = await prepararImagenParaOcr(imagenPath);
+            temporales.push(rutaPreparada);
         } catch (err: any) {
             console.warn('[OCR] No se pudo preparar la imagen, se usa la original:', err?.message);
         }
 
-        const { data } = await Tesseract.recognize(rutaPreparada ?? imagenPath, 'spa', {
-            logger: (m) => {
-                if (m.status === 'recognizing text') {
-                    console.log(`OCR progreso: ${Math.round(m.progress * 100)}%`);
-                }
-            },
-        });
+        const primera = await reconocer(rutaPreparada ?? imagenPath);
+        let mejor: OCRResult = { ...primera, tuberia: 'ticket' };
 
-        const confianza = data.confidence;
-        return { texto: data.text, confianza, legible: confianza >= UMBRAL_CONFIANZA };
+        if (primera.confianza < UMBRAL_SEGUNDO_INTENTO) {
+            console.log(`[OCR] Confianza ${primera.confianza.toFixed(0)}: segundo intento como documento`);
+            try {
+                const rutaDoc = await prepararDocumentoParaOcr(imagenPath);
+                temporales.push(rutaDoc);
+                const segunda = await reconocer(rutaDoc);
+                if (segunda.confianza > primera.confianza) {
+                    console.log(`[OCR] Gana la tubería de documento (${segunda.confianza.toFixed(0)})`);
+                    mejor = { ...segunda, tuberia: 'documento' };
+                }
+            } catch (err: any) {
+                // Que falle el reintento no puede estropear la lectura que ya
+                // teníamos, por mala que fuera.
+                console.warn('[OCR] Falló el segundo intento:', err?.message);
+            }
+        }
+
+        return { ...mejor, legible: mejor.confianza >= UMBRAL_CONFIANZA };
     } catch (error: any) {
         console.error('[OCR] Error en Tesseract (no implica imagen ilegible):', error.message);
         return { texto: '', confianza: 0, legible: false, error_ocr: 'tesseract_error' };
     } finally {
-        // El PNG preparado es de usar y tirar: pesa más que el original y ya
-        // no sirve de nada. Si no se puede borrar, tampoco es grave.
-        if (rutaPreparada) {
-            try { fs.unlinkSync(rutaPreparada); } catch { /* da igual */ }
+        // Los PNG preparados son de usar y tirar: pesan más que el original y
+        // ya no sirven de nada. Si no se pueden borrar, tampoco es grave.
+        for (const ruta of temporales) {
+            try { fs.unlinkSync(ruta); } catch { /* da igual */ }
         }
     }
+}
+
+/** Una pasada de Tesseract. Sin decidir nada: solo texto y confianza. */
+async function reconocer(ruta: string): Promise<OCRResult> {
+    const { data } = await Tesseract.recognize(ruta, 'spa', {
+        logger: (m) => {
+            if (m.status === 'recognizing text') {
+                console.log(`OCR progreso: ${Math.round(m.progress * 100)}%`);
+            }
+        },
+    });
+    return { texto: data.text, confianza: data.confidence, legible: data.confidence >= UMBRAL_CONFIANZA };
 }
 
 // ─────────────────────────────────────────────────────────
@@ -210,7 +317,7 @@ export async function extraerTextoImagen(imagenPath: string): Promise<OCRResult>
  * Solo toca lo que está ENTRE DÍGITOS, para no estropear texto normal ni las
  * horas (`21:50` se queda como está).
  */
-function normalizarNumerosOcr(t: string): string {
+export function normalizarNumerosOcr(t: string): string {
     return t
         // separador decimal leído como símbolo raro: 144605» 85 -> 144605.85
         // La lista ha ido creciendo con cada ticket real: `»«>·—–` salieron el

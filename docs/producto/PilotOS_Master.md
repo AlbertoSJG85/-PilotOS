@@ -204,13 +204,28 @@ merece la pena saber por dónde puede volver a romperse (C-061, C-062, C-063):
 3. El OCR corría dentro de la petición y GlorIA cortaba a los 20 s (C-063).
    Por eso el análisis de ese camino va **después** de responder.
 
+Y llegar no era leer. Esa misma factura se archivó bien y se leyó fatal
+(C-064): propuso 54,15 € cuando el papel ponía 397,31 €, se inventó una
+matrícula y no detectó ni la fecha ni las piezas. Lo que se aprendió, porque
+vale para todo documento nuevo que entre:
+
+- **Un formato nuevo de documento es un problema nuevo, no un parámetro más.**
+  El preprocesado de imagen de los tickets térmicos no sirve para un A4, y al
+  revés lo destroza. Hay dos tuberías: se lee con la de tickets y, **solo si
+  la confianza baja de 45**, se reintenta como documento y se queda la mejor.
+- **El OCR no propone un número que no sepa nombrar.** El importe de una
+  factura solo se propone si viene etiquetado como total. Coger "una cifra que
+  había por ahí" acaba en un gasto mal registrado, y en una factura de taller
+  hay una cifra en euros por línea.
+- **Lo que el documento no puede afirmar por su cuenta, no se propone.** La
+  matrícula leída solo se enseña si coincide con la del vehículo.
+
 Pendiente: el almacenamiento sigue siendo el disco del servidor, **no Drive**
 (la conexión OAuth quedó a medias por un `redirect_uri_mismatch`).
-Los patrones de lectura de ITV y facturas
-están escritos contra el formato habitual, **no validados aún contra
-documentos reales pasados por OCR** — la primera ITV y la primera factura
-reales van a exigir ajustes, y ahí es cuando se fijan con su texto literal
-como fixture.
+La lectura de **facturas de taller** ya está validada contra una factura real
+(fixture `factura-taller-2026-08-12.jpg`); la de **ITV y pólizas** sigue
+escrita contra el formato habitual y **sin validar contra un documento real**
+— la primera tarjeta ITV que entre va a exigir el mismo ejercicio.
 
 
 #### 5.4.2 Drive del cliente (2026-08-12)

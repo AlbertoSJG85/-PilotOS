@@ -25,7 +25,7 @@
  */
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
-import { analizarImagen, extraerTextoImagen, validarTicketGasoil } from './ocr.service';
+import { analizarImagen, extraerTextoImagen, normalizarNumerosOcr } from './ocr.service';
 
 export type TipoDocumentoVehiculo = 'CERTIFICADO_ITV' | 'FACTURA_TALLER' | 'POLIZA_SEGURO' | 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR';
 
@@ -74,6 +74,94 @@ export function clasificarDocumento(texto: string): TipoDocumentoVehiculo {
 // Piezas sueltas
 // ─────────────────────────────────────────────────────────
 
+/**
+ * Un importe en euros tal y como sale del OCR → número.
+ * "1.397,31" → 1397.31, "397.31" → 397.31, "371 31" → 371.31.
+ */
+function aEuros(bruto: string): number | undefined {
+    // El separador de miles es siempre el que NO manda: si hay coma, el punto
+    // es de miles; si solo hay puntos y el último grupo tiene 2 cifras, ese
+    // punto es el decimal.
+    let limpio = bruto.replace(/\s/g, '');
+    if (limpio.includes(',')) {
+        limpio = limpio.replace(/\./g, '').replace(',', '.');
+    } else {
+        const partes = limpio.split('.');
+        limpio = partes.length > 1 && partes[partes.length - 1].length === 2
+            ? partes.slice(0, -1).join('') + '.' + partes[partes.length - 1]
+            : partes.join('');
+    }
+    const n = Number(limpio);
+    return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : undefined;
+}
+
+/**
+ * El TOTAL de una factura (2026-08-12, C-064).
+ *
+ * POR QUÉ NO VALE EL LECTOR DE TICKETS DE GASOLINERA, que es lo que había
+ * aquí. Un ticket de gasolinera tiene un importe y ya. Una factura de taller
+ * tiene uno por línea más la base y el impuesto — la de Alberto tenía siete
+ * cifras en euros. El lector de gasolinera terminaba en un patrón de último
+ * recurso, "la primera cifra seguida de €", y en esa factura la primera cifra
+ * seguida de € era la del KIT DE DISTRIBUCIÓN: 154,15 €, que además el OCR
+ * leyó como 54,15 €. El total real eran 397,31 €.
+ *
+ * Ese número no es cosmético: si el dueño le da a "aceptar", se registra como
+ * gasto. Un gasto de 54,15 € en vez de 397,31 € descuadra la contabilidad del
+ * mes y nadie se entera.
+ *
+ * LA REGLA, y es deliberada: solo se devuelve un importe si viene ETIQUETADO
+ * como total. Si no hay etiqueta, se devuelve `undefined` y el campo se le
+ * pide a la persona. Adivinar mal un importe es peor que no proponerlo —
+ * misma lección que C-056 con los borrados del taxímetro.
+ */
+export function extraerImporteFactura(texto: string): number | undefined {
+    const t = normalizarNumerosOcr(texto);
+    const CIFRA = String.raw`(\d[\d.,\s]{0,12}[.,]\d{2})`;
+
+    // El orden importa. Lo específico antes que lo genérico, y "base
+    // imponible" e "impuesto" NUNCA cuentan como total.
+    const patrones = [
+        new RegExp(String.raw`total\s*(?:factura|de\s*la\s*factura|documento)\s*[:.]?\s*€?\s*${CIFRA}`, 'i'),
+        new RegExp(String.raw`(?:total|importe)\s*a\s*pagar\s*[:.]?\s*€?\s*${CIFRA}`, 'i'),
+        new RegExp(String.raw`importe\s*total\s*[:.]?\s*€?\s*${CIFRA}`, 'i'),
+        // "Total : 397,31€" en su propia línea, que es como lo imprime
+        // cualquier factura española. Se permite algo de ruido de OCR entre
+        // la palabra y la cifra, pero no otra palabra con dígitos.
+        new RegExp(String.raw`(?:^|\n)[^\n\d]{0,15}\btotal\b[^\n\d]{0,10}${CIFRA}`, 'i'),
+    ];
+
+    for (const patron of patrones) {
+        const m = t.match(patron);
+        const valor = m?.[1] ? aEuros(m[1]) : undefined;
+        if (valor !== undefined) return valor;
+    }
+    return undefined;
+}
+
+/** La base imponible, solo para comprobar que el total leído tiene sentido. */
+function extraerBaseImponible(texto: string): number | undefined {
+    const m = normalizarNumerosOcr(texto)
+        .match(/base\s*imponible\s*[:.]?\s*€?\s*(\d[\d.,\s]{0,12}[.,]\d{2})/i);
+    return m?.[1] ? aEuros(m[1]) : undefined;
+}
+
+/**
+ * La fecha de emisión de la factura. Se busca primero por etiqueta, porque en
+ * una factura hay varias fechas (emisión, vencimiento, la del pedido) y la
+ * primera que aparezca no tiene por qué ser la buena.
+ */
+export function extraerFechaFactura(texto: string): string | undefined {
+    const etiquetada = texto.match(
+        /(?:fecha\s*(?:de\s*)?(?:factura|emisi[oó]n|expedici[oó]n)|fecha)\s*[:.]?\s*(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/i,
+    );
+    if (etiquetada) {
+        const f = extraerFechas(etiquetada[1])[0];
+        if (f) return f;
+    }
+    return extraerFechas(texto)[0];
+}
+
 /** Matrícula española moderna (1234ABC) o antigua (M-1234-AB), con o sin separadores. */
 export function extraerMatricula(texto: string): string | undefined {
     const moderna = texto.match(/\b(\d{4})\s*[-\s]?\s*([BCDFGHJKLMNPRSTVWXYZ]{3})\b/i);
@@ -81,6 +169,38 @@ export function extraerMatricula(texto: string): string | undefined {
     const antigua = texto.match(/\b([A-Z]{1,2})\s*[-\s]\s*(\d{4})\s*[-\s]\s*([A-Z]{1,2})\b/);
     if (antigua) return `${antigua[1]}-${antigua[2]}-${antigua[3]}`.toUpperCase();
     return undefined;
+}
+
+/** Quita separadores y mayúsculas para comparar dos matrículas. */
+function normalizarMatricula(m: string): string {
+    return m.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * La matrícula del documento, pero SOLO si es la del vehículo al que se está
+ * subiendo (2026-08-12, C-064).
+ *
+ * En la factura real de Alberto, el OCR leyó "1100 mts" en la cabecera y el
+ * patrón de matrícula moderna (4 cifras + 3 consonantes) lo dio por bueno:
+ * propuso la matrícula `1100MTS`, que no existe. Con el ruido que trae una
+ * foto de un documento, este patrón va a encontrar matrículas falsas siempre.
+ *
+ * Y no perdemos nada: el vehículo lo elige la persona al subir el documento,
+ * así que la matrícula leída no aporta un dato nuevo — solo sirve para
+ * CONFIRMAR que el papel es de ese coche. Si coincide, se enseña; si no
+ * coincide o no se lee, no se propone nada. Nunca al revés.
+ */
+export function matriculaLeidaSiEsDeEsteVehiculo(
+    texto: string,
+    matriculaVehiculo?: string,
+): string | undefined {
+    const leida = extraerMatricula(texto);
+    if (!leida || !matriculaVehiculo) return undefined;
+    if (normalizarMatricula(leida) !== normalizarMatricula(matriculaVehiculo)) {
+        console.log(`[DOC-VEHICULO] Matrícula leída (${leida}) distinta de la del vehículo (${matriculaVehiculo}); se descarta`);
+        return undefined;
+    }
+    return leida;
 }
 
 /** Todas las fechas del texto, en orden de aparición, normalizadas a DD/MM/YYYY. */
@@ -145,7 +265,14 @@ export function extraerKm(texto: string): number | undefined {
         ?? texto.match(/([\d.]{4,12})\s*(?:kms?|kil[oó]metros?)\b/i);
     if (!m) return undefined;
     const n = Number(m[1].replace(/[.\s]/g, '').replace(',', '.'));
-    return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined;
+    if (!Number.isFinite(n)) return undefined;
+
+    // Cordura (C-064). La factura real de Alberto traía un campo "Kilómetro
+    // 245,25" que no eran kilómetros de nada —es una columna del programa del
+    // taller—, y de ahí salía "245 km" propuestos. Un taxi que va al taller no
+    // tiene 245 km ni 9 millones: fuera de esa horquilla, no se propone nada.
+    const km = Math.round(n);
+    return km >= 1000 && km <= 2_000_000 ? km : undefined;
 }
 
 /**
@@ -162,7 +289,13 @@ const MAPA_MANTENIMIENTOS: Array<{ patron: RegExp; catalogo: string }> = [
     { patron: /aceite\s+(?:motor|y\s+filtro)|cambio\s+de\s+aceite|lubricante/i, catalogo: 'Cambio de aceite y filtro' },
     { patron: /filtro\s+de\s+aire/i, catalogo: 'Filtro de aire' },
     { patron: /filtro\s+(?:de\s+)?habit[aá]culo|filtro\s+(?:de\s+)?polen/i, catalogo: 'Filtro de habitaculo / polen' },
-    { patron: /correa\s+de\s+distribuci[oó]n|kit\s+de\s+distribuci[oó]n/i, catalogo: 'Correa de distribucion' },
+    // Basta con la palabra suelta, y es deliberado (C-064). La factura real
+    // de Alberto ponía "[9800VKMC06136.] KIT DISTRIBUCION Y BOMBA DE AGUA", y
+    // el OCR partió la línea justo entre "KIT" y "DISTRIBUCION": ningún
+    // patrón que exigiera las dos palabras juntas iba a casar nunca. En un
+    // papel de un taller, "distribución" es la correa; y aunque se colara un
+    // falso positivo, esto solo PROPONE un mantenimiento que alguien confirma.
+    { patron: /distribuci[oó]n/i, catalogo: 'Correa de distribucion' },
     { patron: /refrigerante|anticongelante/i, catalogo: 'Liquido refrigerante' },
     { patron: /amortiguador/i, catalogo: 'Amortiguadores' },
     { patron: /bater[ií]a/i, catalogo: 'Bateria 12V' },
@@ -191,10 +324,11 @@ export function detectarMantenimientos(texto: string): string[] {
 export function analizarDocumentoVehiculo(
     texto: string,
     tipoForzado?: TipoDocumentoVehiculo,
+    matriculaVehiculo?: string,
 ): PropuestaDocumento {
     const tipo = tipoForzado ?? clasificarDocumento(texto);
     const fechas = extraerFechas(texto);
-    const matricula = extraerMatricula(texto);
+    const matricula = matriculaLeidaSiEsDeEsteVehiculo(texto, matriculaVehiculo);
     const km_documento = extraerKm(texto);
     const mantenimientos_detectados = detectarMantenimientos(texto);
 
@@ -221,12 +355,18 @@ export function analizarDocumentoVehiculo(
         return propuesta;
     }
 
-    // Facturas (taller y póliza): interesa la fecha y el importe a pagar.
-    // El importe se saca con el mismo lector que ya acierta en las facturas de
-    // gasolinera, que aprendió por las malas a NO coger el descuento (C-055).
-    const gasoil = validarTicketGasoil(texto);
-    propuesta.fecha = gasoil.fecha ?? fechas[0];
-    propuesta.importe = gasoil.importe;
+    // Facturas (taller y póliza): interesa la fecha y el total a pagar.
+    // El importe SOLO se propone si viene etiquetado como total; ver
+    // extraerImporteFactura y por qué ya no se usa el lector de gasolinera.
+    propuesta.fecha = extraerFechaFactura(texto) ?? fechas[0];
+
+    const total = extraerImporteFactura(texto);
+    const base = extraerBaseImponible(texto);
+    // Un total por debajo de la base imponible es imposible: si eso pasa, lo
+    // que se ha leído como "total" es otra cosa y no se propone.
+    propuesta.importe = total !== undefined && base !== undefined && total < base
+        ? undefined
+        : total;
 
     if (!propuesta.fecha) propuesta.faltantes.push('fecha');
     if (propuesta.importe === undefined) propuesta.faltantes.push('importe');
@@ -265,6 +405,15 @@ export function analizarDocumentoVehiculo(
  * asalariado) lo puede confirmar. Que el documento haya llegado por WhatsApp
  * o por la app no puede cambiar si se procesa.
  */
+/** La matrícula del vehículo, para poder contrastarla con la del documento. */
+async function matriculaDe(vehiculoId: string): Promise<string | undefined> {
+    const v = await prisma.vehiculo.findUnique({
+        where: { id: vehiculoId },
+        select: { matricula: true },
+    });
+    return v?.matricula ?? undefined;
+}
+
 export interface ResultadoRegistro {
     documento: { id: string; tipo: string; estado: string };
     propuesta: PropuestaDocumento;
@@ -283,7 +432,8 @@ export async function analizarYRegistrarDocumento(datos: {
         ? await extraerTextoImagen(datos.rutaLocal)
         : { texto: '', confianza: 0, legible: false };
 
-    const propuesta = analizarDocumentoVehiculo(ocr.texto, datos.tipoForzado);
+    const matriculaVehiculo = await matriculaDe(datos.vehiculoId);
+    const propuesta = analizarDocumentoVehiculo(ocr.texto, datos.tipoForzado, matriculaVehiculo);
 
     const documento = await prisma.documento.create({
         data: {
@@ -359,7 +509,11 @@ export async function analizarDocumentoRegistrado(
             ? await extraerTextoImagen(rutaLocal)
             : { texto: '', confianza: 0, legible: false };
 
-        const propuesta = analizarDocumentoVehiculo(ocr.texto, tipoForzado);
+        const doc = await prisma.documento.findUnique({
+            where: { id: documentoId },
+            select: { vehiculo: { select: { matricula: true } } },
+        });
+        const propuesta = analizarDocumentoVehiculo(ocr.texto, tipoForzado, doc?.vehiculo?.matricula);
 
         await prisma.documento.update({
             where: { id: documentoId },

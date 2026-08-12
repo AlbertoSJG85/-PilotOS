@@ -846,3 +846,38 @@ El camino de la app sigue siendo síncrono a propósito: ahí la persona está d
 
 - 242/242 tests, incluido uno nuevo que falla si alguien vuelve a meter trabajo lento dentro de esa petición (comprueba que se responde **antes** de que el análisis termine).
 - **Prevención, y es la lección cara del día:** *un endpoint verificado no es un circuito verificado.* Cuando algo se arregla para que lo consuma otro servicio, la prueba tiene que salir **desde ese servicio**, con su cliente, sus timeouts y sus tokens. Una llamada directa desde fuera no reproduce las condiciones reales y da una falsa sensación de cierre. Y un arreglo que hace más trabajo dentro de una petición es, por definición, un candidato a romper a quien la llama por tiempo.
+
+---
+
+### C-064 · La factura llegó entera, y aun así el sistema no supo leerla
+- Fecha: 2026-08-12
+- Área: `backend/src/services/ocr.service.ts`, `backend/src/services/ocrDocumentoVehiculo.service.ts`
+
+**El síntoma.** Cerrado C-063, el circuito de WhatsApp por fin archivaba la factura. Alberto abrió la pantalla de documentos y se encontró un aviso: *"No he podido leer fecha, mantenimientos del documento. Escríbelo tú."* El sistema funcionaba de punta a punta y el resultado seguía siendo inservible.
+
+**Lo que ponía el papel** (factura `INV/2026/0193`, del 13/05/2026): kit de distribución y bomba de agua, correa del alternador, tubo de embrague, agua refrigerante y mano de obra. Base 371,31 € + 26,00 € de impuesto = **397,31 € de total**.
+
+**Lo que propuso el sistema:** importe **54,15 €**, matrícula **1100MTS**, sin fecha, sin mantenimientos. Confianza del OCR: 31 sobre 100 (los tickets del taxímetro salen a 64-73).
+
+Cuatro fallos distintos, y ninguno era el mismo:
+
+**1. La imagen: la tubería estaba afinada para tickets, no para documentos.**
+La factura no era un papel: era una **foto de la pantalla de un ordenador**, con el muaré que eso produce. El preprocesado de C-060 (gris + normalizar + x2,5) está ajustado contra tira térmica y ahí no rascaba nada. La solución fue una segunda tubería —dividir la imagen por su propio fondo desenfocado y binarizar— que sube esa foto de 31 a 59 de confianza y deja la factura legible entera.
+
+Lo importante es **cómo se elige** entre las dos, porque la de documento aplicada a un ticket térmico lo destroza (se probó: 0 de 4 datos correctos). No se adivina por el aspecto de la imagen: se lee, y **solo si la confianza baja de 45 se reintenta** con la otra tubería y se queda la mejor de las dos. Un ticket normal no paga ese coste nunca, y un caso que ya funcionaba no puede empeorar.
+
+**2. El importe: se leía con el lector de tickets de gasolinera.**
+Un ticket de gasolinera tiene un importe. Una factura de taller tiene uno por línea, más base y más impuesto — la de Alberto traía siete cifras en euros. Ese lector termina en un patrón de último recurso ("la primera cifra con un € detrás") y ahí cogió la primera línea, 154,15 €, que además el OCR leyó como 54,15 €.
+
+No es un detalle cosmético: si el dueño le da a *aceptar*, eso se registra como gasto. **Se habría anotado un gasto de 54,15 € en vez de 397,31 €, y el descuadre del mes no lo habría explicado nadie.** Ahora hay un lector propio de facturas que **solo devuelve un importe si viene etiquetado como total**; si no hay etiqueta, no propone nada y se lo pide a la persona. Además, un "total" menor que la base imponible se descarta por imposible.
+
+**3. La matrícula: se la inventó.** De `1100 mts` en la cabecera salió la matrícula `1100MTS`, porque encaja en el patrón de matrícula moderna (4 cifras + 3 consonantes). Con el ruido de una foto de documento, ese patrón va a encontrar matrículas falsas siempre. Ahora la matrícula leída **solo se propone si coincide con la del vehículo** al que se sube el documento — que además es lo único para lo que sirve, porque el vehículo lo elige la persona.
+
+**4. Los kilómetros y los mantenimientos.** La factura traía una columna "Kilómetro 245,25" del programa del taller, de la que salían "245 km" propuestos; ahora se descarta cualquier lectura fuera de 1.000–2.000.000 km. Y ningún mantenimiento se detectaba porque el patrón exigía "kit **de** distribución" y el papel ponía "KIT DISTRIBUCION Y BOMBA DE AGUA" — y encima el OCR partió la línea entre "KIT" y "DISTRIBUCION", así que ningún patrón de dos palabras iba a casar jamás.
+
+**Verificado con la foto real.** La factura está en `tests/fixtures/factura-taller-2026-08-12.jpg` y `smoke.ocrFacturaReal` la pasa por la tubería completa: total 397,31 €, fecha 13/05/2026, tres mantenimientos detectados, **cero campos faltantes**. Antes de esto, ese mismo fichero daba 54,15 € y dos faltantes.
+
+- 256/256 tests. Los dos tests de los tickets reales del taxímetro siguen verdes, que es lo que demuestra que la tubería nueva no se ha llevado por delante la vieja.
+- **Prevención.** Dos cosas. La primera: *el OCR no puede proponer un número que no sepa nombrar.* Coger "una cifra que había por ahí" es peor que dejar el campo vacío — es la misma lección de C-056 (los borrados del taxímetro) y de C-055 (el descuento de la gasolinera), y ya van tres. Si el dato no viene etiquetado, se pregunta.
+  La segunda: *un formato nuevo de documento es un problema nuevo, no un parámetro más.* Facturas A4 y tickets térmicos no comparten preprocesado y no hay ajuste que sirva para los dos; intentar unificarlos rompe el que ya funcionaba. Cuando entre el primer PDF, o la primera tarjeta ITV real, habrá que volver aquí y repetir el ejercicio con su fixture.
+- **Deuda declarada:** la tubería de documento está ajustada contra UNA sola factura. Se eligió a propósito un punto con vecinos buenos en el barrido (sigma 25 / umbral 150) en vez del máximo aislado, pero sigue siendo una foto. La segunda factura real que entre va a decir la verdad.

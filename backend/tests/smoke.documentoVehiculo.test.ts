@@ -28,7 +28,7 @@ vi.mock('../src/services/aplicarDocumento.service', () => ({
 const { default: rutas } = await import('../src/routes/documentoVehiculo.routes');
 const {
     clasificarDocumento, extraerMatricula, extraerValidaHasta,
-    detectarMantenimientos, analizarDocumentoVehiculo,
+    detectarMantenimientos, analizarDocumentoVehiculo, extraerImporteFactura,
 } = await import('../src/services/ocrDocumentoVehiculo.service');
 
 function manejador(metodo: string, ruta: string) {
@@ -118,6 +118,100 @@ describe('clasificar y leer un documento del vehículo', () => {
         expect(r.importe).toBeUndefined();
         expect(r.faltantes).toContain('importe');
         expect(r.faltantes).toContain('fecha');
+    });
+});
+
+// ─────────────────────────────────────────────────────────
+// El importe de una factura (C-064)
+// ─────────────────────────────────────────────────────────
+
+/**
+ * Estos tests salen todos de la MISMA factura real: la primera que entró en
+ * producción, el 2026-08-12. Propuso 54,15 € cuando el papel ponía 397,31 €,
+ * porque el importe se sacaba con el lector de tickets de gasolinera y ese
+ * termina cogiendo "la primera cifra con un € detrás" — que en una factura
+ * con líneas de detalle es el primer artículo, no el total.
+ */
+describe('el importe de una factura de taller', () => {
+    const FACTURA_CON_LINEAS = [
+        'FACTURA INV/2026/0193',
+        'Fecha factura 13/05/2026',
+        'KIT DISTRIBUCION Y BOMBA DE AGUA   1,000   154,15   igic 7%   154,15€',
+        'CORREA ALTERNADOR                  1,000    21,83   igic 7%    21,83€',
+        'TUBO EMBRAGUE(ORIGINAL)            1,000    72,83   igic 7%    72,83€',
+        'MANO DE OBRA TAXI                  4,500    25,00   igic 7%   112,50€',
+        'Base imponible : 371,31€',
+        'Impuesto : 26,00€',
+        'Total : 397,31€',
+    ].join('\n');
+
+    it('CLAVE: coge el TOTAL, no la primera línea de la factura', () => {
+        expect(extraerImporteFactura(FACTURA_CON_LINEAS)).toBeCloseTo(397.31, 2);
+    });
+
+    it('no confunde el total con la base imponible ni con el impuesto', () => {
+        const r = analizarDocumentoVehiculo(FACTURA_CON_LINEAS, 'FACTURA_TALLER');
+        expect(r.importe).not.toBeCloseTo(371.31, 2);
+        expect(r.importe).not.toBeCloseTo(26.0, 2);
+    });
+
+    it('aguanta el ruido del OCR en la cifra: "397, 31€" y "371 31€"', () => {
+        expect(extraerImporteFactura('Base imponible : 371 31€\nTotal : 397, 31€')).toBeCloseTo(397.31, 2);
+    });
+
+    it('entiende el separador de miles', () => {
+        expect(extraerImporteFactura('TOTAL A PAGAR: 1.397,31 €')).toBeCloseTo(1397.31, 2);
+    });
+
+    it('CLAVE: sin una etiqueta de total, no propone importe (antes se inventaba uno)', () => {
+        // Cifras en euros hay, pero ninguna dice ser el total. Antes esto
+        // devolvía 154,15 €; ahora se le pregunta a la persona.
+        const sinTotal = 'FACTURA Taller\nKIT DISTRIBUCION 154,15€\nCORREA 21,83€';
+        expect(extraerImporteFactura(sinTotal)).toBeUndefined();
+        expect(analizarDocumentoVehiculo(sinTotal, 'FACTURA_TALLER').faltantes).toContain('importe');
+    });
+
+    it('un "total" menor que la base imponible es imposible: no se propone', () => {
+        const incoherente = 'Base imponible : 371,31€\nTotal : 54,15€';
+        expect(analizarDocumentoVehiculo(incoherente, 'FACTURA_TALLER').importe).toBeUndefined();
+    });
+
+    it('coge la fecha por su etiqueta, no la primera del papel', () => {
+        const texto = 'Vencimiento 30/06/2026\nFecha factura 13/05/2026';
+        expect(analizarDocumentoVehiculo(texto, 'FACTURA_TALLER').fecha).toBe('13/05/2026');
+    });
+});
+
+// ─────────────────────────────────────────────────────────
+// Matrícula y kilómetros: no inventar (C-064)
+// ─────────────────────────────────────────────────────────
+
+describe('lo que el documento NO puede afirmar por su cuenta', () => {
+    // "1100 mts" salió de la cabecera de la factura real y el patrón de
+    // matrícula moderna (4 cifras + 3 consonantes) lo dio por bueno.
+    const RUIDO = 'FACTURA taller\n1100 mts MEET N NN al EN\nTotal : 397,31€';
+
+    it('CLAVE: no propone una matrícula que no sea la del vehículo', () => {
+        expect(analizarDocumentoVehiculo(RUIDO, 'FACTURA_TALLER', '8053KKX').matricula).toBeUndefined();
+    });
+
+    it('si no se sabe de qué vehículo es, tampoco propone matrícula', () => {
+        expect(analizarDocumentoVehiculo(RUIDO, 'FACTURA_TALLER').matricula).toBeUndefined();
+    });
+
+    it('si coincide con la del vehículo, sí la enseña (sirve de confirmación)', () => {
+        const texto = 'FACTURA taller\nVehiculo: 8053 KKX\nTotal : 397,31€';
+        expect(analizarDocumentoVehiculo(texto, 'FACTURA_TALLER', '8053-KKX').matricula).toBe('8053KKX');
+    });
+
+    it('descarta kilómetros imposibles (el "Kilómetro 245,25" de la factura real)', () => {
+        const texto = 'FACTURA taller\nKilómetro 245,25\nTotal : 397,31€';
+        expect(analizarDocumentoVehiculo(texto, 'FACTURA_TALLER').km_documento).toBeUndefined();
+    });
+
+    it('un kilometraje creíble sí se propone', () => {
+        const texto = 'FACTURA taller\nKm: 245.250\nTotal : 397,31€';
+        expect(analizarDocumentoVehiculo(texto, 'FACTURA_TALLER').km_documento).toBe(245250);
     });
 });
 
