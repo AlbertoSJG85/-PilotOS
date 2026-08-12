@@ -816,3 +816,33 @@ Se descartó, en este orden: ClinicOS (otro número), RentOS (no reenvía nada),
 - *Un workflow de n8n versionado en el repo no es un workflow desplegado.* El fichero JSON en git y lo que corre en n8n son dos cosas distintas y pueden divergir semanas. Cuando se arregla un workflow, el trabajo no está hecho hasta que se comprueba el `updatedAt` del que está activo.
 - *Antes de descartar un componente, verificar contra qué instancia se está preguntando.* "Cero ejecuciones" solo significa algo si es la base de datos correcta.
 - *No desplegar un arreglo antes de tener la causa.* La red de seguridad del `inbound` se escribió sobre una hipótesis (payload crudo) que los datos —`type='image'` en `gloria.events`— habrían refutado en dos minutos si se hubieran mirado primero.
+
+### C-063 · El arreglo de la mañana rompió el mismo circuito que arreglaba
+- Fecha: 2026-08-12
+- Área: `backend/src/routes/internal.routes.ts`, `backend/src/services/ocrDocumentoVehiculo.service.ts`
+
+**El síntoma.** Después de C-062 —que hizo que n8n por fin mandara el `mediaId` de la foto— Alberto envió otra factura real y **siguió sin archivarse**. Ninguna traza de error en ningún sitio: ni en GlorIA, ni en PilotOS, ni en n8n. Los tres servicios decían que todo iba bien.
+
+**Lo que zanjó el caso.** Ejecutar el camino real (`descargarMedia` + `subirDocumentoVehiculo`) desde dentro del contenedor de GlorIA, con el `mediaId` de la foto de verdad y enseñando el error que el código se traga a propósito:
+
+```
+descargarMedia:        ok: true | bytes: 330647
+subirDocumentoVehiculo: { ok: false, motivo: "error_red", error: "timeout" }
+```
+
+**La causa, y es propia.** C-061, esa misma mañana, metió el OCR completo dentro de `POST /internal/documentos-vehiculo` para que una factura de WhatsApp se procesara igual que una de la app. El fondo era correcto. El efecto, no: Tesseract sobre una foto de móvil de 330 KB tarda unos 20 segundos, y el cliente de PilotOS en GlorIA corta exactamente a los 20 (`TIMEOUT_MS = 20000`). La foto se subía, el documento se creaba, el OCR se completaba — y GlorIA recibía un timeout que su propio diseño ("nunca lanza") convertía en silencio.
+
+La prueba de que el trabajo sí se hacía quedó en la base de datos: el documento `d1828313`, creado a las 19:27:35 por la primera llamada de diagnóstico —la que dio timeout— estaba ahí, clasificado como `FACTURA_TALLER` y en `PENDIENTE_CONFIRMACION`. **El sistema hacía su trabajo entero; el que llamaba se rendía antes de que terminara.**
+
+**Por qué no lo detecté al hacer C-061.** Lo verifiqué con una llamada directa al endpoint —`HTTP 201`, documento correcto, aparece en la pantalla del dueño— y lo di por bueno. Pero esa llamada la hice yo, sin timeout. El cliente real tiene uno. **Verifiqué el endpoint, no el circuito.**
+
+**La corrección.** El trabajo se parte en dos para el camino de entrada externa:
+- `registrarDocumentoPendiente` — crea la fila al momento (`estado: 'ANALIZANDO'`) y permite contestar enseguida.
+- `analizarDocumentoRegistrado` — hace el OCR después, sin `await`, y deja el documento en `PENDIENTE_CONFIRMACION`. Nunca lanza: si el OCR falla, el documento queda **visible con el motivo** en vez de perderse, porque que el dueño lo rellene a mano es mejor que perder la factura.
+
+El camino de la app sigue siendo síncrono a propósito: ahí la persona está delante esperando a ver la propuesta.
+
+**Verificado con la foto real**, no solo con tests: `ok: true` → documento `e9ff8bf5` → `[DOC-VEHICULO] Analizado ... FACTURA_TALLER` → `PENDIENTE_CONFIRMACION`.
+
+- 242/242 tests, incluido uno nuevo que falla si alguien vuelve a meter trabajo lento dentro de esa petición (comprueba que se responde **antes** de que el análisis termine).
+- **Prevención, y es la lección cara del día:** *un endpoint verificado no es un circuito verificado.* Cuando algo se arregla para que lo consuma otro servicio, la prueba tiene que salir **desde ese servicio**, con su cliente, sus timeouts y sus tokens. Una llamada directa desde fuera no reproduce las condiciones reales y da una falsa sensación de cierre. Y un arreglo que hace más trabajo dentro de una petición es, por definición, un candidato a romper a quien la llama por tiempo.

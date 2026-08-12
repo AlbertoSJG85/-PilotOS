@@ -188,11 +188,25 @@ no es quién sube el documento, sino si esa persona **contradice a la imagen**:
 frecuencia y por eso nunca vencen por calendario. Se ponen al día cuando llega
 la factura que los cambia, que es la única señal real que existe.
 
-**Estado a 2026-08-12:** implementado y verificado end-to-end contra una
-factura de taller combinada (neumáticos + frenos). Pendientes: el
-almacenamiento sigue siendo el disco del servidor, **no Drive**; y GlorIA
-todavía no tiene puerta de entrada para meter documentos desde WhatsApp (hoy
-solo salen avisos hacia GlorIA). Los patrones de lectura de ITV y facturas
+**Estado a 2026-08-12 (final del día):** implementado y verificado end-to-end
+contra una factura de taller combinada (neumáticos + frenos), **y también
+contra una factura real enviada por WhatsApp**: la foto entra por GlorIA, se
+archiva, se clasifica sola como `FACTURA_TALLER` y queda esperando
+confirmación del dueño.
+
+Ese camino de WhatsApp costó tres arreglos encadenados el mismo día —
+merece la pena saber por dónde puede volver a romperse (C-061, C-062, C-063):
+
+1. El endpoint interno guardaba la foto y no la analizaba nunca (C-061).
+2. El workflow de n8n en vivo no mandaba el `mediaId` de Meta, así que la
+   foto no se podía ni ir a buscar (C-062). **Ojo: n8n 2.8 guarda borrador y
+   versión publicada por separado; lo que se ejecuta es `activeVersionId`.**
+3. El OCR corría dentro de la petición y GlorIA cortaba a los 20 s (C-063).
+   Por eso el análisis de ese camino va **después** de responder.
+
+Pendiente: el almacenamiento sigue siendo el disco del servidor, **no Drive**
+(la conexión OAuth quedó a medias por un `redirect_uri_mismatch`).
+Los patrones de lectura de ITV y facturas
 están escritos contra el formato habitual, **no validados aún contra
 documentos reales pasados por OCR** — la primera ITV y la primera factura
 reales van a exigir ajustes, y ahí es cuando se fijan con su texto literal
