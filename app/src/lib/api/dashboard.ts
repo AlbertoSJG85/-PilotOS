@@ -11,6 +11,13 @@ export interface ResumenDashboard {
     parte_patron: number;
     gastos_variables: number;
     gastos_fijos_prorrateados: number;
+    /** SS de los asalariados devengada en el periodo (cuota completa por mes). */
+    seguridad_social?: number;
+    /** Donde se descuenta la SS: eleccion del patron para todos sus asalariados. */
+    ss_modo_descuento?: 'parte' | 'cierre';
+    /** Desglose por asalariado: genera, reparto, SS, percibe y lo que te queda. */
+    asalariados?: { conductor_id: string; nombre: string; partes: number; bruto: number; combustible: number; neto_generado: number; reparto: number; seguridad_social: number; percibe: number; para_el_patron: number }[];
+    seguridad_social_detalle?: { conductor_id: string; nombre: string; cuota_mensual: number; meses: number; total: number }[];
     beneficio_estimado: number;
     partes_count: number;
     rango: { desde: string | null; hasta: string | null };

@@ -68,6 +68,9 @@ model Cliente {
   // definida ni consumidor; ver services/mantenimientoAlertas.service.ts
   // (resolverPreferenciasAvisos) para el esquema y los valores por defecto.
   preferencias_avisos    Json?
+  /// Donde se descuenta la SS de los asalariados: 'parte' o 'cierre'.
+  /// Es una eleccion del patron para TODOS sus asalariados, no por persona.
+  ss_modo_descuento      String                   @default("cierre")
   created_at             DateTime                 @default(now())
   updated_at             DateTime                 @updatedAt
   cierresPeriodo         CierrePeriodo[]
@@ -88,6 +91,9 @@ model Conductor {
   cliente_id         String
   usuario_id         Int
   es_patron          Boolean                  @default(false)
+  /// Cuota mensual de Seguridad Social de este asalariado (F4, 2026-08-11).
+  /// null = no se le aplica descuento. Nunca se prorratea por dias.
+  cuota_ss_mensual   Decimal?                 @db.Decimal(10, 2)
   activo             Boolean                  @default(true)
   created_at         DateTime                 @default(now())
   updated_at         DateTime                 @updatedAt
@@ -217,6 +223,9 @@ model CalculoParte {
   modelo_reparto_aplicado       String
   porcentaje_conductor_aplicado Decimal                @db.Decimal(5, 2)
   porcentaje_patron_aplicado    Decimal                @db.Decimal(5, 2)
+  /// SS descontada en ESTE parte (modo 'parte': se carga entera en el ultimo
+  /// parte del mes del conductor). 0 en el resto.
+  descuento_ss                  Decimal                @default(0) @db.Decimal(10, 2)
   created_at                    DateTime               @default(now())
   configuracion                 ConfiguracionEconomica @relation(fields: [configuracion_id], references: [id])
   parteDiario                   ParteDiario            @relation(fields: [parte_diario_id], references: [id])

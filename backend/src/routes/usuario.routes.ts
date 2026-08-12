@@ -134,6 +134,28 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
 });
 
 // PATCH /api/usuarios/:id — Editar/Desactivar (Fase 3 RBAC: solo patron)
+/**
+ * PATCH /api/usuarios/ss-modo — donde se descuenta la Seguridad Social.
+ * Es una eleccion del patron para TODOS sus asalariados a la vez (F4), no
+ * una casilla por persona: por eso vive en el cliente y no en el conductor.
+ */
+router.patch('/ss-modo', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
+    try {
+        const { modo } = req.body;
+        if (modo !== 'parte' && modo !== 'cierre') {
+            res.status(400).json({ status: 'FAIL', error: 'modo_invalido', message: "Solo vale 'parte' o 'cierre'" });
+            return;
+        }
+        if (!req.usuario?.cliente_id) { res.status(403).json({ status: 'FAIL', error: 'no_client_context' }); return; }
+
+        await prisma.cliente.update({ where: { id: req.usuario.cliente_id }, data: { ss_modo_descuento: modo } });
+        res.json({ status: 'OK', modo });
+    } catch (err: any) {
+        console.error('[USUARIOS] Error al cambiar el modo de SS:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
 router.patch('/:id', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
         const existing = await prisma.conductor.findUnique({
@@ -143,7 +165,25 @@ router.patch('/:id', requireAuth, requirePatron, async (req: AuthRequest, res: R
         if (!existing || !isSameTenant(req, existing.cliente_id)) {
             res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
         }
-        const { nombre, telefono, activo } = req.body;
+        const { nombre, telefono, activo, cuota_ss_mensual } = req.body;
+
+        // Cuota de Seguridad Social del asalariado (F4, 2026-08-11). null o
+        // vacio = no se le aplica descuento. Se valida el numero aqui porque
+        // un texto colado se convertiria en NaN y acabaria restando "nada"
+        // sin que nadie se entere.
+        let cuotaSS: number | null | undefined;
+        if (cuota_ss_mensual !== undefined) {
+            if (cuota_ss_mensual === null || cuota_ss_mensual === '') {
+                cuotaSS = null;
+            } else {
+                const n = Number(cuota_ss_mensual);
+                if (!Number.isFinite(n) || n < 0) {
+                    res.status(400).json({ status: 'FAIL', error: 'cuota_ss_invalida', message: 'La cuota de Seguridad Social debe ser un numero positivo' });
+                    return;
+                }
+                cuotaSS = n;
+            }
+        }
         if (activo !== undefined && typeof activo !== 'boolean') {
             res.status(400).json({ status: 'FAIL', error: 'invalid_activo' }); return;
         }

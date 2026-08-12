@@ -13,6 +13,8 @@ import type { ParteDiario, Vehiculo, Anomalia, MantenimientoVehiculo } from '@/t
 import type { ResumenDashboard } from '@/lib/api/dashboard';
 import { PeriodFilter } from '@/components/features/period-filter';
 import { PartesRetenidos } from '@/components/features/partes-retenidos';
+import { SeguridadSocial } from '@/components/features/seguridad-social';
+import { AsalariadosResumen } from '@/components/features/asalariados-resumen';
 
 function AdminDashboardContent() {
   const searchParams = useSearchParams();
@@ -70,7 +72,14 @@ function AdminDashboardContent() {
   const totalBruto = resumen?.bruto ?? 0;
   const totalCombustible = resumen?.combustible ?? 0;
   const totalNeto = resumen?.neto ?? 0;
-  const gastosTotal = (resumen?.gastos_variables ?? 0) + (resumen?.gastos_fijos_prorrateados ?? 0);
+  const seguridadSocial = resumen?.seguridad_social ?? 0;
+  // La SS entra en "gastos del periodo": es un coste del negocio como el
+  // seguro o la gestoría, y si no apareciera aquí el beneficio no cuadraría
+  // con la resta que hace el backend.
+  const gastosTotal = (resumen?.gastos_variables ?? 0) + (resumen?.gastos_fijos_prorrateados ?? 0) + seguridadSocial;
+  const subtituloGastos = seguridadSocial > 0
+    ? `Incluye ${formatCurrency(seguridadSocial)} de Seg. Social`
+    : 'Variables + fijos del periodo';
   const beneficioEstimado = resumen?.beneficio_estimado ?? 0;
   const totalDatafono = resumen?.datafono ?? 0;
   const totalEfectivo = resumen?.efectivo_estimado ?? 0;
@@ -123,13 +132,16 @@ function AdminDashboardContent() {
         <PeriodFilter />
       </PageHeader>
 
-      {/* KPI grid */}
+      {/* KPI grid — el orden lo fijó Alberto (2026-08-12) y sigue el camino
+          del dinero: lo que entra, lo que se va en combustible, lo que queda
+          de operar, lo que cuesta el negocio y lo que sobra al final. Antes el
+          beneficio salía el segundo, antes incluso de haber enseñado un coste. */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-8">
-        <StatCard title="Facturación Bruta"   value={formatCurrency(totalBruto)}          subtitle={`${partes.length} partes`}       icon={DollarSign} />
-        <StatCard title="Beneficio Estimado"  value={formatCurrency(beneficioEstimado)}   subtitle="Ingresos - Gastos"                icon={TrendingUp}  variant={beneficioEstimado >= 0 ? 'success' : 'danger'} />
-        <StatCard title="Neto Operativo"      value={formatCurrency(totalNeto)}           subtitle="Rebote líquido"                   icon={Activity} />
-        <StatCard title="Combustible"         value={formatCurrency(totalCombustible)}    subtitle="Descontado en Turnos"             icon={Fuel}        variant="warning" />
-        <StatCard title="Gastos del periodo"  value={formatCurrency(gastosTotal)}         subtitle="Variables + fijos prorrateados"  icon={Wrench}      variant="danger" />
+        <StatCard title="Facturación Bruta"   value={formatCurrency(totalBruto)}          subtitle={`${partes.length} partes`}   icon={DollarSign} />
+        <StatCard title="Combustible"         value={formatCurrency(totalCombustible)}    subtitle="Descontado en turnos"        icon={Fuel}        variant="warning" />
+        <StatCard title="Neto Operativo"      value={formatCurrency(totalNeto)}           subtitle="Bruto − combustible"         icon={Activity} />
+        <StatCard title="Gastos del periodo"  value={formatCurrency(gastosTotal)}         subtitle={subtituloGastos}             icon={Wrench}      variant="danger" />
+        <StatCard title="Beneficio Estimado"  value={formatCurrency(beneficioEstimado)}   subtitle="Lo que queda para ti"        icon={TrendingUp}  variant={beneficioEstimado >= 0 ? 'success' : 'danger'} />
       </div>
 
       {/* Desglose datáfono vs efectivo estimado del periodo */}
@@ -194,6 +206,21 @@ function AdminDashboardContent() {
           <p className="text-xs text-zinc-500 mt-2">Sin partes en este periodo.</p>
         )}
       </Card>
+
+      {/* El lado del asalariado: qué genera, qué se lleva y qué te queda.
+          Debajo, dónde se le descuenta la Seguridad Social. */}
+      {((resumen?.asalariados?.length ?? 0) > 0 || (resumen?.seguridad_social ?? 0) > 0) && (
+        <div className="mb-8 grid gap-4 lg:grid-cols-2">
+          <AsalariadosResumen asalariados={resumen?.asalariados ?? []} />
+          {(resumen?.seguridad_social ?? 0) > 0 && (
+            <SeguridadSocial
+              total={resumen!.seguridad_social!}
+              detalle={resumen!.seguridad_social_detalle ?? []}
+              modo={resumen?.ss_modo_descuento ?? 'cierre'}
+            />
+          )}
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-6">

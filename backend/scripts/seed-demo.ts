@@ -44,6 +44,7 @@ async function limpiar() {
     await prisma.notificacionConductor.deleteMany({});
     await prisma.seguimientoMantenimiento.deleteMany({});
     await prisma.gasto.deleteMany({});
+    await prisma.gastoFijo.deleteMany({});
     await prisma.anomalia.deleteMany({});
     await prisma.calculoParte.deleteMany({});
     await prisma.documentoEnlace.deleteMany({});
@@ -98,7 +99,9 @@ async function main() {
         data: { cliente_id: cliente.id, usuario_id: dueno.id, es_patron: true },
     });
     const condAsalariado = await prisma.conductor.create({
-        data: { cliente_id: cliente.id, usuario_id: asalariado.id, es_patron: false },
+        // Con cuota de Seguridad Social: sin ella el panel del dueño no tendría
+        // nada que enseñar de la regla F4.
+        data: { cliente_id: cliente.id, usuario_id: asalariado.id, es_patron: false, cuota_ss_mensual: 314.50 },
     });
 
     // Reparto 50/50 para el asalariado; el dueño se lleva todo lo suyo.
@@ -123,6 +126,15 @@ async function main() {
     });
 
     const configAsalariado = await prisma.configuracionEconomica.findFirstOrThrow({ where: { conductor_id: condAsalariado.id } });
+
+    for (const g of [
+        { descripcion: 'Cuota de autónomo', importe: 303, periodicidad: 'MENSUAL', tipo: 'AUTONOMO' },
+        { descripcion: 'Radio taxi', importe: 100, periodicidad: 'MENSUAL', tipo: 'SERVICIO' },
+        { descripcion: 'Gestoría', importe: 50, periodicidad: 'MENSUAL', tipo: 'SERVICIO' },
+        { descripcion: 'Seguro del vehículo', importe: 780, periodicidad: 'ANUAL', tipo: 'SEGURO' },
+    ]) {
+        await prisma.gastoFijo.create({ data: { cliente_id: cliente.id, ...g } });
+    }
 
     // ── Un mes de trabajo de verdad ───────────────────────────────────────
     // Sin varios días no se puede juzgar el panel del asalariado: las medias

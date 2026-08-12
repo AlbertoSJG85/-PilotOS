@@ -16,6 +16,7 @@
  * - reparto segun configuracion del conductor / cliente
  */
 import { prisma } from '../lib/prisma';
+import { esUltimoParteDelMes } from './seguridadSocial.service';
 import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 
@@ -33,6 +34,8 @@ interface CalculoResult {
     base_reparto: Decimal;
     varios: Decimal;
     parte_conductor: Decimal;
+    /// SS descontada en este parte (0 salvo el ultimo del mes en modo parte).
+    descuento_ss: Decimal;
     parte_patron: Decimal;
     modelo_reparto_aplicado: string;
     porcentaje_conductor_aplicado: Decimal;
@@ -77,6 +80,9 @@ async function resolverConfiguracionVigente(client: ClientePrisma, cliente_id: s
 export async function calcularParte(input: CalculoInput, client: ClientePrisma = prisma): Promise<CalculoResult> {
     const parte = await client.parteDiario.findUniqueOrThrow({
         where: { id: input.parte_diario_id },
+        // El conductor y su cliente hacen falta para la Seguridad Social: la
+        // cuota es del conductor y el modo de descuento, del cliente (F4).
+        include: { conductor: { include: { cliente: { select: { ss_modo_descuento: true } } } } },
     });
 
     const config = await resolverConfiguracionVigente(client, input.cliente_id, parte.conductor_id);
@@ -127,7 +133,26 @@ export async function calcularParte(input: CalculoInput, client: ClientePrisma =
     // Varios repercute en la cuenta del patron (PilotOS_Master.md seccion 5.5)
     partePatron = partePatron.minus(varios);
 
+    // ── Seguridad Social en modo 'parte' (F4, regla cerrada el 2026-08-11) ──
+    // La cuota va ENTERA en el ultimo parte del mes de ese conductor, no
+    // repartida entre los dias: la regla dice cuota completa aunque solo
+    // trabaje un dia del mes, y repartirla obligaria a recalcular todos los
+    // partes cada vez que entra uno nuevo, peleando ademas con los redondeos.
+    // Lo que se le descuenta al conductor pasa a la cuenta del patron, que es
+    // quien la paga a la Seguridad Social.
+    let descuentoSS = new Decimal(0);
+    const modoSS = parte.conductor?.cliente?.ss_modo_descuento === 'parte' ? 'parte' : 'cierre';
+    const cuotaSS = parte.conductor?.cuota_ss_mensual;
+    if (modoSS === 'parte' && cuotaSS && !parte.conductor?.es_patron) {
+        if (await esUltimoParteDelMes(parte.conductor_id, parte.fecha_trabajada, client as any)) {
+            descuentoSS = new Decimal(cuotaSS.toString());
+            parteConductor = parteConductor.minus(descuentoSS);
+            partePatron = partePatron.plus(descuentoSS);
+        }
+    }
+
     return {
+        descuento_ss: descuentoSS,
         bruto_diario: bruto,
         combustible,
         neto_diario: netoOperativo,
@@ -164,6 +189,7 @@ export async function crearOActualizarCalculo(input: CalculoInput, client: Clien
             modelo_reparto_aplicado: resultado.modelo_reparto_aplicado,
             porcentaje_conductor_aplicado: resultado.porcentaje_conductor_aplicado,
             porcentaje_patron_aplicado: resultado.porcentaje_patron_aplicado,
+            descuento_ss: resultado.descuento_ss,
         },
         update: {
             configuracion_id: resultado.configuracion_id,
@@ -177,6 +203,7 @@ export async function crearOActualizarCalculo(input: CalculoInput, client: Clien
             modelo_reparto_aplicado: resultado.modelo_reparto_aplicado,
             porcentaje_conductor_aplicado: resultado.porcentaje_conductor_aplicado,
             porcentaje_patron_aplicado: resultado.porcentaje_patron_aplicado,
+            descuento_ss: resultado.descuento_ss,
         },
     });
 }

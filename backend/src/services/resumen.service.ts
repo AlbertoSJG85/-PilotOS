@@ -22,6 +22,7 @@
 import { Decimal } from '@prisma/client/runtime/library';
 import { prisma } from '../lib/prisma';
 import { ESTADOS_COMPUTABLES } from './retencionParte.service';
+import { calcularSeguridadSocial, type DetalleSS } from './seguridadSocial.service';
 
 const DIAS_POR_ANIO = 365;
 
@@ -63,6 +64,33 @@ export interface ResumenInput {
     hasta?: Date;
 }
 
+/**
+ * El lado del negocio que corresponde a un asalariado (2026-08-12).
+ *
+ * El recorrido, que es el que pidió Alberto ver separado:
+ *   genera (bruto − combustible) → su reparto pactado → menos su Seguridad
+ *   Social = lo que percibe. Y aparte, lo que le queda al dueño de su trabajo.
+ *
+ * `neto_generado` coincide EXACTAMENTE con el "entregado neto" que el
+ * asalariado ve en su panel. Si las dos pantallas no dijeran lo mismo, la
+ * conversación entre dueño y asalariado empezaría mal.
+ */
+export interface DetalleAsalariado {
+    conductor_id: string;
+    nombre: string;
+    partes: number;
+    bruto: number;
+    combustible: number;
+    neto_generado: number;
+    /** Su parte del reparto ANTES de descontarle la Seguridad Social. */
+    reparto: number;
+    seguridad_social: number;
+    /** Lo que cobra de verdad: reparto − Seguridad Social. */
+    percibe: number;
+    /** Lo que le queda al dueño del trabajo de esta persona. */
+    para_el_patron: number;
+}
+
 export interface ResumenOutput {
     bruto: number;
     datafono: number;
@@ -76,6 +104,13 @@ export interface ResumenOutput {
     parte_patron: number;
     gastos_variables: number;
     gastos_fijos_prorrateados: number;
+    /// Seguridad Social de los asalariados devengada en el periodo (F4).
+    /// Cuota completa por mes tocado: nunca se prorratea por dias.
+    seguridad_social: number;
+    ss_modo_descuento: 'parte' | 'cierre';
+    seguridad_social_detalle: DetalleSS[];
+    /** Desglose por asalariado: lo que genera, lo que se lleva y lo que te queda. */
+    asalariados: DetalleAsalariado[];
     beneficio_estimado: number;
     partes_count: number;
     rango: { desde: string | null; hasta: string | null };
@@ -103,7 +138,9 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
 
     const partes = await prisma.parteDiario.findMany({
         where: wherePartes,
-        include: { calculo: true },
+        // El conductor hace falta para separar lo que ha generado cada
+        // asalariado: el dueño necesita ver ese lado del negocio aparte.
+        include: { calculo: true, conductor: { include: { usuario: { select: { nombre: true } } } } },
     });
 
     let bruto = 0, datafono = 0, combustible = 0, neto = 0;
@@ -137,7 +174,52 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
     const fijos = await prisma.gastoFijo.findMany({ where: { cliente_id, activo: true } });
     const gastosFijosProrrateados = prorratearGastosFijos(fijos, desde, hasta);
 
-    const beneficio = partePatron - gastosVariables - gastosFijosProrrateados;
+    // Seguridad Social de los asalariados (F4, regla del 2026-08-11). Es un
+    // coste del patron como cualquier otro, asi que baja el beneficio. Ojo:
+    // en modo 'parte' la cuota ya se le ha descontado al conductor y ha
+    // subido parte_patron en la misma cantidad, asi que restarla aqui deja el
+    // beneficio correcto en los dos modos -- no se cuenta dos veces.
+    const cliente = await prisma.cliente.findUnique({ where: { id: cliente_id }, select: { ss_modo_descuento: true } });
+    const modoSS = cliente?.ss_modo_descuento === 'parte' ? 'parte' as const : 'cierre' as const;
+
+    const ss = (desde && hasta)
+        ? await calcularSeguridadSocial(cliente_id, desde, hasta)
+        : { total: 0, detalle: [] as DetalleSS[] };
+
+
+    // ── El lado de cada asalariado (2026-08-12) ──────────────────────────
+    // El dueño necesita ver, por persona: lo que ha generado, lo que se
+    // lleva por el reparto pactado, su Seguridad Social y lo que le queda a
+    // él. Sin esto, el panel dice cuánto entra pero no de quién sale.
+    const porAsalariado = new Map<string, DetalleAsalariado>();
+    for (const p of partes) {
+        if (!p.conductor || p.conductor.es_patron) continue;
+        const id = p.conductor_id;
+        const acumulado = porAsalariado.get(id) ?? {
+            conductor_id: id,
+            nombre: p.conductor.usuario?.nombre ?? 'Asalariado',
+            partes: 0, bruto: 0, combustible: 0, neto_generado: 0,
+            reparto: 0, seguridad_social: 0, percibe: 0, para_el_patron: 0,
+        };
+        acumulado.partes += 1;
+        acumulado.bruto += toNum(p.ingreso_bruto);
+        acumulado.combustible += toNum(p.combustible);
+        // El reparto se toma ANTES de la SS: en modo "parte" el cálculo ya
+        // se la descontó, así que se le vuelve a sumar para no restarla dos
+        // veces al llegar abajo. Así la cifra final es la misma en los dos
+        // modos de descuento, que es lo que espera quien la lee.
+        acumulado.reparto += toNum(p.calculo?.parte_conductor) + toNum(p.calculo?.descuento_ss);
+        acumulado.para_el_patron += toNum(p.calculo?.parte_patron) - toNum(p.calculo?.descuento_ss);
+        porAsalariado.set(id, acumulado);
+    }
+
+    for (const detalle of porAsalariado.values()) {
+        detalle.neto_generado = detalle.bruto - detalle.combustible;
+        detalle.seguridad_social = ss.detalle.find((d) => d.conductor_id === detalle.conductor_id)?.total ?? 0;
+        detalle.percibe = detalle.reparto - detalle.seguridad_social;
+    }
+    const asalariados = [...porAsalariado.values()].sort((a, b) => b.neto_generado - a.neto_generado);
+    const beneficio = partePatron - gastosVariables - gastosFijosProrrateados - ss.total;
 
     // Efectivo estimado = bruto - datafono. Clampamos a 0 por seguridad
     // si en algún parte se introduce datafono > bruto (input incorrecto).
@@ -153,6 +235,10 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
         parte_patron: partePatron,
         gastos_variables: gastosVariables,
         gastos_fijos_prorrateados: gastosFijosProrrateados,
+        seguridad_social: ss.total,
+        asalariados,
+        ss_modo_descuento: modoSS,
+        seguridad_social_detalle: ss.detalle,
         beneficio_estimado: beneficio,
         partes_count: partes.length,
         rango: {
