@@ -274,7 +274,15 @@ export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput
     //
     // Ahora: lo que trabaja él (íntegro) + su parte de lo que trabaja el
     // asalariado − sus gastos. La SS no aparece porque no es dinero suyo.
-    const ingresoDelPatron = (patron?.reparto ?? 0)
+    // De los días que conduce ÉL le corresponden LAS DOS partes del reparto,
+    // no solo una: el dinero es suyo entero, y da igual en qué lado lo haya
+    // dejado su configuración económica. Esto no es teoría — en producción,
+    // la config de Alberto manda todo su neto al lado "patrón" y en el
+    // entorno de prueba, al lado "conductor". Mirando solo uno, su ingreso
+    // salía CERO en producción y el beneficio, negativo por el importe
+    // exacto de sus gastos. De los días del asalariado, en cambio, solo le
+    // toca la parte del patrón.
+    const ingresoDelPatron = (patron ? patron.reparto + patron.para_el_patron : 0)
         + asalariados.reduce((acc, a) => acc + a.para_el_patron, 0);
     const beneficio = ingresoDelPatron - gastosVariables - gastosFijosProrrateados;
 
