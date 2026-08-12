@@ -26,6 +26,7 @@ import { prisma } from '../lib/prisma';
 import { requireAuth, AuthRequest } from '../middleware/auth.middleware';
 import { extraerTextoImagen, validarTicketTaximetro, validarTicketGasoil, analizarImagen } from '../services/ocr.service';
 import { compararDocumentosConParte } from '../services/ocrComparacion.service';
+import { aplicarRetencion } from '../services/retencionParte.service';
 import crypto from 'crypto';
 
 // Convierte una URL pública de uploads a ruta local del disco.
@@ -44,6 +45,11 @@ function urlToLocalPath(url: string): string {
  * dispararía. Llamamos a esta función al final de cada operación que añade,
  * sustituye o re-procesa un documento. Es idempotente (anomalias previas se
  * borran al inicio de compararDocumentosConParte).
+ *
+ * Y aplica la retención (2026-08-12): si aparecen discrepancias el parte deja
+ * de contar en los globales, y si al sustituir una foto desaparecen todas,
+ * vuelve a contar solo. Tiene que estar aquí y no solo en /confirmar porque
+ * el patrón sube las fotos DESPUÉS de crear el parte.
  */
 async function recompararSiEnviado(parte_diario_id: string): Promise<number> {
     try {
@@ -54,6 +60,7 @@ async function recompararSiEnviado(parte_diario_id: string): Promise<number> {
         if (!p) return 0;
         if (p.estado === 'BORRADOR') return 0;
         const r = await compararDocumentosConParte(parte_diario_id);
+        await aplicarRetencion(parte_diario_id, r.total_discrepancias);
         return r.total_discrepancias;
     } catch (e: any) {
         console.warn('[FOTOS] Recomparación fallida:', e.message);

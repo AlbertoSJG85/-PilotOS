@@ -106,7 +106,11 @@ export interface ParteDiario {
   combustible: number | null;
   varios: number | null;
   concepto_varios: string | null;
-  estado: 'BORRADOR' | 'ENVIADO' | 'FOTO_ILEGIBLE' | 'FOTO_SUSTITUIDA' | 'VALIDADO' | 'CON_INCIDENCIA';
+  /** PENDIENTE_VALIDACION = enviado con discrepancias: NO cuenta en los globales
+   *  hasta que el dueño lo acepta o pide rehacerlo (2026-08-12). */
+  estado: 'BORRADOR' | 'ENVIADO' | 'PENDIENTE_VALIDACION' | 'FOTO_ILEGIBLE' | 'FOTO_SUSTITUIDA' | 'VALIDADO' | 'CON_INCIDENCIA';
+  validado_por?: number | null;
+  validado_at?: string | null;
   conductor?: Conductor;
   vehiculo?: Vehiculo;
   calculo?: CalculoParte;

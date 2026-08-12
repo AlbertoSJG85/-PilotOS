@@ -34,6 +34,7 @@
 import { prisma } from '../lib/prisma';
 import type { DatosTaximetro } from './ocr.service';
 import { enviarAvisoGloria } from './notificacion.service';
+import { ESTADOS_ENVIADOS } from './retencionParte.service';
 
 
 const TOLERANCIA_TAXIMETRO_EUR = 3;
@@ -461,7 +462,7 @@ async function buscarTicketAnterior(
         where: {
             vehiculo_id: parte.vehiculo_id,
             fecha_trabajada: { lt: parte.fecha_trabajada },
-            estado: { in: ['ENVIADO', 'FOTO_SUSTITUIDA'] },
+            estado: { in: [...ESTADOS_ENVIADOS] },
         },
         orderBy: { fecha_trabajada: 'desc' },
         include: { documentos: { include: { documento: true } } },
@@ -535,7 +536,7 @@ async function compararAcumulados(
         where: {
             vehiculo_id: parte.vehiculo_id,
             fecha_trabajada: { gt: parteAnterior.fecha_trabajada, lte: parte.fecha_trabajada },
-            estado: { in: ['ENVIADO', 'FOTO_SUSTITUIDA'] },
+            estado: { in: [...ESTADOS_ENVIADOS] },
         },
         select: { km_inicio: true, km_fin: true, ingreso_bruto: true },
     });

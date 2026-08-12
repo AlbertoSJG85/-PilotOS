@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest, requireAuth, requirePatron } from '../middleware/auth.middleware';
 import { Decimal } from '@prisma/client/runtime/library';
 import { prorratearGastosFijos } from '../services/resumen.service';
+import { ESTADOS_COMPUTABLES } from '../services/retencionParte.service';
 
 const router = Router();
 router.use(requireAuth);
@@ -61,7 +62,7 @@ router.post('/', requirePatron, async (req, res, next) => {
             where: {
                 vehiculo: { cliente_id },
                 fecha_trabajada: { gte: fechaInicio, lte: fechaFin },
-                estado: { in: ['ENVIADO', 'FOTO_SUSTITUIDA'] }
+                estado: { in: [...ESTADOS_COMPUTABLES] }
             },
             include: { calculo: true }
         });

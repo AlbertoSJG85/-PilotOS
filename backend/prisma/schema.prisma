@@ -177,7 +177,16 @@ model ParteDiario {
   combustible      Decimal?          @db.Decimal(10, 2)
   varios           Decimal?          @db.Decimal(10, 2)
   concepto_varios  String?
+  // Estados: BORRADOR (en curso, no cuenta) → ENVIADO (cuenta en globales)
+  //          PENDIENTE_VALIDACION (enviado CON discrepancias: NO cuenta en
+  //            globales hasta que el dueño lo acepta o pide rehacerlo)
+  //          FOTO_SUSTITUIDA (enviado, con una foto reemplazada; cuenta)
   estado           String            @default("ENVIADO")
+  // Decisión del dueño sobre un parte retenido. Una vez aceptado, ningún
+  // recálculo posterior vuelve a retenerlo: la decisión de una persona pesa
+  // más que una relectura del OCR.
+  validado_por     Int?
+  validado_at      DateTime?
   created_at       DateTime          @default(now())
   updated_at       DateTime          @updatedAt
   calculo          CalculoParte?
