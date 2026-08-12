@@ -17,9 +17,11 @@
 import { Router, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { requireAuth, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 import { crearOActualizarCalculo } from '../services/calculo.service';
 import { compararDocumentosConParte } from '../services/ocrComparacion.service';
+import { aplicarRetencion, ESTADO_RETENIDO, ESTADOS_ENVIADOS } from '../services/retencionParte.service';
+import { notificarConductor, textoParteAceptado, textoRehacerParte } from '../services/notificacionConductor.service';
 
 const router = Router();
 
@@ -72,7 +74,8 @@ interface ParteDiarioInput {
     km_inicio: number;
     km_fin: number;
     ingreso_bruto: number;
-    ingreso_datafono: number;
+    /** Opcional desde 2026-08-12: un turno puede ser todo efectivo o todo tarjeta. */
+    ingreso_datafono?: number;
     combustible?: number;
     varios?: number;
     concepto_varios?: string;
@@ -87,7 +90,8 @@ function validarParte(data: ParteDiarioInput): { valid: boolean; errors: string[
     if (data.km_inicio === undefined) errors.push('km_inicio es obligatorio');
     if (data.km_fin === undefined) errors.push('km_fin es obligatorio');
     if (data.ingreso_bruto === undefined) errors.push('ingreso_bruto es obligatorio');
-    if (data.ingreso_datafono === undefined) errors.push('ingreso_datafono es obligatorio');
+    // El datafono NO es obligatorio (2026-08-12): puede no haber cobrado nada
+    // con tarjeta ese dia. Ausente = 0, que es la verdad del turno, no un hueco.
     if (data.km_fin !== undefined && data.km_inicio !== undefined && data.km_fin <= data.km_inicio) {
         errors.push('km_fin debe ser mayor que km_inicio (R-PD-013)');
     }
@@ -145,7 +149,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                         km_inicio: data.km_inicio,
                         km_fin: data.km_fin,
                         ingreso_bruto: data.ingreso_bruto,
-                        ingreso_datafono: data.ingreso_datafono,
+                        ingreso_datafono: data.ingreso_datafono ?? 0,
                         combustible: data.combustible ?? null,
                         varios: data.varios ?? null,
                         concepto_varios: data.concepto_varios ?? null,
@@ -181,7 +185,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                     km_inicio: data.km_inicio,
                     km_fin: data.km_fin,
                     ingreso_bruto: data.ingreso_bruto,
-                    ingreso_datafono: data.ingreso_datafono,
+                    ingreso_datafono: data.ingreso_datafono ?? 0,
                     combustible: data.combustible ?? null,
                     varios: data.varios ?? null,
                     concepto_varios: data.concepto_varios ?? null,
@@ -202,7 +206,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
                     km_inicio: data.km_inicio,
                     km_fin: data.km_fin,
                     ingreso_bruto: data.ingreso_bruto,
-                    ingreso_datafono: data.ingreso_datafono,
+                    ingreso_datafono: data.ingreso_datafono ?? 0,
                     combustible: data.combustible ?? null,
                     varios: data.varios ?? null,
                     concepto_varios: data.concepto_varios ?? null,
@@ -361,17 +365,23 @@ router.patch('/:id/confirmar', requireAuth, async (req: AuthRequest, res: Respon
         // que el frontend pueda avisar al usuario tras confirmar. Es solo lectura
         // + un puñado de UPDATEs, no es lento.
         let resumenComparacion = { total_discrepancias: 0 };
+        let retenido = false;
         try {
             const r = await compararDocumentosConParte(updated.id);
             resumenComparacion = { total_discrepancias: r.total_discrepancias };
+            // Con discrepancias, el parte NO entra en los globales hasta que
+            // el dueño lo mire (2026-08-12). El asalariado se entera aquí
+            // mismo: la respuesta se lo dice para poder avisarle en pantalla.
+            retenido = (await aplicarRetencion(updated.id, r.total_discrepancias)) === 'RETENIDO';
         } catch (e: any) {
             console.warn('[PARTES] Comparación OCR fallida:', e.message);
         }
 
         res.status(200).json({
             status: 'OK',
-            data: updated,
+            data: retenido ? { ...updated, estado: ESTADO_RETENIDO } : updated,
             discrepancias: resumenComparacion.total_discrepancias,
+            retenido,
             evento: 'E-PD-001',
         });
     } catch (err: any) {
@@ -420,6 +430,185 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     }
 });
 
+// ─────────────────────────────────────────────────────────
+// Decisión del dueño sobre un parte retenido (2026-08-12)
+//
+// Un parte con discrepancias queda en PENDIENTE_VALIDACION y no cuenta en
+// los globales. El dueño tiene exactamente dos salidas, y las dos son suyas:
+// nadie más puede cerrar el caso, y menos el asalariado sobre sí mismo.
+// ─────────────────────────────────────────────────────────
+
+/** Carga un parte retenido comprobando tenencia. Devuelve null si no procede. */
+async function cargarParteRetenido(req: AuthRequest, res: Response) {
+    const parte = await prisma.parteDiario.findUnique({
+        where: { id: req.params.id },
+        include: { vehiculo: { select: { cliente_id: true, id: true } } },
+    });
+    if (!parte || !isSameTenant(req, parte.vehiculo.cliente_id)) {
+        res.status(404).json({ status: 'FAIL', error: 'not_found' });
+        return null;
+    }
+    if (parte.estado !== ESTADO_RETENIDO) {
+        res.status(409).json({ status: 'FAIL', error: 'invalid_state', estado_actual: parte.estado });
+        return null;
+    }
+    return parte;
+}
+
+// POST /api/partes/:id/validar — el dueño acepta el parte tal cual está.
+// Ha hablado con el asalariado (o ha decidido que la diferencia es asumible)
+// y el parte pasa a contar en los globales. Las anomalías se marcan revisadas
+// pero NO se borran: son un hecho ocurrido (R-AN-002).
+router.post('/:id/validar', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
+    try {
+        const parte = await cargarParteRetenido(req, res);
+        if (!parte) return;
+
+        // El asalariado tiene que enterarse de que su parte ya cuenta, y de
+        // quién lo ha aceptado (2026-08-12).
+        const dueno = await prisma.minosUser.findUnique({
+            where: { id: req.usuario!.id }, select: { nombre: true },
+        });
+        const nombreDueno = dueno?.nombre || 'El dueño';
+
+        const actualizado = await prisma.$transaction(async (tx) => {
+            const p = await tx.parteDiario.update({
+                where: { id: parte.id },
+                data: { estado: 'ENVIADO', validado_por: req.usuario!.id, validado_at: new Date() },
+            });
+
+            const texto = textoParteAceptado(nombreDueno, parte.fecha_trabajada);
+            await notificarConductor({
+                conductorId: parte.conductor_id,
+                tipo: 'PARTE_ACEPTADO',
+                ...texto,
+                entidadTipo: 'PARTE_DIARIO',
+                entidadId: parte.id,
+            }, tx);
+            await tx.anomalia.updateMany({
+                where: { parte_diario_id: parte.id, estado: 'ACTIVA' },
+                data: { estado: 'RESUELTA', revisada_at: new Date(), revisada_por: req.usuario!.id },
+            });
+            await tx.ledgerEvento.create({
+                data: {
+                    tipo_evento: 'PARTE_VALIDADO',
+                    source: 'PILOTOS',
+                    dedupe_key: `parte-validado-${parte.id}`,
+                    datos: { parte_id: parte.id, validado_por: req.usuario!.id },
+                },
+            });
+            return p;
+        });
+
+        res.json({ status: 'OK', data: actualizado });
+    } catch (err: any) {
+        console.error('[PARTES] Error validando parte:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
+// POST /api/partes/:id/rehacer — el dueño lo rechaza: el parte y sus tickets
+// desaparecen para que el asalariado registre ese día otra vez desde cero.
+//
+// Se borra de verdad (no se archiva) porque el asalariado tiene que poder
+// volver a crear el parte de esa fecha, y hay un unique (vehiculo, fecha).
+// Lo que NO se borra:
+//   - las anomalías, que son el histórico de lo que pasó (R-AN-002);
+//   - el evento de ledger, que deja constancia con una copia de las cifras
+//     que traía el parte rechazado.
+// El kilometraje del vehículo se recalcula desde los partes que quedan: si
+// el rechazado era el que lo había subido, el contador tiene que volver
+// atrás o el parte nuevo arrancaría con unos km que nadie ha recorrido.
+router.post('/:id/rehacer', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
+    try {
+        const parte = await cargarParteRetenido(req, res);
+        if (!parte) return;
+        const motivo = typeof req.body?.motivo === 'string' ? req.body.motivo.slice(0, 500) : null;
+
+        // Sin esto, el asalariado veía desaparecer su parte sin saber por qué
+        // ni que le toca volver a hacerlo (2026-08-12).
+        const duenoRechaza = await prisma.minosUser.findUnique({
+            where: { id: req.usuario!.id }, select: { nombre: true },
+        });
+        const nombreQuienRechaza = duenoRechaza?.nombre || 'El dueño';
+
+        await prisma.$transaction(async (tx) => {
+            // El aviso se crea ANTES de borrar el parte: si algo falla, no
+            // queremos haber borrado y dejado al asalariado sin explicación.
+            const texto = textoRehacerParte(nombreQuienRechaza, parte.fecha_trabajada, motivo);
+            await notificarConductor({
+                conductorId: parte.conductor_id,
+                tipo: 'REHACER_PARTE',
+                ...texto,
+                entidadTipo: 'PARTE_DIARIO',
+                entidadId: parte.id,
+            }, tx);
+
+            const enlaces = await tx.documentoEnlace.findMany({
+                where: { entidad_tipo: 'PARTE_DIARIO', entidad_id: parte.id },
+                select: { documento_id: true },
+            });
+            const documentoIds = enlaces.map((e) => e.documento_id);
+
+            await tx.ledgerEvento.create({
+                data: {
+                    tipo_evento: 'PARTE_RECHAZADO',
+                    source: 'PILOTOS',
+                    dedupe_key: `parte-rechazado-${parte.id}`,
+                    datos: {
+                        parte_id: parte.id,
+                        rechazado_por: req.usuario!.id,
+                        motivo,
+                        // Copia de lo que traía, porque la fila se va a borrar.
+                        snapshot: {
+                            fecha_trabajada: parte.fecha_trabajada.toISOString().slice(0, 10),
+                            vehiculo_id: parte.vehiculo_id,
+                            conductor_id: parte.conductor_id,
+                            km_inicio: parte.km_inicio,
+                            km_fin: parte.km_fin,
+                            ingreso_bruto: String(parte.ingreso_bruto),
+                            ingreso_datafono: String(parte.ingreso_datafono),
+                            combustible: parte.combustible ? String(parte.combustible) : null,
+                            documentos: documentoIds,
+                        },
+                    },
+                },
+            });
+
+            await tx.anomalia.updateMany({
+                where: { parte_diario_id: parte.id },
+                data: { estado: 'RESUELTA', revisada_at: new Date(), revisada_por: req.usuario!.id },
+            });
+
+            await tx.calculoParte.deleteMany({ where: { parte_diario_id: parte.id } });
+            await tx.documentoEnlace.deleteMany({ where: { entidad_tipo: 'PARTE_DIARIO', entidad_id: parte.id } });
+            if (documentoIds.length > 0) {
+                await tx.documento.deleteMany({ where: { id: { in: documentoIds } } });
+            }
+            await tx.parteDiario.delete({ where: { id: parte.id } });
+
+            // Kilometraje oficial: el máximo de los partes que sobreviven.
+            const restantes = await tx.parteDiario.findMany({
+                where: { vehiculo_id: parte.vehiculo_id, estado: { in: [...ESTADOS_ENVIADOS] } },
+                select: { km_fin: true },
+                orderBy: { km_fin: 'desc' },
+                take: 1,
+            });
+            if (restantes.length > 0) {
+                await tx.vehiculo.update({
+                    where: { id: parte.vehiculo_id },
+                    data: { km_actuales: restantes[0].km_fin },
+                });
+            }
+        });
+
+        res.json({ status: 'OK', rehecho: true, parte_id: parte.id });
+    } catch (err: any) {
+        console.error('[PARTES] Error rechazando parte:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
 // GET /api/partes — Listar partes (filtrado por tenant)
 router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
@@ -443,9 +632,11 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
             if (desde) where.fecha_trabajada.gte = new Date(desde as string);
             if (hasta) where.fecha_trabajada.lte = new Date(hasta as string);
         }
-        // Por defecto se excluyen los BORRADOR del listado general.
+        // Por defecto se excluyen los BORRADOR del listado general. Los
+        // retenidos SÍ se listan: no cuentan en los globales, pero el dueño y
+        // el asalariado tienen que verlos — es justo lo que hay que atender.
         if (incluir_borrador !== 'true') {
-            where.estado = { in: ['ENVIADO', 'FOTO_SUSTITUIDA'] };
+            where.estado = { in: [...ESTADOS_ENVIADOS] };
         }
 
         const partes = await prisma.parteDiario.findMany({
@@ -498,6 +689,25 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
             where: { parte_diario_id: parte.id },
             orderBy: { created_at: 'desc' },
         });
+
+        // Un asalariado ve QUE su parte no cuadra, pero no QUÉ (2026-08-12,
+        // decisión de Alberto). Si supiera el hueco exacto —"el ticket dice
+        // 148,60 € y declaraste 95 €"— tendría la medida justa de la historia
+        // que le toca contar. El detalle es del dueño, que es quien va a
+        // hablar con él.
+        //
+        // Se filtra AQUÍ y no solo en la pantalla: ocultarlo en el frontend
+        // dejaría el dato viajando en la respuesta, a un inspector de vista.
+        if (!req.usuario?.es_patron && req.usuario?.role !== 'admin') {
+            const documentosSinDetalle = parte.documentos.map((enlace) => {
+                const datos = enlace.documento.ocr_datos_extraidos as Record<string, unknown> | null;
+                if (!datos || typeof datos !== 'object') return enlace;
+                const { discrepancias, ...resto } = datos;
+                return { ...enlace, documento: { ...enlace.documento, ocr_datos_extraidos: resto } };
+            });
+            res.json({ status: 'OK', data: { ...parte, documentos: documentosSinDetalle, anomalias: [] } });
+            return;
+        }
 
         res.json({ status: 'OK', data: { ...parte, anomalias } });
     } catch (err: any) {

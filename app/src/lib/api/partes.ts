@@ -59,6 +59,23 @@ export async function getBorradorActual(vehiculo_id: string, fecha: string): Pro
   return apiFetch(`/api/partes/borrador/actual?${params.toString()}`);
 }
 
+/**
+ * POST /api/partes/:id/validar — el dueño acepta un parte retenido tal cual
+ * está. A partir de aquí cuenta en los globales.
+ */
+export async function validarParte(id: string): Promise<ApiResponse<ParteDiario>> {
+  return apiFetch(`/api/partes/${id}/validar`, { method: 'POST', body: {} });
+}
+
+/**
+ * POST /api/partes/:id/rehacer — el dueño rechaza un parte retenido: el parte
+ * y sus tickets se borran para que el asalariado registre ese día otra vez.
+ * Es destructivo, siempre detrás de una confirmación.
+ */
+export async function rehacerParte(id: string, motivo?: string): Promise<{ status: string; rehecho?: boolean }> {
+  return apiFetch(`/api/partes/${id}/rehacer`, { method: 'POST', body: { motivo } });
+}
+
 /** DELETE /api/partes/:id — Solo permitido si estado BORRADOR. */
 export async function descartarBorrador(id: string): Promise<{ status: string }> {
   return apiFetch(`/api/partes/${id}`, { method: 'DELETE' });

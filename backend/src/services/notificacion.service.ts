@@ -35,6 +35,56 @@ export interface EnvioResultado {
     message_id?: string;
 }
 
+/**
+ * Aviso al patron por los DOS canales (2026-08-12).
+ *
+ * Por que dos: el WhatsApp depende de que Meta apruebe la plantilla, y a 12
+ * de agosto no habian aprobado ninguna de las cuatro enviadas a revision. Es
+ * decir, todos los avisos criticos de PilotOS (mantenimiento vencido, anomalia
+ * en el taximetro) llevaban semanas sin llegarle a nadie. El correo no depende
+ * de terceros, asi que pasa a ser el canal que garantiza la entrega y el
+ * WhatsApp queda como el canal que se ve antes cuando funciona.
+ *
+ * El aviso cuenta como ENTREGADO si sale por CUALQUIERA de los dos. Si fallan
+ * los dos, se devuelven los dos motivos: son problemas distintos y se arreglan
+ * distinto.
+ */
+export interface EnvioMulticanal {
+    ok: boolean;
+    whatsapp: { ok: boolean; error?: string };
+    email: { ok: boolean; error?: string };
+    error?: string;
+}
+
+export async function avisarPatron(destino: {
+    telefono?: string | null;
+    email?: string | null;
+}, mensaje: {
+    tipo: string;
+    template_params: Record<string, unknown>;
+    asunto: string;
+    cuerpo: string;
+}): Promise<EnvioMulticanal> {
+    const { enviarEmail, esEmailEntregable } = await import('./email.service');
+
+    const [whatsapp, email] = await Promise.all([
+        destino.telefono
+            ? enviarAvisoGloria(destino.telefono, mensaje.tipo, mensaje.template_params)
+            : Promise.resolve({ ok: false, error: 'sin telefono' } as EnvioResultado),
+        esEmailEntregable(destino.email)
+            ? enviarEmail(destino.email!, mensaje.asunto, mensaje.cuerpo)
+            : Promise.resolve({ ok: false, error: 'sin email entregable' }),
+    ]);
+
+    const ok = whatsapp.ok || email.ok;
+    return {
+        ok,
+        whatsapp: { ok: whatsapp.ok, error: whatsapp.error },
+        email: { ok: email.ok, error: email.error },
+        error: ok ? undefined : `whatsapp: ${whatsapp.error ?? '?'} | email: ${email.error ?? '?'}`.slice(0, 300),
+    };
+}
+
 const TIMEOUT_MS = 8000;
 
 export async function enviarAvisoGloria(

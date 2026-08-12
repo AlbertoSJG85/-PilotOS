@@ -192,7 +192,8 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
     }
     if (step === 2) {
       if (form.ingreso_bruto === '') errs.push('Ingreso bruto obligatorio');
-      if (form.ingreso_datafono === '') errs.push('Ingreso datáfono obligatorio');
+      // El datáfono NO es obligatorio (2026-08-12): un turno puede ser todo
+      // efectivo o todo tarjeta. Vacío = 0, que es la verdad del día.
       if (form.ingreso_bruto !== '' && form.ingreso_datafono !== '' &&
           Number(form.ingreso_bruto) < Number(form.ingreso_datafono)) {
         errs.push('El ingreso bruto debe ser ≥ al datáfono');
@@ -259,7 +260,7 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
         km_inicio: Number(form.km_inicio),
         km_fin: Number(form.km_fin),
         ingreso_bruto: Number(form.ingreso_bruto),
-        ingreso_datafono: Number(form.ingreso_datafono),
+        ingreso_datafono: form.ingreso_datafono === '' ? 0 : Number(form.ingreso_datafono),
         combustible: form.combustible !== '' ? Number(form.combustible) : undefined,
         varios: form.varios !== '' ? Number(form.varios) : undefined,
         concepto_varios: form.concepto_varios || undefined,
@@ -494,15 +495,16 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
               onChange={(e) => update('ingreso_bruto', e.target.value ? Number(e.target.value) : '')}
               required
             />
+            {/* Sin `required`: puede no haber cobrado nada con tarjeta ese
+                día (2026-08-12). Vacío se guarda como 0. */}
             <Input
-              label="De eso, por datáfono (€)"
+              label="De eso, por datáfono (€) — opcional"
               type="number"
               inputMode="decimal"
               step="0.01"
-              placeholder="0.00"
+              placeholder="0.00 si no has usado el datáfono"
               value={form.ingreso_datafono}
               onChange={(e) => update('ingreso_datafono', e.target.value ? Number(e.target.value) : '')}
-              required
             />
             {form.ingreso_bruto !== '' && form.ingreso_datafono !== '' && (
               <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-3 flex justify-between text-sm">

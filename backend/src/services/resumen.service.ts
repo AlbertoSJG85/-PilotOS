@@ -5,7 +5,9 @@
  *   - GET /api/dashboard/resumen (informes — mismo endpoint, mismo cálculo)
  *
  * Reglas:
- *   - Solo computan partes en estados ENVIADO o FOTO_SUSTITUIDA. BORRADOR fuera.
+ *   - Solo computan partes en estados ENVIADO o FOTO_SUSTITUIDA. Fuera quedan
+ *     los BORRADOR y los PENDIENTE_VALIDACION (partes con discrepancias, a la
+ *     espera de que el dueño decida — ver retencionParte.service.ts).
  *   - Gastos variables se filtran por fecha del gasto.
  *   - Gastos fijos activos se prorratean segun los DIAS REALES del rango
  *     solicitado (Fase 4, 2026-07-24): antes siempre se mostraba la cuota
@@ -19,6 +21,7 @@
  */
 import { Decimal } from '@prisma/client/runtime/library';
 import { prisma } from '../lib/prisma';
+import { ESTADOS_COMPUTABLES } from './retencionParte.service';
 
 const DIAS_POR_ANIO = 365;
 
@@ -84,10 +87,13 @@ function toNum(d: Decimal | null | undefined): number {
 }
 
 export async function calcularResumen({ cliente_id, desde, hasta }: ResumenInput): Promise<ResumenOutput> {
-    // 1. Partes válidos del periodo (mismos estados que cierres MVP)
+    // 1. Partes válidos del periodo (mismos estados que cierres MVP).
+    // PENDIENTE_VALIDACION queda FUERA a propósito (2026-08-12): un parte con
+    // discrepancias no suma hasta que el dueño lo acepta. Esta línea y su
+    // gemela en cierre.routes.ts son la puerta de los globales.
     const wherePartes: any = {
         vehiculo: { cliente_id },
-        estado: { in: ['ENVIADO', 'FOTO_SUSTITUIDA'] },
+        estado: { in: [...ESTADOS_COMPUTABLES] },
     };
     if (desde || hasta) {
         wherePartes.fecha_trabajada = {};

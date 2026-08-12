@@ -90,6 +90,7 @@ model Conductor {
   created_at         DateTime                 @default(now())
   updated_at         DateTime                 @updatedAt
   anomalias          Anomalia[]
+  notificaciones     NotificacionConductor[]
   cliente            Cliente                  @relation(fields: [cliente_id], references: [id])
   usuario            MinosUser                @relation(fields: [usuario_id], references: [id])
   configuraciones    ConfiguracionEconomica[]
@@ -177,7 +178,16 @@ model ParteDiario {
   combustible      Decimal?          @db.Decimal(10, 2)
   varios           Decimal?          @db.Decimal(10, 2)
   concepto_varios  String?
+  // Estados: BORRADOR (en curso, no cuenta) → ENVIADO (cuenta en globales)
+  //          PENDIENTE_VALIDACION (enviado CON discrepancias: NO cuenta en
+  //            globales hasta que el dueño lo acepta o pide rehacerlo)
+  //          FOTO_SUSTITUIDA (enviado, con una foto reemplazada; cuenta)
   estado           String            @default("ENVIADO")
+  // Decisión del dueño sobre un parte retenido. Una vez aceptado, ningún
+  // recálculo posterior vuelve a retenerlo: la decisión de una persona pesa
+  // más que una relectura del OCR.
+  validado_por     Int?
+  validado_at      DateTime?
   created_at       DateTime          @default(now())
   updated_at       DateTime          @updatedAt
   calculo          CalculoParte?
@@ -256,6 +266,22 @@ model Documento {
   vehiculo                  Vehiculo?              @relation(fields: [vehiculo_id], references: [id])
   mantenimientoVehiculo     MantenimientoVehiculo? @relation(fields: [mantenimiento_vehiculo_id], references: [id])
 
+  // ── Confirmación humana (2026-08-12) ────────────────────────────────
+  // El OCR propone (`ocr_datos_extraidos`, que nunca se toca) y una persona
+  // confirma (`datos_confirmados`, que es lo que vale). Se guardan los dos a
+  // propósito: si mañana un importe no cuadra, se ve si lo dijo la máquina o
+  // lo escribió alguien.
+  datos_confirmados         Json?
+  confirmado_por            Int?
+  confirmado_at             DateTime?
+  /// true = la persona contradijo al documento. Si ademas era el asalariado, va a revision del dueno.
+  corregido                 Boolean                @default(false)
+  revisado_por              Int?
+  revisado_at               DateTime?
+  /// Cuando se aplicaron los efectos (mantenimiento al dia + gasto). Candado de idempotencia.
+  aplicado_at               DateTime?
+  gasto_id                  String?
+
   @@map("documentos")
   @@schema("pilotos")
 }
@@ -283,6 +309,26 @@ model DocumentoHistorial {
   documento    Documento @relation(fields: [documento_id], references: [id])
 
   @@map("documento_historial")
+  @@schema("pilotos")
+}
+
+model NotificacionConductor {
+  id           String    @id @default(uuid())
+  conductor_id String
+  tipo         String
+  titulo       String
+  mensaje      String
+  /// Referencia blanda: el parte puede haberse borrado (caso "rehacer"), asi
+  /// que no hay FK. La notificacion sobrevive al parte a proposito.
+  entidad_tipo String?
+  entidad_id   String?
+  leida_at     DateTime?
+  created_at   DateTime  @default(now())
+  conductor    Conductor @relation(fields: [conductor_id], references: [id])
+
+  @@index([conductor_id])
+  @@index([leida_at])
+  @@map("notificaciones_conductor")
   @@schema("pilotos")
 }
 

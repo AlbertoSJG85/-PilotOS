@@ -72,7 +72,7 @@ export default function LoginPage() {
       // El backend responde igual exista o no la cuenta, a proposito: si
       // dijera "ese telefono no esta registrado", cualquiera podria averiguar
       // quien usa PilotOS probando numeros. Aqui reflejamos eso tal cual.
-      setAviso('Si el telefono corresponde a una cuenta, recibiras un codigo por WhatsApp.');
+      setAviso('Si el telefono corresponde a una cuenta, recibiras un codigo en tu correo.');
       setModo('restablecer');
     } catch (err: unknown) {
       setError(err instanceof ApiError ? err.message : 'No se pudo enviar el codigo');
@@ -150,8 +150,11 @@ export default function LoginPage() {
       </div>
 
       <div className="relative w-full max-w-sm">
-        {/* Logo */}
-        <div className="mb-10 flex flex-col items-center gap-4">
+        {/* Identidad: PilotOS y de quién es.
+            "by NexOS" se escribe tal cual, sin mayúsculas forzadas: la marca
+            es "NexOS", no "NEXOS". El "OS" va en el azul de la casa (#158FFF,
+            muestreado del logotipo oficial). */}
+        <div className="mb-10 flex flex-col items-center">
           <Image
             src="/branding/pilotos/logo-compact.png"
             alt="PilotOS"
@@ -160,8 +163,9 @@ export default function LoginPage() {
             className="h-14 w-auto object-contain"
             priority
           />
-          <p className="text-xs tracking-widest text-zinc-600 uppercase font-medium">
-            by NexOS
+
+          <p className="mt-2.5 text-[11px] font-medium tracking-wide text-zinc-600">
+            by <span className="text-zinc-300">Nex</span><span className="text-nexos-blue">OS</span>
           </p>
         </div>
 
@@ -214,7 +218,7 @@ export default function LoginPage() {
           ) : modo === 'pedir-codigo' ? (
             <>
               <p className="mb-6 text-sm text-zinc-400 text-center">
-                Te enviaremos un codigo por WhatsApp al numero de tu cuenta.
+                Te enviaremos un codigo al correo de tu cuenta.
               </p>
 
               <form onSubmit={handlePedirCodigo} className="space-y-5">

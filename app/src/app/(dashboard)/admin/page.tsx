@@ -12,6 +12,7 @@ import { DollarSign, Fuel, TrendingUp, Wrench, AlertTriangle, ArrowRight, Activi
 import type { ParteDiario, Vehiculo, Anomalia, MantenimientoVehiculo } from '@/types';
 import type { ResumenDashboard } from '@/lib/api/dashboard';
 import { PeriodFilter } from '@/components/features/period-filter';
+import { PartesRetenidos } from '@/components/features/partes-retenidos';
 
 function AdminDashboardContent() {
   const searchParams = useSearchParams();
@@ -27,7 +28,9 @@ function AdminDashboardContent() {
   const [revisando, setRevisando] = useState<string | null>(null);
   const [errorRevisar, setErrorRevisar] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Extraída del efecto para poder recargar tras aceptar o rehacer un parte
+  // retenido: esa decisión cambia los totales, no solo la lista.
+  function cargarDatos() {
     setLoading(true);
 
     Promise.all([
@@ -60,7 +63,9 @@ function AdminDashboardContent() {
       })
       .catch(() => { })
       .finally(() => setLoading(false));
-  }, [desde, hasta]);
+  }
+
+  useEffect(cargarDatos, [desde, hasta]);
 
   const totalBruto = resumen?.bruto ?? 0;
   const totalCombustible = resumen?.combustible ?? 0;
@@ -80,7 +85,11 @@ function AdminDashboardContent() {
   // Todas las que el patrón aún no ha revisado, no solo las 4 últimas — una
   // anomalía no desaparece por antigua, se queda hasta que él decide (el
   // WhatsApp puede no llegar, pasar desapercibido, o simplemente olvidarse).
-  const pendingAnomalias = anomalias.filter(a => a.estado !== 'RESUELTA');
+  const idsRetenidos = new Set(partes.filter(p => p.estado === 'PENDIENTE_VALIDACION').map(p => p.id));
+  // Las anomalías de un parte retenido se gestionan desde la bandeja de
+  // decisión (aceptar / rehacer), no una a una: cerrar la alerta sin decidir
+  // sobre el parte era justo el agujero que había antes.
+  const pendingAnomalias = anomalias.filter(a => a.estado !== 'RESUELTA' && !(a.parte_diario_id && idsRetenidos.has(a.parte_diario_id)));
 
   async function handleRevisarAnomalia(id: string) {
     setErrorRevisar(null);
@@ -189,7 +198,9 @@ function AdminDashboardContent() {
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-6">
 
-          {/* Alertas */}
+          <PartesRetenidos partes={partes} anomalias={anomalias} onResuelto={cargarDatos} />
+
+          {/* Alertas que no cuelgan de un parte retenido (mantenimiento, km, etc.) */}
           {pendingAnomalias.length > 0 && (
             <Card className="p-4 border-red-500/40 bg-red-950/20">
               <h2 className="text-sm font-semibold text-red-400 mb-3 flex items-center gap-2 uppercase tracking-wider">

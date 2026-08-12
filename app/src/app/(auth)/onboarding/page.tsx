@@ -18,6 +18,8 @@ const STEPS = [
 type Asalariado = {
   nombre: string;
   telefono: string;
+  /** Suyo de verdad: es por donde recupera la contraseña (2026-08-12). */
+  email: string;
   modelo_reparto: string;
   porcentaje_conductor: number;
 };
@@ -84,7 +86,7 @@ export default function OnboardingPage() {
   const addAsalariado = () => {
     set('asalariados', [
       ...data.asalariados,
-      { nombre: '', telefono: '', modelo_reparto: 'PORCENTAJE', porcentaje_conductor: 50 }
+      { nombre: '', telefono: '', email: '', modelo_reparto: 'PORCENTAJE', porcentaje_conductor: 50 }
     ]);
   };
 
@@ -132,6 +134,9 @@ export default function OnboardingPage() {
         for (const [i, a] of data.asalariados.entries()) {
           if (!a.nombre.trim()) return `El nombre del asalariado ${i + 1} es obligatorio`;
           if (!a.telefono.trim()) return `El teléfono del asalariado ${i + 1} es obligatorio`;
+          // Sin email no puede recuperar su contraseña solo: el código va por correo.
+          if (!a.email.trim()) return `El email del asalariado ${i + 1} es obligatorio`;
+          if (!/^[^s@]+@[^s@]+.[^s@]+$/.test(a.email.trim())) return `El email del asalariado ${i + 1} no es válido`;
         }
         return null;
       default:
@@ -383,6 +388,20 @@ export default function OnboardingPage() {
                             className="h-10"
                           />
                         </div>
+
+                        {/* Su email, no uno inventado: es por donde recibirá el
+                            código si pierde la contraseña (2026-08-12). */}
+                        <Input
+                          label="Email del conductor"
+                          type="email"
+                          placeholder="conductor@email.com"
+                          value={a.email}
+                          onChange={(e) => updateAsalariado(i, { email: e.target.value })}
+                          className="h-10"
+                        />
+                        <p className="text-[10px] text-zinc-500 -mt-2">
+                          Aquí recibirá el código si olvida la contraseña.
+                        </p>
 
                         <div className="grid grid-cols-2 gap-4 items-end bg-black/20 p-3 rounded-lg border border-zinc-800/50">
                           <div className="space-y-1.5">

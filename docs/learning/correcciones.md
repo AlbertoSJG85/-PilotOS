@@ -690,3 +690,72 @@ P Total: 91-55         <- el ticket pone 51,55 (= P Carreras 49,75 + P Suplement
 - **Verificado:** 163/163 tests, con `smoke.ocrFiabilidad.test.ts` y el fixture literal de Tesseract del ticket del 10/08 añadido a `smoke.ocrTicketRealOcr.test.ts`. Los dos partes de producción recalculados tras el despliegue.
 - **Aparte, y no es de código:** los dos avisos al patrón fallaron con `(#132001) Template name does not exist` — la plantilla Meta `anomalia_taximetro` sigue sin estar aprobada. Ninguna alerta crítica ha salido nunca por WhatsApp.
 - **Prevención.** Regla para todo lo que salga del OCR: *antes de acusar, comprobar que la cifra es posible*. Un número bien formado (`2937`) no es un número correcto, y el parser no puede saberlo — quien tiene que darse cuenta es quien compara. Ningún dato imposible puede terminar en un mensaje a una persona.
+
+### C-057 · Un parte con diferencias contaba igual, y la recuperación de contraseña dependía de Meta
+- Fecha: 2026-08-12
+- Área: `backend/src/services/retencionParte.service.ts`, `backend/src/routes/parteDiario.routes.ts`, `backend/src/services/email.service.ts`, `backend/src/routes/auth.routes.ts`, `app/src/components/features/partes-retenidos.tsx`, `app/src/app/(conductor)/conductor/page.tsx`
+
+**1. El control que no controlaba nada.**
+Un parte con discrepancias generaba su incidencia en el panel, el dueño pulsaba «Marcar revisada» y desaparecía — pero el dinero de ese parte estaba en los totales desde el primer momento. El botón no decidía nada: solo apagaba el aviso.
+- Solución: estado `PENDIENTE_VALIDACION`. El parte existe, se lista y se ve, pero queda fuera de `calcularResumen` y de los cierres hasta que el dueño elige una de dos:
+  - **Aceptar** → pasa a ENVIADO, entra en globales, sus anomalías quedan revisadas (no borradas, R-AN-002).
+  - **Pedir que se rehaga** → el parte y sus tickets se borran para que el asalariado registre ese día otra vez. Queda `PARTE_RECHAZADO` en el ledger con copia de las cifras.
+- Detalle que costó pensar y es el que protege el dato: **el km del vehículo se recalcula al rechazar**. El parte rechazado pudo ser el que subió el contador; si no se devuelve al máximo de los partes que sobreviven, el parte nuevo arrancaría con kilómetros que nadie ha recorrido.
+- Otro: un parte retenido **sigue contando como turno físico** para la comparación de acumulados del taxímetro. Si se excluyera, el motor vería un borrado que ningún parte explica — el falso positivo de C-056 otra vez, por la puerta de atrás.
+- Y otro: un parte que el dueño ya aceptó **no se vuelve a retener solo**. Su decisión pesa más que una relectura del OCR.
+- El asalariado ve en su panel que su parte tiene diferencias, que **todavía no cuenta**, y qué cifras concretas no cuadran. Antes se habría enterado al cuadrar la nómina.
+
+**2. La vista del dueño empezaba por lo que menos hace.**
+El home ofrecía «Nuevo parte» como acción dominante y el panel de gestión como un enlace al final. Un dueño entra a controlar el negocio; conducir es la excepción. Invertido: panel de gestión como acción principal, nuevo parte como secundaria. El asalariado mantiene el parte primero, que es lo suyo.
+
+**3. La recuperación de contraseña dependía de un tercero.**
+El código salía por WhatsApp con una plantilla de Meta. A 12 de agosto no habían aprobado ninguna de las cuatro enviadas: la función existía y no servía para nadie. Se pasa a email (SMTP), que solo depende de nosotros — **la misma decisión que ya tomó NexOS Pay el 2026-08-08 y por el mismo motivo**.
+- `email.service.ts` repite el enfoque de Pay (transporte inyectable, nunca lanza, sin credenciales no envía y lo dice) en vez de importarlo, porque hoy no hay paquete compartido para esto. Anotado: al tercer consumidor, esto sube a `NexOS/core`.
+- **Hallazgo de paso, y es el que de verdad importaba:** el onboarding **nunca pidió email al asalariado** — le inventaba `telefono@pilotos.app`, un buzón que no existe. Con el reset por correo, ese asalariado no habría podido recuperar nada. Ahora el email es obligatorio en el alta; las altas antiguas se detectan en `/recuperar` y quedan en el log (por fuera la respuesta no cambia, no se revela quién tiene cuenta).
+- Verificado: 187/187 tests.
+- **Prevención.** Dos lecciones distintas: (a) un aviso que no cambia el estado de nada es decoración — si el sistema detecta que algo no cuadra, tiene que retener el efecto, no solo pintar un cartel; (b) una función crítica no puede depender de la aprobación de un tercero, y si depende, hay que saber que está apagada, no descubrirlo el día que alguien la necesita.
+
+### C-058 · La pantalla de Documentos duplicaba los partes, y el asalariado veía demasiado
+- Fecha: 2026-08-12
+- Área: `app/src/app/(dashboard)/documentos/page.tsx`, `backend/src/routes/documentoVehiculo.routes.ts`, `backend/src/services/ocrDocumentoVehiculo.service.ts`, `backend/src/services/aplicarDocumento.service.ts`, `app/src/components/features/resumen-mes-conductor.tsx`
+
+**1. El asalariado sabía exactamente qué hueco tenía que justificar.**
+Al retener un parte (C-057) le enseñábamos el detalle: *"el ticket dice 148,60 € y declaraste 95 €"*. Alberto lo cortó en cuanto lo vio, y tiene razón: eso es darle la medida de la historia que le toca contar. Ahora ve **que** algo no cuadra y de qué día, nada más.
+- Se filtra en el **backend**, no en la pantalla: ocultarlo solo en el frontend dejaba el dato viajando en la respuesta, a un inspector de vista de distancia. `GET /api/partes/:id` devuelve a un no-patrón el parte sin anomalías y sin las discrepancias del OCR. Verificado con las dos sesiones: 0 y 0 para el asalariado, 2 y 2 para el dueño.
+- Lección general: **una regla de privacidad que solo vive en la UI no es una regla.**
+
+**2. Documentos listaba partes.**
+La pantalla mostraba los partes con sus tickets — es decir, la pantalla de partes otra vez. Lo que faltaba era la carpeta del taxi: la ITV, la factura de los neumáticos, el seguro. Reescrita entera.
+
+**3. El circuito documental, que no existía.**
+Se sube el papel → el OCR **propone** (tipo, fecha, importe, validez, qué mantenimientos resuelve) → una persona confirma → el contador del mantenimiento se pone al día con su fecha nueva **y** el importe se registra como gasto con la factura enganchada. Todo en una transacción: un gasto sin su mantenimiento actualizado (o al revés) es peor que no hacer nada, porque nadie se entera de que falta la mitad.
+- La regla de quién confirma la fijó Alberto y no es la obvia: **lo que dispara la revisión del dueño no es quién sube el documento, sino si esa persona contradice a la imagen.** Si el asalariado acepta lo que pone el papel, se aplica solo; si lo corrige, va a revisión. Si corrige el dueño, manda él.
+- Se guardan **las dos versiones** (lo que leyó la máquina y lo que vale) con autor y fecha.
+- El kilometraje oficial no se toca: §5.3 del maestro. Una factura puede ser de hace tres días.
+- Verificado end-to-end contra la base de prueba con una factura combinada (4 neumáticos + alineado + pastillas, 620 €): mantenimiento de neumáticos al día con la fecha y los km de la factura, gasto de 620 € creado, km del vehículo intacto, y **aviso explícito** de que "Pastillas de freno" no estaba dado de alta en ese vehículo en vez de fallar en silencio.
+- **Honestidad sobre el OCR, que es la lección cara de esta semana:** los patrones de ITV y factura están escritos contra el formato habitual, no contra documentos reales pasados por Tesseract. Ya sabemos lo que vale eso (C-043, C-054, C-055): poco. Lo que sostiene el dato mientras tanto es el paso de confirmación — si el OCR no lee un campo, lo declara faltante y lo escribe la persona.
+- Detalle divertido de la prueba: el parser no leyó la matrícula `0000DMO` del vehículo ficticio. No es un fallo: la `O` no existe en las matrículas españolas (se excluye para no confundirla con el cero). La matrícula inventada era imposible; el parser tenía razón.
+
+**4. Mini-panel del asalariado.** Lo que ha entregado neto (bruto − combustible, la misma definición que usa el motor de cálculo), días trabajados, km, €/km y €/día. No ve su reparto: eso es del dueño. Los partes retenidos no suman, y se dice.
+- Verificado: 205/205 tests.
+- **Prevención:** antes de dar por buena una pantalla, preguntar qué está enseñando de más. "Documentos" llevaba meses siendo un duplicado de "Partes" y nadie lo miró; el detalle de las discrepancias se coló porque parecía transparencia y era ventaja para quien tiene que dar explicaciones.
+
+### C-059 · El asalariado no se enteraba de la decisión del dueño, y el datáfono era obligatorio
+- Fecha: 2026-08-12
+- Área: `backend/src/services/notificacionConductor.service.ts`, `backend/src/routes/notificacion.routes.ts`, `backend/src/routes/parteDiario.routes.ts`, `app/src/components/features/avisos-conductor.tsx`, `app/src/app/(conductor)/conductor/panel/page.tsx`
+
+**1. Las decisiones se tomaban a espaldas de quien las sufre.**
+Al montar la retención (C-057) se resolvió el lado del dueño —aceptar o mandar rehacer— pero no el del asalariado: si le pedían rehacerlo, **el parte desaparecía de su pantalla sin una palabra**. Ahora los dos caminos avisan, con el nombre de quien decidió:
+- Aceptado → *"Manuel Ficticio ha aceptado tu parte del 11/08/2026. Ya está contabilizado."*
+- Rehacer → *"…ha pedido que vuelvas a registrar el parte del 11/08/2026. El anterior se ha eliminado"*, con el motivo si lo hay y un botón directo para registrarlo otra vez.
+- Tabla nueva `notificaciones_conductor`. La referencia al parte es **blanda a propósito** (sin FK): en el caso "rehacer" el parte se borra, y el aviso tiene que sobrevivirle — si no, el asalariado se quedaría sin la explicación justo en el caso que la necesita.
+- El aviso se crea **antes** de borrar el parte, y hay un test que lo comprueba por orden de llamada. Si el borrado fallara, al menos la persona sabe que algo pasa.
+
+**2. El datáfono era obligatorio y no tenía por qué.**
+Un turno puede ser todo en efectivo o todo con tarjeta. El formulario exigía rellenarlo igual, así que el conductor escribía un 0 a mano o se lo inventaba. Ahora es opcional (vacío = 0) en el backend y en el formulario. La regla R-PD-014 (bruto ≥ datáfono) sigue viva cuando sí se rellena.
+
+**3. Las vistas, cada una en lo suyo.**
+La home del asalariado es para **trabajar**: avisos, el parte de hoy y poco más. Todo lo demás —cómo va el mes, su vehículo, sus partes, subir un documento— se muda a `/conductor/panel`. Es la simétrica de la decisión del dueño: cada uno arranca en lo que hace el 90% de las veces.
+- En su panel, además, los **acumulados del mes por datáfono y en efectivo**: el efectivo es lo que de verdad tiene que entregar, y verlo separado le ahorra la cuenta a mano.
+- Verificado: 208/208 tests, y el ciclo completo probado con las dos sesiones del entorno ficticio.
+- **Prevención:** cuando una función tenga dos lados (quien decide y quien lo sufre), construir los dos a la vez. La retención se dio por terminada con el lado del dueño resuelto, y estaba a medias.

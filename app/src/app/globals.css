@@ -16,6 +16,11 @@
   --color-pilotos-warning:#F59E0B;
   --color-pilotos-danger: #EF4444;
 
+  /* Azul de NexOS — muestreado del logotipo oficial (el "OS" de la marca).
+     Es el color de la CASA, no de PilotOS: solo se usa para firmar
+     "by NexOS". No debe colarse en la interfaz del producto. */
+  --color-nexos-blue: #158FFF;
+
   --radius-pilotos: 18px;
 
   /* Mapeos para retrocompatibilidad con componentes antiguos */

@@ -145,6 +145,59 @@ Aunque la base debe quedar preparada para escalar, en esta fase todavía no se e
 - Deben tener hash y deduplicación.
 - Deben registrar estado OCR, estado de validación y usuario remitente.
 
+#### 5.4.1 Documentación del vehículo: ITV y facturas de taller (2026-08-12)
+
+Definido con Alberto el 2026-08-12. Aplica a los papeles del taxi (ITV,
+factura del taller, póliza), **no** a los tickets del parte diario.
+
+**El circuito.** El vehículo pasa la ITV o va al taller. Quien esté allí
+—dueño o asalariado— hace la foto o guarda el PDF y lo sube. El sistema lo
+lee y **propone**: qué documento es, de qué fecha, por cuánto importe, hasta
+cuándo vale y qué mantenimientos pone al día. Una persona confirma. Al
+confirmarse pasan dos cosas, y solo dos:
+
+1. Los mantenimientos que ese documento resuelve quedan **al día**: fecha y km
+   de ejecución, siguiente vencimiento recalculado y avisos rearmados.
+2. El importe, si lo hay, se registra como **gasto** con la factura enganchada.
+
+**Quién confirma, y cuándo hace falta el dueño.** Lo que dispara la revisión
+no es quién sube el documento, sino si esa persona **contradice a la imagen**:
+
+| Situación | Qué pasa |
+|---|---|
+| Acepta lo que dice el documento (cualquiera de los dos) | Se aplica directamente |
+| Lo corrige el dueño | Se aplica: su palabra es la que vale |
+| Lo corrige el asalariado | Se anota y **va a revisión del dueño** |
+
+**Reglas duras:**
+
+- **El OCR nunca decide solo.** Propone; una persona confirma. Una fecha de
+  ITV mal leída no molesta a nadie: apaga un aviso, y uno se entera el día que
+  le para la Guardia Civil. (El precedente está en C-056.)
+- **Sin imagen no hay gasto.** El asalariado no puede declarar un gasto sin un
+  documento que lo respalde. Por eso el gasto nace del documento, nunca al revés.
+- **Se guardan las dos versiones:** lo que leyó la máquina (`ocr_datos_extraidos`,
+  que no se toca nunca) y lo que vale (`datos_confirmados`), con quién lo
+  confirmó y cuándo. Si un día un importe no cuadra, se ve de dónde salió.
+- **Los km de una factura NO actualizan el kilometraje oficial** (§5.3). Una
+  factura puede ser de hace tres días y llegar hoy; si moviera el contador, lo
+  movería hacia atrás. Y una factura no está obligada a traer km.
+- Un mismo documento **no puede aplicarse dos veces** (hash + `aplicado_at`).
+
+**Mantenimientos "según uso"** (neumáticos, pastillas, discos): no tienen
+frecuencia y por eso nunca vencen por calendario. Se ponen al día cuando llega
+la factura que los cambia, que es la única señal real que existe.
+
+**Estado a 2026-08-12:** implementado y verificado end-to-end contra una
+factura de taller combinada (neumáticos + frenos). Pendientes: el
+almacenamiento sigue siendo el disco del servidor, **no Drive**; y GlorIA
+todavía no tiene puerta de entrada para meter documentos desde WhatsApp (hoy
+solo salen avisos hacia GlorIA). Los patrones de lectura de ITV y facturas
+están escritos contra el formato habitual, **no validados aún contra
+documentos reales pasados por OCR** — la primera ITV y la primera factura
+reales van a exigir ajustes, y ahí es cuando se fijan con su texto literal
+como fixture.
+
 ### 5.5 Gasto y reparto
 
 - El sistema debe soportar varios modelos económicos, no uno solo.
