@@ -12,7 +12,7 @@ import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { clienteTieneFeaturePro } from '../middleware/billing-access.middleware';
 import { procesarYGuardarImagen } from '../services/storage.service';
-import { analizarYRegistrarDocumento, hashDeBuffer } from '../services/ocrDocumentoVehiculo.service';
+import { registrarDocumentoPendiente, analizarDocumentoRegistrado, hashDeBuffer } from '../services/ocrDocumentoVehiculo.service';
 
 const router = Router();
 
@@ -547,20 +547,31 @@ router.post('/documentos-vehiculo', express.json({ limit: '15mb' }), async (req:
         // nada. Una factura mandada por WhatsApp desaparecía en la práctica:
         // el dueño nunca llegaba a ver que había algo que confirmar.
         //
-        // Ahora corre el MISMO análisis que la app: lee la imagen, saca la
-        // propuesta y deja el documento en PENDIENTE_CONFIRMACION. Que la
-        // factura entre por WhatsApp o por la app no puede cambiar si se lee.
-        const { documento, propuesta } = await analizarYRegistrarDocumento({
-            rutaLocal: procesado.path,
+        // C-063 (2026-08-12): el análisis va DESPUÉS de contestar.
+        //
+        // C-061 metió aquí el OCR completo para que una factura de WhatsApp se
+        // procesara igual que una de la app. Correcto de fondo, pero convirtió
+        // esta llamada en algo de ~20 segundos, y GlorIA corta a los 20: la
+        // foto se subía, el documento se creaba... y GlorIA recibía un timeout
+        // y se lo tragaba en silencio. Desde fuera, no pasaba nada.
+        //
+        // Ahora se crea la fila al momento y se contesta; el OCR corre detrás.
+        // El documento aparece en "esperan tu confirmación" unos segundos más
+        // tarde, que es exactamente lo que hacía falta.
+        const documento = await registrarDocumentoPendiente({
             url,
             vehiculoId: vehiculo!.id,
             hashSha256: hash_sha256,
             subidoPorUsuarioId: usuarioResuelto?.id ?? null,
         });
 
-        console.log(`[INTERNAL] Documento recibido y analizado para vehiculo ${vehiculo!.id}${subido_por_telefono ? ` (via ${subido_por_telefono})` : ''}: ${documento.id} (${documento.tipo})`);
+        console.log(`[INTERNAL] Documento recibido para vehiculo ${vehiculo!.id}${subido_por_telefono ? ` (via ${subido_por_telefono})` : ''}: ${documento.id} — analizando en segundo plano`);
 
-        res.status(201).json({ status: 'OK', data: { documento_id: documento.id, url, tipo: documento.tipo, propuesta } });
+        res.status(201).json({ status: 'OK', data: { documento_id: documento.id, url, estado: 'ANALIZANDO' } });
+
+        // Deliberadamente SIN await y después de responder: `analizarDocumentoRegistrado`
+        // nunca lanza y deja el resultado (o el motivo del fallo) en el propio documento.
+        void analizarDocumentoRegistrado(documento.id, procesado.path);
     } catch (err: any) {
         console.error('[INTERNAL] Error en /documentos-vehiculo:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });

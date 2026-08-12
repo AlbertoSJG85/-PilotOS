@@ -25,9 +25,11 @@ vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }));
 const procesarYGuardarImagenMock = vi.fn();
 vi.mock('../src/services/storage.service', () => ({ procesarYGuardarImagen: procesarYGuardarImagenMock }));
 
-const analizarYRegistrarDocumentoMock = vi.fn();
+const registrarDocumentoPendienteMock = vi.fn();
+const analizarDocumentoRegistradoMock = vi.fn();
 vi.mock('../src/services/ocrDocumentoVehiculo.service', () => ({
-    analizarYRegistrarDocumento: analizarYRegistrarDocumentoMock,
+    registrarDocumentoPendiente: registrarDocumentoPendienteMock,
+    analizarDocumentoRegistrado: analizarDocumentoRegistradoMock,
     hashDeBuffer: vi.fn().mockReturnValue('hash-de-prueba'),
 }));
 
@@ -59,10 +61,8 @@ describe('POST /internal/documentos-vehiculo', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         procesarYGuardarImagenMock.mockResolvedValue({ filename: 'foto-123.jpg', size: 500000, path: '/app/uploads/foto-123.jpg' });
-        analizarYRegistrarDocumentoMock.mockResolvedValue({
-            documento: { id: 'doc-1', tipo: 'FACTURA_TALLER', estado: 'PENDIENTE_CONFIRMACION' },
-            propuesta: { tipo: 'FACTURA_TALLER', mantenimientos_detectados: [], faltantes: [] },
-        });
+        registrarDocumentoPendienteMock.mockResolvedValue({ id: 'doc-1' });
+        analizarDocumentoRegistradoMock.mockResolvedValue(undefined);
     });
 
     it('sin vehiculo_id o imagen_base64 → 400', async () => {
@@ -80,7 +80,7 @@ describe('POST /internal/documentos-vehiculo', () => {
         expect(procesarYGuardarImagenMock).not.toHaveBeenCalled();
     });
 
-    it('caso feliz: guarda la imagen, la ANALIZA y crea el Documento listo para confirmar', async () => {
+    it('caso feliz: guarda la imagen, registra el Documento y lanza el análisis', async () => {
         prismaMock.vehiculo.findUnique.mockResolvedValue({ id: 'v1' });
         const res = mockRes();
 
@@ -90,19 +90,51 @@ describe('POST /internal/documentos-vehiculo', () => {
         );
 
         expect(procesarYGuardarImagenMock).toHaveBeenCalledTimes(1);
-        // CLAVE (C-061): ya no basta con guardar el fichero — tiene que
-        // analizarse, o el documento no aparece nunca para confirmar.
-        expect(analizarYRegistrarDocumentoMock).toHaveBeenCalledTimes(1);
-        expect(analizarYRegistrarDocumentoMock).toHaveBeenCalledWith(expect.objectContaining({
-            rutaLocal: '/app/uploads/foto-123.jpg',
+        expect(registrarDocumentoPendienteMock).toHaveBeenCalledWith(expect.objectContaining({
             vehiculoId: 'v1',
             hashSha256: 'hash-de-prueba',
         }));
+        // CLAVE (C-061): el análisis tiene que dispararse, o el documento no
+        // aparece nunca para confirmar.
+        expect(analizarDocumentoRegistradoMock).toHaveBeenCalledWith('doc-1', '/app/uploads/foto-123.jpg');
         expect(res.status).toHaveBeenCalledWith(201);
         expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
             status: 'OK',
-            data: expect.objectContaining({ documento_id: 'doc-1', tipo: 'FACTURA_TALLER' }),
+            data: expect.objectContaining({ documento_id: 'doc-1', estado: 'ANALIZANDO' }),
         }));
+    });
+
+    // CLAVE (C-063): esto es lo que se rompió. El OCR dentro de la petición la
+    // hacía durar ~20 s y GlorIA cortaba a los 20, tragándose el timeout.
+    it('CRITICO: responde ANTES de que el análisis termine', async () => {
+        prismaMock.vehiculo.findUnique.mockResolvedValue({ id: 'v1' });
+        const res = mockRes();
+
+        let analisisTerminado = false;
+        analizarDocumentoRegistradoMock.mockImplementation(
+            () => new Promise((resolve) => setTimeout(() => { analisisTerminado = true; resolve(undefined); }, 50)),
+        );
+
+        await manejadorDe('post', '/documentos-vehiculo')(
+            mockReq({ vehiculo_id: 'v1', imagen_base64: 'aGVsbG8=' }), res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(201);
+        expect(analisisTerminado).toBe(false); // contestó sin esperarlo
+        expect(analizarDocumentoRegistradoMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('si el análisis falla, la respuesta ya se dio igualmente (no rompe al que llama)', async () => {
+        prismaMock.vehiculo.findUnique.mockResolvedValue({ id: 'v1' });
+        analizarDocumentoRegistradoMock.mockRejectedValue(new Error('tesseract explotó'));
+        const res = mockRes();
+
+        await manejadorDe('post', '/documentos-vehiculo')(
+            mockReq({ vehiculo_id: 'v1', imagen_base64: 'aGVsbG8=' }), res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(201);
+        expect(res.status).not.toHaveBeenCalledWith(500);
     });
 
     it('imagen_base64 vacía o corrupta → 400, no llega a analizar nada', async () => {
@@ -110,7 +142,7 @@ describe('POST /internal/documentos-vehiculo', () => {
         const res = mockRes();
         await manejadorDe('post', '/documentos-vehiculo')(mockReq({ vehiculo_id: 'v1', imagen_base64: '' }), res);
         expect(res.status).toHaveBeenCalledWith(400);
-        expect(analizarYRegistrarDocumentoMock).not.toHaveBeenCalled();
+        expect(registrarDocumentoPendienteMock).not.toHaveBeenCalled();
     });
 
     it('si Sharp no puede procesar la imagen → 415, no llega a analizar nada', async () => {
@@ -119,7 +151,7 @@ describe('POST /internal/documentos-vehiculo', () => {
         const res = mockRes();
         await manejadorDe('post', '/documentos-vehiculo')(mockReq({ vehiculo_id: 'v1', imagen_base64: 'aGVsbG8=' }), res);
         expect(res.status).toHaveBeenCalledWith(415);
-        expect(analizarYRegistrarDocumentoMock).not.toHaveBeenCalled();
+        expect(registrarDocumentoPendienteMock).not.toHaveBeenCalled();
     });
 });
 
@@ -131,10 +163,8 @@ describe('POST /internal/documentos-vehiculo — resolución por teléfono', () 
     beforeEach(() => {
         vi.clearAllMocks();
         procesarYGuardarImagenMock.mockResolvedValue({ filename: 'f.jpg', size: 1000, path: '/app/uploads/f.jpg' });
-        analizarYRegistrarDocumentoMock.mockResolvedValue({
-            documento: { id: 'doc-1', tipo: 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR', estado: 'PENDIENTE_CONFIRMACION' },
-            propuesta: { tipo: 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR', mantenimientos_detectados: [], faltantes: [] },
-        });
+        registrarDocumentoPendienteMock.mockResolvedValue({ id: 'doc-1' });
+        analizarDocumentoRegistradoMock.mockResolvedValue(undefined);
     });
 
     it('un solo vehículo → lo resuelve, lo analiza y deja quién lo mandó', async () => {
@@ -147,7 +177,7 @@ describe('POST /internal/documentos-vehiculo — resolución por teléfono', () 
             mockReq({ subido_por_telefono: '+34600111222', imagen_base64: 'aGVsbG8=' }), res,
         );
 
-        expect(analizarYRegistrarDocumentoMock).toHaveBeenCalledWith(expect.objectContaining({
+        expect(registrarDocumentoPendienteMock).toHaveBeenCalledWith(expect.objectContaining({
             vehiculoId: 'v1',
             subidoPorUsuarioId: 42,
         }));

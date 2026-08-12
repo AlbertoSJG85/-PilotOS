@@ -303,6 +303,93 @@ export async function analizarYRegistrarDocumento(datos: {
     return { documento, propuesta };
 }
 
+/**
+ * Registra el documento SIN analizarlo todavía (2026-08-12, C-063).
+ *
+ * POR QUÉ EXISTE. `analizarYRegistrarDocumento` hace el OCR dentro de la
+ * misma llamada, y eso tarda unos 15-20 segundos con una foto de móvil. Para
+ * la app está bien —la persona está delante esperando a ver la propuesta—,
+ * pero para quien nos manda el documento por HTTP no: GlorIA espera 20
+ * segundos y corta. El documento se creaba igual, pero el que llamaba se
+ * llevaba un timeout y no se enteraba de nada.
+ *
+ * Así que para ese camino el trabajo se parte en dos: esto crea la fila al
+ * momento (una foto ya guardada, un INSERT) para poder contestar enseguida,
+ * y `analizarDocumentoRegistrado` hace lo lento después.
+ */
+export async function registrarDocumentoPendiente(datos: {
+    url: string;
+    vehiculoId: string;
+    hashSha256: string;
+    subidoPorUsuarioId?: number | null;
+}): Promise<{ id: string }> {
+    return prisma.documento.create({
+        data: {
+            tipo: 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR',
+            url: datos.url,
+            hash_sha256: datos.hashSha256,
+            // Estado de paso. No aparece en "esperan tu confirmación" (que
+            // filtra por PENDIENTE_CONFIRMACION) hasta que el análisis
+            // termina, que es lo correcto: todavía no hay nada que confirmar.
+            estado: 'ANALIZANDO',
+            estado_ocr: 'PENDIENTE',
+            vehiculo_id: datos.vehiculoId,
+            subido_por_usuario_id: datos.subidoPorUsuarioId ?? null,
+        },
+        select: { id: true },
+    });
+}
+
+/**
+ * Termina el trabajo de `registrarDocumentoPendiente`: lee la imagen y deja
+ * el documento listo para confirmar.
+ *
+ * Nunca lanza — se llama sin esperar respuesta. Si el OCR falla, el documento
+ * queda marcado con el error en vez de desaparecer: es preferible que el dueño
+ * vea "no se pudo leer" y lo rellene a mano, a que la factura se pierda.
+ */
+export async function analizarDocumentoRegistrado(
+    documentoId: string,
+    rutaLocal: string,
+    tipoForzado?: TipoDocumentoVehiculo,
+): Promise<void> {
+    try {
+        const analisis = await analizarImagen(rutaLocal);
+        const ocr = analisis.procesable
+            ? await extraerTextoImagen(rutaLocal)
+            : { texto: '', confianza: 0, legible: false };
+
+        const propuesta = analizarDocumentoVehiculo(ocr.texto, tipoForzado);
+
+        await prisma.documento.update({
+            where: { id: documentoId },
+            data: {
+                tipo: propuesta.tipo,
+                estado: 'PENDIENTE_CONFIRMACION',
+                estado_ocr: analisis.procesable ? 'COMPLETADO' : 'ILEGIBLE',
+                ocr_texto: ocr.texto || null,
+                ocr_confianza: ocr.confianza ?? null,
+                ocr_datos_extraidos: propuesta as any,
+            },
+        });
+        console.log(`[DOC-VEHICULO] Analizado ${documentoId}: ${propuesta.tipo}`);
+    } catch (err: any) {
+        console.error(`[DOC-VEHICULO] Fallo analizando ${documentoId}:`, err?.message);
+        // El documento se queda, pero visible y con el motivo. Que se pueda
+        // confirmar a mano es mejor que perderlo.
+        await prisma.documento
+            .update({
+                where: { id: documentoId },
+                data: {
+                    estado: 'PENDIENTE_CONFIRMACION',
+                    estado_ocr: 'ERROR',
+                    ocr_error: String(err?.message ?? err).slice(0, 500),
+                },
+            })
+            .catch(() => undefined);
+    }
+}
+
 /** SHA-256 de un buffer, para deduplicar documentos que llegan como bytes crudos (GlorIA). */
 export function hashDeBuffer(buffer: Buffer): string {
     return crypto.createHash('sha256').update(buffer).digest('hex');
