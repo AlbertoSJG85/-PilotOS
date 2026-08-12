@@ -653,6 +653,25 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
             orderBy: { created_at: 'desc' },
         });
 
+        // Un asalariado ve QUE su parte no cuadra, pero no QUÉ (2026-08-12,
+        // decisión de Alberto). Si supiera el hueco exacto —"el ticket dice
+        // 148,60 € y declaraste 95 €"— tendría la medida justa de la historia
+        // que le toca contar. El detalle es del dueño, que es quien va a
+        // hablar con él.
+        //
+        // Se filtra AQUÍ y no solo en la pantalla: ocultarlo en el frontend
+        // dejaría el dato viajando en la respuesta, a un inspector de vista.
+        if (!req.usuario?.es_patron && req.usuario?.role !== 'admin') {
+            const documentosSinDetalle = parte.documentos.map((enlace) => {
+                const datos = enlace.documento.ocr_datos_extraidos as Record<string, unknown> | null;
+                if (!datos || typeof datos !== 'object') return enlace;
+                const { discrepancias, ...resto } = datos;
+                return { ...enlace, documento: { ...enlace.documento, ocr_datos_extraidos: resto } };
+            });
+            res.json({ status: 'OK', data: { ...parte, documentos: documentosSinDetalle, anomalias: [] } });
+            return;
+        }
+
         res.json({ status: 'OK', data: { ...parte, anomalias } });
     } catch (err: any) {
         console.error('[PARTES] Error:', err.message);

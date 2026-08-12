@@ -151,10 +151,12 @@ export default function ConductorHome() {
                     ? 'Un parte tuyo tiene diferencias'
                     : `${retenidos.length} partes tuyos tienen diferencias`}
                 </p>
+                {/* Solo QUE pasa algo, nunca QUÉ: el detalle es del dueño. */}
                 <p className="text-xs text-amber-200/80 mt-1">
-                  Lo que declaraste no cuadra con el ticket. {retenidos.length === 1 ? 'Ese parte' : 'Esos partes'}{' '}
+                  Hay datos que no cuadran con la documentación aportada.{' '}
+                  {retenidos.length === 1 ? 'Ese parte' : 'Esos partes'}{' '}
                   <strong>todavía no cuenta{retenidos.length === 1 ? '' : 'n'}</strong>: está pendiente de que el
-                  dueño lo revise y decida.
+                  dueño lo revise.
                 </p>
               </div>
             </div>
@@ -167,7 +169,7 @@ export default function ConductorHome() {
                 >
                   <span className="text-sm font-medium text-zinc-200">{formatDate(p.fecha_trabajada)}</span>
                   <span className="flex items-center gap-2 text-xs text-amber-300">
-                    Ver qué no cuadra <ArrowRight className="h-3.5 w-3.5" />
+                    Ver el parte <ArrowRight className="h-3.5 w-3.5" />
                   </span>
                 </Link>
               ))}
