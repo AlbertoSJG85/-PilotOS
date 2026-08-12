@@ -21,6 +21,7 @@ import anomaliaRoutes from './routes/anomalia.routes';
 import gastoRoutes from './routes/gasto.routes';
 import mantenimientoRoutes from './routes/mantenimiento.routes';
 import fotoRoutes from './routes/foto.routes';
+import documentoVehiculoRoutes from './routes/documentoVehiculo.routes';
 import incidenciaRoutes from './routes/incidencia.routes';
 import cierreRoutes from './routes/cierre.routes';
 import dashboardRoutes from './routes/dashboard.routes';
@@ -170,6 +171,9 @@ app.use('/api/anomalias', anomaliaRoutes);
 app.use('/api/gastos', gastoRoutes);
 app.use('/api/mantenimientos', requireNexosPayAccess('pilotos_proactividad'), mantenimientoRoutes);
 app.use('/api/fotos', fotoRoutes);
+// Documentacion del taxi (ITV, facturas de taller, poliza). Distinta de
+// /api/fotos, que son los tickets del parte diario.
+app.use('/api/documentos-vehiculo', documentoVehiculoRoutes);
 app.use('/api/incidencias', incidenciaRoutes);
 app.use('/api/cierres', cierreRoutes);
 app.use('/api/dashboard', dashboardRoutes);

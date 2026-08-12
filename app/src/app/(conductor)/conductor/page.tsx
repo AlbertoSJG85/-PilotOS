@@ -289,6 +289,24 @@ export default function ConductorHome() {
         {/* El acceso al panel de gestión ya no vive aquí abajo: para el dueño
             es la acción principal y está arriba del todo. */}
 
+        {/* Documentación del taxi. El asalariado también sube: si va a pasar
+            la ITV o lleva el coche al taller, la foto la hace él (2026-08-12).
+            Lo que decide si hace falta que lo mire el dueño no es quién sube,
+            sino si contradice a la imagen — eso lo controla el backend. */}
+        {!loading && !esPatron && (
+          <Link
+            href="/documentos"
+            className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 active:bg-zinc-800 transition-colors"
+          >
+            <FileText className="h-5 w-5 text-pilot-lime shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-zinc-200">Subir documento del taxi</p>
+              <p className="text-xs text-zinc-500">ITV, factura del taller, neumáticos…</p>
+            </div>
+            <ArrowRight className="ml-auto h-4 w-4 text-zinc-600" />
+          </Link>
+        )}
+
       </main>
 
       <div className="h-safe-bottom" />

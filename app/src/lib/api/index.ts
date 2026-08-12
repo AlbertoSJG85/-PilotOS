@@ -9,5 +9,6 @@ export * from './anomalias';
 export * from './onboarding';
 export * from './upload';
 export * from './fotos';
+export * from './documentos-vehiculo';
 export * from './dashboard';
 export * from './usuarios';

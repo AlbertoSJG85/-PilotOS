@@ -1,0 +1,185 @@
+/**
+ * Efectos de un documento del vehículo confirmado (2026-08-12).
+ *
+ * Cuando una persona confirma una ITV o una factura de taller, pasan dos
+ * cosas y solo dos:
+ *
+ *   1. Los mantenimientos que ese documento resuelve quedan al día: nueva
+ *      fecha y km de ejecución, siguiente vencimiento recalculado y avisos
+ *      rearmados. Es exactamente lo que ya hacía `POST /mantenimientos/:id/
+ *      resolver` — misma lógica, para no tener dos formas de poner al día un
+ *      mantenimiento que se desincronicen con el tiempo.
+ *   2. El importe, si lo hay, se convierte en un gasto con la factura
+ *      enganchada.
+ *
+ * LO QUE NO PASA, y está en PilotOS_Master.md §5.3: el kilometraje oficial
+ * del vehículo NO se toca. Sale del último parte diario. Una factura puede
+ * ser de hace tres días y llegar hoy; si moviera el contador, lo movería
+ * hacia atrás. Los km del documento se guardan como dato del documento y
+ * sirven para fechar la ejecución del mantenimiento, nada más.
+ *
+ * Idempotencia: el documento guarda `aplicado_at`. Un documento no puede
+ * reiniciar dos veces el mismo contador ni duplicar el gasto.
+ */
+import { Prisma } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+
+export interface DatosDocumentoConfirmados {
+    /** DD/MM/YYYY — fecha del documento (inspección o emisión de la factura). */
+    fecha?: string;
+    /** DD/MM/YYYY — hasta cuándo vale (ITV, póliza). */
+    valida_hasta?: string;
+    importe?: number;
+    matricula?: string;
+    km_documento?: number;
+    /** Nombres del catálogo de mantenimiento que este documento pone al día. */
+    mantenimientos?: string[];
+    descripcion?: string;
+}
+
+export interface ResultadoAplicacion {
+    mantenimientos_actualizados: string[];
+    gasto_id: string | null;
+    avisos: string[];
+}
+
+export function parsearFechaEs(fecha?: string): Date | null {
+    if (!fecha) return null;
+    const m = fecha.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+    if (!m) return null;
+    const d = new Date(Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1])));
+    return isNaN(d.getTime()) ? null : d;
+}
+
+function sumarMeses(fecha: Date, meses: number): Date {
+    const d = new Date(fecha);
+    d.setMonth(d.getMonth() + meses);
+    return d;
+}
+
+/**
+ * Aplica el documento. Todo dentro de una transacción: o queda el
+ * mantenimiento al día Y el gasto, o no queda nada. Un gasto sin su
+ * mantenimiento actualizado (o al revés) es peor que no haber hecho nada,
+ * porque nadie se entera de que falta la mitad.
+ */
+export async function aplicarDocumentoConfirmado(
+    documentoId: string,
+    datos: DatosDocumentoConfirmados,
+    usuarioId: number,
+    clienteId: string,
+): Promise<ResultadoAplicacion> {
+    const avisos: string[] = [];
+
+    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const doc = await tx.documento.findUnique({
+            where: { id: documentoId },
+            include: { vehiculo: true },
+        });
+        if (!doc) throw new Error('documento_no_encontrado');
+        if (doc.aplicado_at) {
+            // Ya se aplicó: no se repite. Devolvemos lo que hay para que la
+            // pantalla no se quede colgada.
+            return {
+                mantenimientos_actualizados: [],
+                gasto_id: doc.gasto_id,
+                avisos: ['Este documento ya estaba aplicado.'],
+            };
+        }
+        if (!doc.vehiculo_id || !doc.vehiculo) throw new Error('documento_sin_vehiculo');
+
+        const fechaDoc = parsearFechaEs(datos.fecha) ?? new Date();
+        const validaHasta = parsearFechaEs(datos.valida_hasta);
+        // Para fechar la ejecución usamos los km del documento si los trae, y
+        // si no, los oficiales. Nunca al revés: los del documento no suben al
+        // vehículo (ver cabecera).
+        const kmEjecucion = datos.km_documento ?? doc.vehiculo.km_actuales;
+
+        const actualizados: string[] = [];
+        // El vinculo documento->mantenimiento es 1:1 en el schema; si una
+        // factura resuelve varios, se engancha al primero y el resto queda
+        // trazado en su seguimiento.
+        let primerMantenimientoId: string | null = null;
+        for (const nombreCatalogo of datos.mantenimientos ?? []) {
+            const mant = await tx.mantenimientoVehiculo.findFirst({
+                where: {
+                    vehiculo_id: doc.vehiculo_id,
+                    activo: true,
+                    catalogo: { nombre: nombreCatalogo },
+                },
+                include: { catalogo: true },
+            });
+            if (!mant) {
+                avisos.push(`No hay un mantenimiento "${nombreCatalogo}" dado de alta en este vehículo.`);
+                continue;
+            }
+
+            const frecKm = mant.frecuencia_km_personalizada ?? mant.frecuencia_aprendida ?? mant.catalogo.frecuencia_km;
+            const frecMeses = mant.frecuencia_meses_personalizada ?? mant.catalogo.frecuencia_meses;
+
+            // La fecha del documento manda cuando la trae (una ITV dice hasta
+            // cuándo vale; no hay que calcularlo). Si no, se calcula con la
+            // frecuencia del catálogo, igual que en /resolver.
+            const proximaFecha = validaHasta ?? (frecMeses ? sumarMeses(fechaDoc, frecMeses) : null);
+            const proximoKm = frecKm ? kmEjecucion + frecKm : null;
+            const tieneRecurrencia = proximoKm !== null || proximaFecha !== null;
+
+            await tx.mantenimientoVehiculo.update({
+                where: { id: mant.id },
+                data: {
+                    ultima_ejecucion_km: kmEjecucion,
+                    ultima_ejecucion_fecha: fechaDoc,
+                    proximo_km: proximoKm,
+                    proxima_fecha: proximaFecha,
+                    estado: tieneRecurrencia ? 'PENDIENTE' : 'RESUELTO',
+                    // Ciclo nuevo: se rearman los avisos (si no, el próximo
+                    // umbral no volvería a notificar nunca).
+                    ultimo_nivel_aviso_km: null,
+                    ultimo_nivel_aviso_dias: null,
+                },
+            });
+
+            await tx.seguimientoMantenimiento.create({
+                data: {
+                    mantenimiento_vehiculo_id: mant.id,
+                    accion: 'RESUELTO',
+                    detalle: `${mant.catalogo.nombre} — según documento aportado`,
+                    km_en_momento: kmEjecucion,
+                },
+            });
+
+            if (!primerMantenimientoId) primerMantenimientoId = mant.id;
+            actualizados.push(mant.catalogo.nombre);
+        }
+
+        let gastoId: string | null = null;
+        if (datos.importe !== undefined && datos.importe > 0) {
+            const gasto = await tx.gasto.create({
+                data: {
+                    cliente_id: clienteId,
+                    vehiculo_id: doc.vehiculo_id,
+                    tipo: 'MANTENIMIENTO',
+                    descripcion: datos.descripcion
+                        || (actualizados.length > 0 ? actualizados.join(', ') : 'Documento del vehículo'),
+                    importe: datos.importe,
+                    fecha: fechaDoc,
+                    url_factura: doc.url,
+                },
+            });
+            gastoId = gasto.id;
+        }
+
+        await tx.documento.update({
+            where: { id: documentoId },
+            data: {
+                estado: 'APLICADO',
+                aplicado_at: new Date(),
+                gasto_id: gastoId,
+                mantenimiento_vehiculo_id: primerMantenimientoId ?? undefined,
+                confirmado_por: usuarioId,
+            },
+        });
+
+        return { mantenimientos_actualizados: actualizados, gasto_id: gastoId, avisos };
+    });
+}

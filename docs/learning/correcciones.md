@@ -714,3 +714,28 @@ El código salía por WhatsApp con una plantilla de Meta. A 12 de agosto no hab�
 - **Hallazgo de paso, y es el que de verdad importaba:** el onboarding **nunca pidió email al asalariado** — le inventaba `telefono@pilotos.app`, un buzón que no existe. Con el reset por correo, ese asalariado no habría podido recuperar nada. Ahora el email es obligatorio en el alta; las altas antiguas se detectan en `/recuperar` y quedan en el log (por fuera la respuesta no cambia, no se revela quién tiene cuenta).
 - Verificado: 187/187 tests.
 - **Prevención.** Dos lecciones distintas: (a) un aviso que no cambia el estado de nada es decoración — si el sistema detecta que algo no cuadra, tiene que retener el efecto, no solo pintar un cartel; (b) una función crítica no puede depender de la aprobación de un tercero, y si depende, hay que saber que está apagada, no descubrirlo el día que alguien la necesita.
+
+### C-058 · La pantalla de Documentos duplicaba los partes, y el asalariado veía demasiado
+- Fecha: 2026-08-12
+- Área: `app/src/app/(dashboard)/documentos/page.tsx`, `backend/src/routes/documentoVehiculo.routes.ts`, `backend/src/services/ocrDocumentoVehiculo.service.ts`, `backend/src/services/aplicarDocumento.service.ts`, `app/src/components/features/resumen-mes-conductor.tsx`
+
+**1. El asalariado sabía exactamente qué hueco tenía que justificar.**
+Al retener un parte (C-057) le enseñábamos el detalle: *"el ticket dice 148,60 € y declaraste 95 €"*. Alberto lo cortó en cuanto lo vio, y tiene razón: eso es darle la medida de la historia que le toca contar. Ahora ve **que** algo no cuadra y de qué día, nada más.
+- Se filtra en el **backend**, no en la pantalla: ocultarlo solo en el frontend dejaba el dato viajando en la respuesta, a un inspector de vista de distancia. `GET /api/partes/:id` devuelve a un no-patrón el parte sin anomalías y sin las discrepancias del OCR. Verificado con las dos sesiones: 0 y 0 para el asalariado, 2 y 2 para el dueño.
+- Lección general: **una regla de privacidad que solo vive en la UI no es una regla.**
+
+**2. Documentos listaba partes.**
+La pantalla mostraba los partes con sus tickets — es decir, la pantalla de partes otra vez. Lo que faltaba era la carpeta del taxi: la ITV, la factura de los neumáticos, el seguro. Reescrita entera.
+
+**3. El circuito documental, que no existía.**
+Se sube el papel → el OCR **propone** (tipo, fecha, importe, validez, qué mantenimientos resuelve) → una persona confirma → el contador del mantenimiento se pone al día con su fecha nueva **y** el importe se registra como gasto con la factura enganchada. Todo en una transacción: un gasto sin su mantenimiento actualizado (o al revés) es peor que no hacer nada, porque nadie se entera de que falta la mitad.
+- La regla de quién confirma la fijó Alberto y no es la obvia: **lo que dispara la revisión del dueño no es quién sube el documento, sino si esa persona contradice a la imagen.** Si el asalariado acepta lo que pone el papel, se aplica solo; si lo corrige, va a revisión. Si corrige el dueño, manda él.
+- Se guardan **las dos versiones** (lo que leyó la máquina y lo que vale) con autor y fecha.
+- El kilometraje oficial no se toca: §5.3 del maestro. Una factura puede ser de hace tres días.
+- Verificado end-to-end contra la base de prueba con una factura combinada (4 neumáticos + alineado + pastillas, 620 €): mantenimiento de neumáticos al día con la fecha y los km de la factura, gasto de 620 € creado, km del vehículo intacto, y **aviso explícito** de que "Pastillas de freno" no estaba dado de alta en ese vehículo en vez de fallar en silencio.
+- **Honestidad sobre el OCR, que es la lección cara de esta semana:** los patrones de ITV y factura están escritos contra el formato habitual, no contra documentos reales pasados por Tesseract. Ya sabemos lo que vale eso (C-043, C-054, C-055): poco. Lo que sostiene el dato mientras tanto es el paso de confirmación — si el OCR no lee un campo, lo declara faltante y lo escribe la persona.
+- Detalle divertido de la prueba: el parser no leyó la matrícula `0000DMO` del vehículo ficticio. No es un fallo: la `O` no existe en las matrículas españolas (se excluye para no confundirla con el cero). La matrícula inventada era imposible; el parser tenía razón.
+
+**4. Mini-panel del asalariado.** Lo que ha entregado neto (bruto − combustible, la misma definición que usa el motor de cálculo), días trabajados, km, €/km y €/día. No ve su reparto: eso es del dueño. Los partes retenidos no suman, y se dice.
+- Verificado: 205/205 tests.
+- **Prevención:** antes de dar por buena una pantalla, preguntar qué está enseñando de más. "Documentos" llevaba meses siendo un duplicado de "Partes" y nadie lo miró; el detalle de las discrepancias se coló porque parecía transparencia y era ventaja para quien tiene que dar explicaciones.
