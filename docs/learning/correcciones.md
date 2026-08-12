@@ -909,3 +909,35 @@ Tres cambios: la tarjeta ahora sale del **mismo cálculo que el panel** (`/dashb
 - 262/262 tests.
 - **Prevención, y es la lección:** *el backend puede estar en lo cierto y el producto estar roto igual.* Los tres primeros fallos habrían pasado cualquier test de backend —los datos eran correctos—, y ninguno era discutible para quien miraba la pantalla. Cuando se cierra un circuito nuevo, la verificación tiene que llegar **hasta lo que ve la persona**, no hasta la fila de la base de datos. Es la hermana de la lección de C-063 ("un endpoint verificado no es un circuito verificado"), un paso más allá.
 - **Corolario concreto:** *nunca enseñar un enum de la base de datos tal cual.* `PENDIENTE` significaba dos cosas opuestas según si había una ejecución anterior. Si un estado necesita contexto para entenderse, la pantalla tiene que dar ese contexto o traducirlo.
+
+---
+
+### C-066 · El comentario decía la verdad; la línea estaba dos bloques más abajo
+- Fecha: 2026-08-13
+- Área: `backend/src/index.ts`
+
+**El síntoma.** Alberto corrigió el `redirect_uri_mismatch` en Google Cloud Console, pulsó "Conectar mi Drive", aceptó el permiso en Google — y al volver se encontró esto en la cara, como texto plano en el navegador:
+
+```json
+{"status":"FAIL","error":"auth_required","message":"Token de autenticacion requerido"}
+```
+
+**La causa.** `GET /api/drive/callback` lo llama el navegador del cliente **redirigido por Google**. Esa petición no lleva nuestra cookie ni nuestra cabecera `Authorization`: viene de `accounts.google.com`. Lo que la autentica es el `state` firmado con HMAC, que comprueba el propio router.
+
+El router estaba bien: el callback nunca tuvo `requireAuth`. Lo que estaba mal era el **orden de montaje**. Express ejecuta los `app.use` por orden de registro, y el cableado era:
+
+```
+línea 146:  app.use('/api', requireAuth, requireNexosPayAccess());   ← guardia global
+...
+línea 160:  app.use('/api/drive', driveRoutes);                      ← demasiado tarde
+```
+
+El guardia se comía la petición antes de que llegara al router. Y el detalle que lo resume: **el comentario justo encima de la línea 160 decía "por eso va montado antes del requireAuth global"**. Describía la intención correcta. La línea estaba debajo. Nadie volvió a mirar si el código hacía lo que el comentario prometía.
+
+**La corrección.** El montaje sube por encima del guardia global, con `requireNexosPayAccess()` explícito para no abrir de más: los otros endpoints (`/estado`, `/conectar`, `/desconectar`) conservan su `requireAuth` y su `requirePatron` dentro del router, así que no quedan expuestos. Solo el callback pasa sin sesión, que es justo lo que necesita.
+
+Al mover la línea quedó el montaje viejo duplicado —el router montado dos veces—, cazado antes de subir. De ahí uno de los tests nuevos.
+
+- 266/266 tests, con tres nuevos que cubren esto por los dos lados: que el callback no lleva sesión delante, que los demás endpoints sí, y **que `/api/drive` se monta antes del guardia global**.
+- **Prevención, y es incómoda:** *un comentario no es una garantía.* Este decía exactamente lo correcto y llevaba meses siendo falso. Cuando un comentario afirma una propiedad del cableado ("esto va antes que aquello", "esto no pasa por aquí"), esa propiedad hay que **afirmarla en un test**, no en prosa. El test de este caso lee `index.ts` como texto y compara posiciones — poco elegante, pero es que `index.ts` abre el puerto al importarse y no se puede montar en una prueba, y ninguna prueba del router habría visto nada: el router siempre fue correcto.
+- **Corolario:** los fallos de orden de middleware no los ve ningún test unitario de la pieza afectada. Solo se ven ejecutando el circuito entero o afirmando el cableado. Otra vuelta de la lección de C-063.

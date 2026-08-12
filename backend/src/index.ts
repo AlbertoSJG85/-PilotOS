@@ -141,6 +141,22 @@ app.use('/uploads', async (req: express.Request, res: express.Response, next: ex
 // ============================================
 // Protected routes (auth required)
 // ============================================
+// Drive DEL CLIENTE. Va ANTES del guardia global y no es un descuido
+// (2026-08-13, C-066): la vuelta de Google —`GET /api/drive/callback`— la
+// hace el navegador del cliente redirigido por Google, SIN nuestra cabecera
+// de sesión ni nuestra cookie. Lo que autentica esa petición es el `state`
+// firmado con HMAC que comprueba el propio router.
+//
+// Montado después del guardia, el callback moría en un 401 `auth_required`
+// y el cliente veía un JSON crudo en la cara justo al volver de Google, con
+// la conexión a medio hacer. El comentario de este bloque ya decía "va
+// montado antes del requireAuth global" — pero la línea estaba debajo.
+//
+// Los otros endpoints (/estado, /conectar, /desconectar) NO quedan abiertos:
+// llevan su propio requireAuth y su propio requirePatron dentro del router,
+// más la comprobación de Pay que se les pone aquí.
+app.use('/api/drive', requireNexosPayAccess(), driveRoutes);
+
 // Pay gobierna el acceso del cliente PilotOS. Los routers conservan sus
 // controles RBAC propios; requireAuth es idempotente para no repetir consultas.
 app.use('/api', requireAuth, requireNexosPayAccess());
@@ -155,9 +171,7 @@ app.use('/api/fotos', fotoRoutes);
 // /api/fotos, que son los tickets del parte diario.
 app.use('/api/documentos-vehiculo', documentoVehiculoRoutes);
 app.use('/api/notificaciones', notificacionRoutes);
-// Drive DEL CLIENTE: el callback de Google no lleva sesion (lo autentica el
-// state firmado), por eso va montado antes del requireAuth global.
-app.use('/api/drive', driveRoutes);
+// (Drive va montado más arriba, antes del guardia global. Ver el porqué allí.)
 app.use('/api/incidencias', incidenciaRoutes);
 app.use('/api/cierres', cierreRoutes);
 app.use('/api/dashboard', dashboardRoutes);
