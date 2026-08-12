@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, CheckCircle, Clock, AlertCircle, Car, Fuel, Receipt } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Clock, AlertCircle, AlertTriangle, Car, Fuel, Receipt } from 'lucide-react';
 import { getParte } from '@/lib/api';
 import { formatCurrency, formatDate, urlDocumento } from '@/lib/utils';
 import type { ParteDiario } from '@/types';
@@ -12,6 +12,13 @@ function EstadoBadge({ estado }: { estado: string }) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-950/60 border border-emerald-800/50 px-3 py-1 text-xs font-semibold text-emerald-400">
         <CheckCircle className="h-3.5 w-3.5" /> Enviado
+      </span>
+    );
+  }
+  if (estado === 'PENDIENTE_VALIDACION') {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-950/60 border border-amber-800/50 px-3 py-1 text-xs font-semibold text-amber-400">
+        <AlertTriangle className="h-3.5 w-3.5" /> Pendiente de revisión
       </span>
     );
   }
@@ -70,6 +77,14 @@ export default function ParteDetalleConductor() {
     );
   }
 
+  // Las discrepancias viven dentro del OCR de cada documento (mismo formato
+  // que usa el detalle del dueño). Aquí se aplanan para listarlas juntas.
+  const discrepancias: Array<{ campo: string; severidad: 'NORMAL' | 'CRITICA'; mensaje: string }> =
+    (parte.documentos ?? []).flatMap((enlace) => {
+      const datos = (enlace as { documento?: { ocr_datos_extraidos?: { discrepancias?: unknown } } }).documento?.ocr_datos_extraidos;
+      return Array.isArray(datos?.discrepancias) ? datos.discrepancias : [];
+    });
+
   const km = parte.km_fin && parte.km_inicio ? parte.km_fin - parte.km_inicio : null;
   const efectivo = Number(parte.ingreso_bruto) - Number(parte.ingreso_datafono);
   const calculo = parte.calculo;
@@ -91,6 +106,31 @@ export default function ParteDetalleConductor() {
       </header>
 
       <div className="px-5 py-6 space-y-5">
+
+        {/* Qué no cuadra (2026-08-12). El asalariado tiene derecho a ver
+            exactamente qué se le está señalando, con las dos cifras delante,
+            y a saber que el parte está parado hasta que el dueño decida. */}
+        {parte.estado === 'PENDIENTE_VALIDACION' && (
+          <div className="rounded-2xl border border-amber-800/50 bg-amber-950/30 p-5">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-300">Este parte todavía no cuenta</p>
+                <p className="text-xs text-amber-200/80 mt-1">
+                  Hay diferencias entre lo que declaraste y lo que dice el ticket. El dueño lo revisará y
+                  decidirá si lo acepta o te pide que lo hagas otra vez.
+                </p>
+              </div>
+            </div>
+            {discrepancias.length > 0 && (
+              <ul className="mt-3 space-y-2 border-t border-amber-900/40 pt-3">
+                {discrepancias.map((d, i) => (
+                  <li key={i} className="text-xs text-zinc-300">· {d.mensaje}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {/* Resumen principal */}
         <div className="rounded-2xl bg-zinc-900 border border-zinc-800 p-5">
