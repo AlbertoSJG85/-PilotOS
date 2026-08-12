@@ -1,5 +1,6 @@
 import Tesseract from 'tesseract.js';
 import sharp from 'sharp';
+import fs from 'fs';
 
 const UMBRAL_CONFIANZA = 60;
 
@@ -110,9 +111,69 @@ export async function analizarImagen(imagenPath: string): Promise<ImagenAnalisis
  * con ese fallo es responsabilidad del caller — esta función NO declara
  * que la imagen es "ilegible". Eso lo decide analizarImagen().
  */
+/**
+ * Prepara la imagen ANTES de pasarla por Tesseract (2026-08-12, C-060).
+ *
+ * Esto es lo que arregla el fallo que más ha costado: el ticket ponía
+ * "Borrados: 297" y Tesseract leía "2937", una y otra vez. No era el parser
+ * —el número llegaba ya mal— sino la resolución: la letra del ticket, tal y
+ * como sale de la foto, es demasiado pequeña para el motor. Tesseract está
+ * afinado para texto a ~300 dpi; con menos, se inventa trazos.
+ *
+ * Tres pasos:
+ *   1. Escala de grises: el color no aporta nada y sí ruido.
+ *   2. Normalizar el contraste: la foto de un ticket suele salir grisácea.
+ *   3. Agrandar x2,5 con lanczos3. Este es el que arregla el problema.
+ *
+ * ── LO QUE NO SE HACE, Y POR QUÉ ─────────────────────────────────────────
+ * NO se afila (`sharpen`) y NO se binariza (`threshold`). Los dos parecían
+ * buena idea y los dos ROMPEN tickets: con afilado, el ticket del 10/08 sale
+ * perfecto pero el del 08/08 pierde la línea de "Borrados" y el importe del
+ * turno. Es exactamente la trampa de siempre en este módulo — ajustar contra
+ * una sola foto y cantar victoria.
+ *
+ * ── CÓMO SE ELIGIÓ ───────────────────────────────────────────────────────
+ * Probando 6 combinaciones (escalas 1,5 / 2 / 2,5 × afilado sí/no) contra las
+ * DOS fotos reales que hay, y midiendo los 9 campos clave contra lo que pone
+ * el papel:
+ *
+ *   x2   plano    7/9   (pierde el importe del turno en las dos)
+ *   x2,5 afilado  8/9
+ *   x2,5 plano    9/9   ← esta
+ *
+ * Los dos tickets están en tests/fixtures y el test `smoke.ocrImagenReal`
+ * comprueba esta tubería entera. Si alguien cambia estos parámetros y ese
+ * test se pone rojo, ha roto la lectura de tickets reales.
+ */
+async function prepararImagenParaOcr(imagenPath: string): Promise<string> {
+    const salida = imagenPath.replace(/\.(jpe?g|png|webp)$/i, '') + '.ocr.png';
+    const meta = await sharp(imagenPath).metadata();
+    // Tope de 5000 px para que una foto enorme no dispare la memoria del
+    // servidor: por encima de eso Tesseract tampoco mejora.
+    const anchoObjetivo = Math.min(Math.round((meta.width ?? 1200) * 2.5), 5000);
+
+    await sharp(imagenPath)
+        .grayscale()
+        .normalize()
+        .resize({ width: anchoObjetivo, kernel: 'lanczos3' })
+        .png()
+        .toFile(salida);
+
+    return salida;
+}
+
 export async function extraerTextoImagen(imagenPath: string): Promise<OCRResult> {
+    let rutaPreparada: string | null = null;
     try {
-        const { data } = await Tesseract.recognize(imagenPath, 'spa', {
+        // Si la preparación falla (imagen rara, sin memoria...), se sigue con
+        // la original: peor lectura, pero lectura al fin y al cabo.
+        try {
+            rutaPreparada = await prepararImagenParaOcr(imagenPath);
+        } catch (err: any) {
+            console.warn('[OCR] No se pudo preparar la imagen, se usa la original:', err?.message);
+        }
+
+        const { data } = await Tesseract.recognize(rutaPreparada ?? imagenPath, 'spa', {
             logger: (m) => {
                 if (m.status === 'recognizing text') {
                     console.log(`OCR progreso: ${Math.round(m.progress * 100)}%`);
@@ -125,6 +186,12 @@ export async function extraerTextoImagen(imagenPath: string): Promise<OCRResult>
     } catch (error: any) {
         console.error('[OCR] Error en Tesseract (no implica imagen ilegible):', error.message);
         return { texto: '', confianza: 0, legible: false, error_ocr: 'tesseract_error' };
+    } finally {
+        // El PNG preparado es de usar y tirar: pesa más que el original y ya
+        // no sirve de nada. Si no se puede borrar, tampoco es grave.
+        if (rutaPreparada) {
+            try { fs.unlinkSync(rutaPreparada); } catch { /* da igual */ }
+        }
     }
 }
 
@@ -146,9 +213,22 @@ export async function extraerTextoImagen(imagenPath: string): Promise<OCRResult>
 function normalizarNumerosOcr(t: string): string {
     return t
         // separador decimal leído como símbolo raro: 144605» 85 -> 144605.85
-        .replace(/(\d)\s*[»«>·—–]\s*(\d)/g, '$1.$2')
+        // La lista ha ido creciendo con cada ticket real: `»«>·—–` salieron el
+        // 2026-08-11, y `;` y `"` el 2026-08-12 ("Carreras: 144655; 60",
+        // "carreras" 144605» 89"). Es texto de impresora térmica fotografiado:
+        // cualquier símbolo pequeño puede acabar aquí.
+        .replace(/(\d)\s*[»«>·—–;:"']\s*(\d)/g, '$1.$2')
         // guion entre cifras cuando hace de decimal: 1967-05 -> 1967.05
         .replace(/(\d)-(\d{1,2})(?!\d)/g, '$1.$2')
+        // separador decimal PERDIDO del todo, solo queda el espacio:
+        // "P Carreras: 49 75" -> 49.75. Se exigen exactamente dos decimales
+        // para no tocar cifras como "144 655" (miles) ni contadores enteros.
+        .replace(/(d)[ 	]+(d{2})(?!d)/g, '$1.$2')
+        // separador decimal PERDIDO del todo, del que solo queda el espacio:
+        // "P Carreras: 49 75" -> 49.75 (el ticket pone 49,75). Se exigen
+        // exactamente DOS decimales y que no siga otro digito, para no tocar
+        // separadores de miles ("144 655") ni contadores enteros.
+        .replace(/(\d)[ \t]+(\d{2})(?!\d)/g, '$1.$2')
         // decimal con el separador BIEN leido pero un espacio detras:
         // "Total: 149047, 40" -> 149047.40. Sin esto el patron de importe
         // (que exige separador + 2 digitos pegados) no casa y el campo se
@@ -243,6 +323,8 @@ export interface DatosTaximetro {
     parc_carreras?: number;
     parc_suplementos?: number;
     parc_total?: number;         // clave: comparar con ingreso_bruto
+    /** true = P Total no cuadraba con Carreras+Suplementos y se uso la suma. */
+    parc_total_reconstruido?: boolean;
     parc_dist_total?: number;    // clave: comparar con km_fin-km_inicio
     parc_dist_ocupado?: number;
     parc_dist_libre?: number;
@@ -495,8 +577,27 @@ export function validarTicketTaximetro(texto: string): DatosTaximetro {
         /\bt(?:iempo)?\.?\s*on\s*[:.]?\s*(\d+)/i,
     ]) ?? undefined;
 
+    // ── Coherencia interna del turno (2026-08-12, C-060) ──────────────────
+    // P Carreras + P Suplementos tiene que dar P Total. Cuando no cuadra, la
+    // cifra que se descarta es P Total: son tres lecturas independientes y dos
+    // que suman bien pesan más que una suelta.
+    //
+    // Caso real del ticket del 10/08: el papel pone "P Total: 51,55" y
+    // Tesseract lee "1.55" —se come el 5 al confundir el borde del ticket con
+    // un carácter—, mientras que 49,75 + 1,80 salen perfectos. Sin esto, el
+    // parte se comparaba contra 1,55 € y saltaba una diferencia absurda.
+    let parc_total_corregido = parc_total_final;
+    let parc_total_reconstruido = false;
+    if (parc_carreras !== undefined && parc_suplementos !== undefined) {
+        const suma = Number((parc_carreras + parc_suplementos).toFixed(2));
+        if (parc_total_corregido === undefined || Math.abs(suma - parc_total_corregido) > 1) {
+            parc_total_corregido = suma;
+            parc_total_reconstruido = true;
+        }
+    }
+
     // ── Validación ──
-    if (!parc_total_final) {
+    if (!parc_total_corregido) {
         errores.push('No se pudo detectar el importe del turno (P Total)');
     }
     if (!fecha) {
@@ -521,14 +622,15 @@ export function validarTicketTaximetro(texto: string): DatosTaximetro {
         parc_num_servicios,
         parc_carreras,
         parc_suplementos,
-        parc_total: parc_total_final,
+        parc_total: parc_total_corregido,
+        parc_total_reconstruido,
         parc_dist_total,
         parc_dist_ocupado,
         parc_dist_libre,
         parc_dist_off,
         parc_tiempo_ocupado,
         parc_tiempo_on,
-        importe: parc_total_final, // backward compat
+        importe: parc_total_corregido, // backward compat
         valido: errores.length === 0,
         errores,
     };

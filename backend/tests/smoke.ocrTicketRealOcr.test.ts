@@ -172,11 +172,26 @@ describe('parser contra la salida REAL de Tesseract (ticket 10/08/2026)', () => 
      * de comparación — ver smoke.ocrFiabilidad.test.ts, que usa exactamente
      * estos valores.
      */
-    it('lecturas erróneas conocidas: el parser las devuelve, el motor de alertas debe filtrarlas', () => {
+    /**
+     * CLAVE, y actualizado el 2026-08-12 (C-060): este texto es la salida de
+     * Tesseract SIN preparar la imagen. Con ese texto, borrados y distancia
+     * llegan ya mal y el parser no puede hacer nada — se arreglan aguas
+     * arriba, agrandando la foto antes de leerla (ver el test contra la
+     * imagen real, smoke.ocrImagenReal.test.ts).
+     *
+     * Lo que SÍ puede arreglar el parser es el importe del turno, y ahora lo
+     * hace: "P Total: 91-55" no cuadra con P Carreras 49,75 + P Suplementos
+     * 1,80 = 51,55, así que se queda con la suma. Dos lecturas que encajan
+     * pesan más que una suelta.
+     */
+    it('lecturas erróneas: las que puede arreglar el parser, las arregla; las que no, las devuelve tal cual', () => {
+        // No arreglables desde el texto: se corrigen preparando la imagen.
         expect(r.acum_borrados).toBe(2937);       // el ticket pone 297
         expect(r.acum_dist_total).toBe(1831080);  // el ticket pone 183.108,0
-        expect(r.parc_total).toBeCloseTo(91.55, 2); // el ticket pone 51,55
-        // La prueba de que 91,55 está mal está en el propio ticket:
+
+        // Arreglable por coherencia interna, y arreglado:
+        expect(r.parc_total).toBeCloseTo(51.55, 2);
+        expect(r.parc_total_reconstruido).toBe(true);
         expect(r.parc_carreras! + r.parc_suplementos!).toBeCloseTo(51.55, 2);
     });
 });

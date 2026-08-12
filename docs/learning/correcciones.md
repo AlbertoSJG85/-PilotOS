@@ -759,3 +759,21 @@ La home del asalariado es para **trabajar**: avisos, el parte de hoy y poco más
 - En su panel, además, los **acumulados del mes por datáfono y en efectivo**: el efectivo es lo que de verdad tiene que entregar, y verlo separado le ahorra la cuenta a mano.
 - Verificado: 208/208 tests, y el ciclo completo probado con las dos sesiones del entorno ficticio.
 - **Prevención:** cuando una función tenga dos lados (quien decide y quien lo sufre), construir los dos a la vez. La retención se dio por terminada con el lado del dueño resuelto, y estaba a medias.
+
+### C-060 · El OCR leía "2937" donde el ticket pone "297" — cuarto intento, y el bueno
+- Fecha: 2026-08-12
+- Área: `backend/src/services/ocr.service.ts`, `backend/tests/smoke.ocrImagenReal.test.ts`, `backend/tests/fixtures/`
+
+**El problema, después de tres arreglos fallidos.** Alberto subió otro parte y el contador de borrados volvió a leerse `2937` cuando el papel pone `297`, dejándole un parte retenido sin motivo. Tres días arreglando el parser (C-043, C-054, C-055) y el fallo seguía.
+
+**La causa: no estaba en el parser.** El número llegaba ya mal desde Tesseract. Todo el trabajo anterior se había hecho sobre el TEXTO — transcripciones primero, salida literal de Tesseract después — y con el texto ya equivocado ningún parser puede acertar. El problema estaba un paso antes: **la imagen**. La letra del ticket, tal y como sale de la foto del móvil, es demasiado pequeña para el motor; Tesseract está afinado para ~300 dpi y por debajo se inventa trazos.
+
+**La solución: preparar la imagen antes de leerla.** Grises + normalizar contraste + agrandar x2,5 con lanczos3. Nada más.
+
+**Y el error que casi cometo otra vez.** La primera versión llevaba `sharpen`, y con ella el ticket del 10/08 salía *perfecto*: 297 borrados, la distancia acumulada bien (183.108,0 en vez del 1831080 que también rompía), el importe del turno... 7 de 7. Estuve a punto de darlo por cerrado. Al probarlo contra **la otra foto real** que había en producción, el 08/08 perdía la línea entera de "Borrados" y el importe del turno. Es la misma trampa de C-043 y C-054 —validar contra un solo ejemplo— pero un nivel más arriba.
+- Se probaron 6 combinaciones (escalas 1,5/2/2,5 × afilado sí/no) contra las DOS fotos, midiendo 9 campos contra lo que pone el papel: `x2 plano` 7/9, `x2,5 afilado` 8/9, **`x2,5 plano` 9/9**.
+- Añadido también: el importe del turno se reconstruye por coherencia interna cuando P Total no cuadra con P Carreras + P Suplementos (el ticket del 10/08 pone 51,55 y Tesseract lee "1.55" al confundir el borde del papel con un carácter). Y dos separadores decimales nuevos a la lista, `;` y `"`, que aparecieron en estas fotos.
+
+**Lo que hace que esto no vuelva a pasar:** las dos fotos están ahora en `tests/fixtures/` y `smoke.ocrImagenReal.test.ts` pasa la tubería COMPLETA —imagen → OCR → parser— comparando con lo que se lee mirando el papel. Es lento (unos 16 segundos) y da igual: es la única prueba que detecta esta clase de fallo. Los tests sobre texto siguen ahí, pero ya sabemos que no bastan.
+
+- **Prevención, y van cuatro:** *un fallo de lectura no se arregla mirando solo el texto.* Cuando el dato llega mal, hay que subir un escalón y preguntarse qué le estamos dando al motor. Y toda mejora de OCR se valida contra **todas** las fotos reales disponibles, nunca contra una — si solo hay una, no está validada.
