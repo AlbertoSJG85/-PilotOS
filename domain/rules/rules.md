@@ -141,7 +141,8 @@ Fuente: Documentación canónica.
 | Seguro del vehículo | Renovación anual |
 | ITV del vehículo | Según matriculación |
 | ITV / verificación del taxímetro | Periódica |
-| Revisión sanitaria anual | Obligatoria |
+| Inspección técnica autotaxi | Obligatoria (antes "Revisión sanitaria anual") |
+| Tarjeta de transporte | Cada 2 años |
 | Impuestos trimestrales (IGIC/IRPF) | Trimestral |
 | Presentación de renta anual | Anual |
 | Inspecciones municipales | Según factura |
