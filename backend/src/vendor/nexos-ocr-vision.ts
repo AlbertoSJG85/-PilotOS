@@ -16,7 +16,7 @@
  * el segundo producto que necesite leer papeles debe partir del original, no
  * de esta copia.
  *
- * Copiado el 2026-08-13 desde @nexos/ocr-vision v0.1.0.
+ * Copiado el 2026-08-13 desde @nexos/ocr-vision v0.1.1 (reintento ante fallo transitorio, C-069).
  * ─────────────────────────────────────────────────────────────────────────
  */
 
@@ -156,22 +156,37 @@ function extraerTextoDeRespuesta(cuerpo: unknown): string | null {
 }
 
 /**
- * Transcribe una imagen. Nunca lanza: devuelve `null` si no ha podido.
- *
- * @param imagenBase64 la imagen ya codificada, sin el prefijo `data:`
- * @param mimeType     `image/jpeg`, `image/png`...
- * @param contexto     una línea sobre qué papel es. Ayuda al modelo a saber
- *                     qué esperar ("ticket de taxímetro", "factura de taller").
+ * Espera de vuelta a `intentarTranscripcion` después de un fallo transitorio
+ * (2026-08-13, C-069). Corta, y a propósito: si el error fuera de verdad
+ * persistente, el segundo intento tarda lo mismo en fallar y Tesseract entra
+ * igual — este retraso solo evita gastar el reintento en pleno pico del
+ * proveedor, que es cuando un 500 puntual suele darse.
  */
-export async function transcribirImagen(
+const ESPERA_REINTENTO_MS = 800;
+
+/**
+ * ¿Merece la pena reintentar, o es un fallo que se va a repetir igual?
+ *
+ * Un 4xx (clave mala, payload rechazado, límite de contenido) va a fallar
+ * exactamente igual la segunda vez — reintentarlo solo dobla la espera antes
+ * de caer a Tesseract. Un 5xx o un fallo de red sí es plausible que sea del
+ * momento: el 2026-08-13, un acta de ITV real chocó con un 500 puntual de
+ * OpenAI ("server_error", sin más detalle) y la lectura entera de esa foto se
+ * fue a Tesseract, que la dejó al 55% de confianza y con el texto roto. Un
+ * solo reintento habría bastado.
+ */
+function mereceReintento(status: number | undefined): boolean {
+    if (status === undefined) return true; // fallo de red / timeout / abort
+    return status >= 500;
+}
+
+/** Un intento de transcripción, sin reintentar. */
+async function intentarTranscripcion(
     imagenBase64: string,
     mimeType: string,
     contexto: string,
     opciones: OpcionesLector,
-): Promise<Transcripcion | null> {
-    if (!opciones.apiKey) return null;
-    if (!imagenBase64) return null;
-
+): Promise<{ ok: true; valor: Transcripcion } | { ok: false; status?: number }> {
     const modelo = opciones.modelo ?? MODELO_POR_DEFECTO;
     const hacerFetch = opciones.fetchImpl ?? fetch;
     const timeoutMs = opciones.timeoutMs ?? TIMEOUT_POR_DEFECTO_MS;
@@ -213,32 +228,71 @@ export async function transcribirImagen(
         if (!respuesta.ok) {
             const detalle = await respuesta.text().catch(() => '');
             console.warn(`[OCR-VISION] ${respuesta.status}: ${detalle.slice(0, 300)}`);
-            return null;
+            return { ok: false, status: respuesta.status };
         }
 
         const crudo = extraerTextoDeRespuesta(await respuesta.json());
         if (!crudo) {
             console.warn('[OCR-VISION] Respuesta sin texto reconocible');
-            return null;
+            return { ok: false };
         }
 
         const datos = JSON.parse(crudo) as { texto?: string; legible?: boolean; dudas?: string[] };
-        if (typeof datos.texto !== 'string' || datos.texto.trim() === '') return null;
+        if (typeof datos.texto !== 'string' || datos.texto.trim() === '') return { ok: false };
 
         return {
-            texto: datos.texto,
-            legible: datos.legible !== false,
-            dudas: Array.isArray(datos.dudas) ? datos.dudas : [],
-            modelo,
+            ok: true,
+            valor: {
+                texto: datos.texto,
+                legible: datos.legible !== false,
+                dudas: Array.isArray(datos.dudas) ? datos.dudas : [],
+                modelo,
+            },
         };
     } catch (err: any) {
         // Incluye el abort del timeout. Nunca se propaga: el producto sigue
         // con su lector de siempre.
         console.warn('[OCR-VISION] No se pudo transcribir:', err?.message ?? err);
-        return null;
+        return { ok: false };
     } finally {
         clearTimeout(temporizador);
     }
+}
+
+function esperar(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Transcribe una imagen. Nunca lanza: devuelve `null` si no ha podido.
+ *
+ * Reintenta UNA vez si el primer fallo parece del momento (5xx, red, timeout)
+ * — ver `mereceReintento`. Un fallo que no es del momento (4xx) no se
+ * reintenta: fallaría igual y solo retrasaría la caída a Tesseract.
+ *
+ * @param imagenBase64 la imagen ya codificada, sin el prefijo `data:`
+ * @param mimeType     `image/jpeg`, `image/png`...
+ * @param contexto     una línea sobre qué papel es. Ayuda al modelo a saber
+ *                     qué esperar ("ticket de taxímetro", "factura de taller").
+ */
+export async function transcribirImagen(
+    imagenBase64: string,
+    mimeType: string,
+    contexto: string,
+    opciones: OpcionesLector,
+): Promise<Transcripcion | null> {
+    if (!opciones.apiKey) return null;
+    if (!imagenBase64) return null;
+
+    const primero = await intentarTranscripcion(imagenBase64, mimeType, contexto, opciones);
+    if (primero.ok) return primero.valor;
+    if (!mereceReintento(primero.status)) return null;
+
+    console.warn('[OCR-VISION] Reintentando tras fallo transitorio...');
+    await esperar(ESPERA_REINTENTO_MS);
+
+    const segundo = await intentarTranscripcion(imagenBase64, mimeType, contexto, opciones);
+    return segundo.ok ? segundo.valor : null;
 }
 
 /** ¿Está el lector configurado? Para que el producto sepa si puede contar con él. */
