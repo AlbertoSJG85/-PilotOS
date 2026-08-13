@@ -244,7 +244,11 @@ function subirCopiaADrive(
         if (r.ok && r.webViewLink) {
             await prisma.documento.update({
                 where: { id: documentoId },
-                data: { drive_web_link: r.webViewLink },
+                // drive_file_id (2026-08-13, C-072): antes se pedía a la API
+                // y se tiraba. Sin él, un fichero mal archivado (carpeta o
+                // fecha equivocada) no se podía corregir sin ir a buscarlo a
+                // mano por la URL.
+                data: { drive_web_link: r.webViewLink, drive_file_id: r.id ?? null },
             });
         } else if (r.error && r.error !== 'sin_conexion_drive' && r.error !== 'drive_no_configurado') {
             // "No lo tiene conectado" no es un fallo: es lo normal.

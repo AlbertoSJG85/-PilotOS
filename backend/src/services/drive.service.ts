@@ -47,11 +47,23 @@ const MESES = [
     'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
 ];
 
-/** Nombre de carpeta por tipo de documento. Lo que vería un humano. */
+/**
+ * Nombre de carpeta por tipo de documento. Lo que vería un humano.
+ *
+ * CERTIFICADO_ITV ya NO es "ITV" a secas (2026-08-13, C-071 / C-072): el
+ * mismo `tipo` agrupa la ITV de tráfico/DGT y el acta municipal de
+ * Inspección Técnica Auto-Taxi del ayuntamiento, que NO es la ITV. Mismo
+ * criterio que el frontend (`ETIQUETA_TIPO` en la pantalla de documentos) —
+ * si un día se separan en tipos distintos, aquí también hay que separarlos.
+ *
+ * TARJETA_TRANSPORTE faltaba directamente: antes de hoy ese tipo no existía,
+ * así que cualquier tarjeta subida caía en "Otros" sin que nadie se enterara.
+ */
 const CARPETA_POR_TIPO: Record<string, string> = {
-    CERTIFICADO_ITV: 'ITV',
+    CERTIFICADO_ITV: 'Inspección técnica',
     FACTURA_TALLER: 'Facturas de taller',
     POLIZA_SEGURO: 'Seguro',
+    TARJETA_TRANSPORTE: 'Tarjeta de transporte',
 };
 
 export interface ConfiguracionGoogle {
@@ -306,6 +318,11 @@ async function carpetaDestino(token: string, clienteId: string, fecha: Date, tip
 export interface ResultadoSubida {
     ok: boolean;
     webViewLink?: string;
+    /** Id del fichero en Drive. Antes de hoy se pedía a la API y se tiraba
+     *  sin guardar (`drive_file_id` se quedaba vacío para siempre) — sin él
+     *  no hay forma de corregir un fichero que se subió mal archivado sin
+     *  ir a buscarlo a mano por la URL. */
+    id?: string;
     error?: string;
 }
 
@@ -362,12 +379,38 @@ export async function subirDocumentoADrive(
         await limpiarError(clienteId);
 
         const creado = (await res.json()) as { id: string; webViewLink?: string };
-        return { ok: true, webViewLink: creado.webViewLink };
+        return { ok: true, webViewLink: creado.webViewLink, id: creado.id };
     } catch (err: any) {
         console.error('[DRIVE] Subida fallida (no bloquea):', err?.message);
         const error = String(err?.message ?? 'error_desconocido').slice(0, 300);
         await anotarError(clienteId, error);
         return { ok: false, error };
+    }
+}
+
+/**
+ * Manda un fichero a la papelera de Drive (2026-08-13, C-072).
+ *
+ * Papelera, no borrado permanente: existe para corregir un fichero que se
+ * archivó mal (carpeta o fecha equivocada por un dato mal leído del
+ * documento) subiendo uno nuevo bien archivado, sin perder el original si
+ * algo sale mal. Nunca lanza — igual que el resto de este módulo, un fallo
+ * aquí no puede impedir que el flujo normal siga.
+ */
+export async function papeleraDrive(clienteId: string, fileId: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+        const token = await tokenValido(clienteId);
+        if (!token) return { ok: false, error: 'sin_conexion_drive' };
+
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trashed: true }),
+        });
+        if (!res.ok) return { ok: false, error: `google_${await motivoGoogle(res)}` };
+        return { ok: true };
+    } catch (err: any) {
+        return { ok: false, error: String(err?.message ?? 'error_desconocido').slice(0, 300) };
     }
 }
 

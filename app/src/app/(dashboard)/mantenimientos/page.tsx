@@ -40,6 +40,7 @@ export default function MantenimientosPage() {
   const [loading, setLoading] = useState(true);
   const [selectedVehiculo, setSelectedVehiculo] = useState<string | null>(null);
   const [user, setUser] = useState<ReturnType<typeof getSessionUser>>(null);
+  const [tab, setTab] = useState<'caducado' | 'al_dia' | 'sin_configurar'>('caducado');
 
   // Estado para resolver
   const [resolvingId, setResolvingId] = useState<string | null>(null);
@@ -168,13 +169,28 @@ export default function MantenimientosPage() {
   }
 
   const currentMants = selectedVehiculo ? (mantenimientos[selectedVehiculo] || []) : [];
-  // "Pendiente" en la base de datos no significa "sin hacer" (ver etiquetaDe).
-  // Lo que separa las dos listas es si hay algo que hacer, no el estado crudo:
-  // arriba lo que reclama atención, abajo lo que está al día.
-  const pendientes = currentMants.filter(
-    (m) => (m.estado !== 'RESUELTO' && !m.ultima_ejecucion_fecha) || m.vencido_real === true || m.estado === 'VENCIDO',
+  // Tres estados, no dos (2026-08-13, C-072: Alberto lo pidió por pestañas).
+  // "Pendiente" en la base de datos no es ninguno de los tres tal cual (ver
+  // etiquetaDe) — lo que separa las listas es si hay algo que hacer y por
+  // qué, no el estado crudo:
+  //   CADUCADO      → venció, hay que resolverlo ya.
+  //   SIN CONFIGURAR → nunca se ha hecho Y no hay ninguna fecha/km calculado
+  //                    (ni km ni meses de periodicidad) — no hay nada que
+  //                    vigilar todavía porque no se sabe cada cuánto toca.
+  //   AL DÍA        → todo lo demás: tiene una fecha/km futuro vigilado, o
+  //                    ya se resolvió alguna vez y no toca de nuevo aún.
+  const caducados = currentMants.filter((m) => m.vencido_real === true || m.estado === 'VENCIDO');
+  const sinConfigurar = currentMants.filter(
+    (m) => !caducados.includes(m) && !m.ultima_ejecucion_fecha && m.proximo_km == null && !m.proxima_fecha,
   );
-  const resueltos = currentMants.filter((m) => !pendientes.includes(m));
+  const alDia = currentMants.filter((m) => !caducados.includes(m) && !sinConfigurar.includes(m));
+
+  const PESTAÑAS = [
+    { id: 'caducado' as const, etiqueta: 'Caducado', lista: caducados },
+    { id: 'al_dia' as const, etiqueta: 'Al día', lista: alDia },
+    { id: 'sin_configurar' as const, etiqueta: 'Sin configurar', lista: sinConfigurar },
+  ];
+  const pestañaActual = PESTAÑAS.find((p) => p.id === tab) ?? PESTAÑAS[0];
 
   const isPatron = user?.es_patron || user?.role === 'admin';
 
@@ -275,14 +291,28 @@ export default function MantenimientosPage() {
             </Card>
           )}
 
-          {/* Pending / overdue */}
-          {pendientes.length > 0 && (
+          {/* Pestañas: caducado / al día / sin configurar (2026-08-13, C-072) */}
+          <div className="mb-4 flex gap-1 border-b border-zinc-800">
+            {PESTAÑAS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setTab(p.id)}
+                className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  tab === p.id
+                    ? 'border-pilot-lime text-pilot-lime'
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                {p.etiqueta} ({p.lista.length})
+              </button>
+            ))}
+          </div>
+
+          {pestañaActual.lista.length > 0 && (
             <div className="mb-6">
-              <h2 className="mb-3 text-lg font-semibold text-zinc-100">
-                Te reclaman ({pendientes.length})
-              </h2>
               <div className="space-y-2">
-                {pendientes.map((m) => (
+                {pestañaActual.lista.map((m) => (
                   <Card key={m.id} className="flex flex-col gap-3">
                     <div className="flex items-center justify-between gap-4">
                       <div className="min-w-0">
@@ -493,36 +523,14 @@ export default function MantenimientosPage() {
             </div>
           )}
 
-          {/* Resolved */}
-          {resueltos.length > 0 && (
-            <div>
-              <h2 className="mb-3 text-lg font-semibold text-zinc-100">
-                Al día ({resueltos.length})
-              </h2>
-              <div className="space-y-2">
-                {resueltos.map((m) => (
-                  <Card key={m.id} className="flex items-center justify-between gap-4 opacity-60">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-zinc-100">{m.catalogo.nombre}</span>
-                        <Badge variant={etiquetaDe(m).variant}>{etiquetaDe(m).texto}</Badge>
-                      </div>
-                      <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-zinc-500">
-                        {m.ultima_ejecucion_fecha && <span>Hecho el {formatDate(m.ultima_ejecucion_fecha)}</span>}
-                        {m.ultima_ejecucion_km != null && <span>a {formatKm(m.ultima_ejecucion_km)}</span>}
-                        {/* Lo que hace que "al día" signifique algo: hasta cuándo. */}
-                        {m.proximo_km != null && <span className="text-zinc-400">Próximo: {formatKm(m.proximo_km)}</span>}
-                        {m.proxima_fecha && <span className="text-zinc-400">Próximo: {formatDate(m.proxima_fecha)}</span>}
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {currentMants.length === 0 && (
+          {currentMants.length === 0 ? (
             <Card className="py-8 text-center text-zinc-500">Sin mantenimientos registrados para este vehiculo</Card>
+          ) : pestañaActual.lista.length === 0 && (
+            <Card className="py-8 text-center text-zinc-500">
+              {tab === 'caducado' && 'Nada caducado. Al día con todo.'}
+              {tab === 'al_dia' && 'Nada al día todavía.'}
+              {tab === 'sin_configurar' && 'Todo tiene una periodicidad configurada.'}
+            </Card>
           )}
         </>
       )}
