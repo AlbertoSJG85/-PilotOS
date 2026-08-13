@@ -7,7 +7,7 @@ import type { ApiResponse } from '@/types';
  */
 
 export interface PropuestaDocumento {
-  tipo: 'CERTIFICADO_ITV' | 'FACTURA_TALLER' | 'POLIZA_SEGURO' | 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR';
+  tipo: 'CERTIFICADO_ITV' | 'FACTURA_TALLER' | 'POLIZA_SEGURO' | 'TARJETA_TRANSPORTE' | 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR';
   fecha?: string;
   valida_hasta?: string;
   importe?: number;
@@ -70,6 +70,19 @@ export async function confirmarDocumento(
   datos?: DatosDocumento,
 ): Promise<{ status: string; aplicado?: boolean; pendiente_revision?: boolean; mantenimientos_actualizados?: string[]; gasto_id?: string | null; avisos?: string[]; message?: string }> {
   return apiFetch(`/api/documentos-vehiculo/${id}/confirmar`, { method: 'POST', body: { acepta_ocr, datos } });
+}
+
+/**
+ * Vuelve a leer el fichero ya subido (2026-08-13, C-070) — no hace falta
+ * resubir la foto. Solo tiene sentido mientras el documento sigue pendiente
+ * de confirmar. `tipo_forzado` opcional, por si ya sabes qué es y el lector
+ * también se equivocó en eso.
+ */
+export async function reprocesarDocumento(
+  id: string,
+  tipo_forzado?: string,
+): Promise<ApiResponse<DocumentoVehiculo>> {
+  return apiFetch(`/api/documentos-vehiculo/${id}/reprocesar`, { method: 'POST', body: { tipo_forzado } });
 }
 
 /** Solo el dueño: cierra un documento que el asalariado corrigió. */

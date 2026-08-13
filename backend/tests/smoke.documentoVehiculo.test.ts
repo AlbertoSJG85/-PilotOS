@@ -122,6 +122,90 @@ describe('clasificar y leer un documento del vehículo', () => {
 });
 
 // ─────────────────────────────────────────────────────────
+// Tarjeta de Transporte y el acta municipal auto-taxi (2026-08-13, C-070)
+// ─────────────────────────────────────────────────────────
+
+/**
+ * Caso real: Alberto subió su Tarjeta de Transporte (Cabildo de Tenerife) y
+ * el sistema la clasificó como FACTURA_TALLER. La causa: el texto legal de
+ * la tarjeta dice "el transporte no podrá ser FACTURADO de forma
+ * independiente" — y el patrón de factura no tenía límite de palabra, así
+ * que "factura" casaba dentro de "facturado".
+ */
+const TARJETA_TRANSPORTE_REAL = [
+    'CABILDOS DE TENERIFE',
+    'TARJETA DE TRANSPORTE',
+    'VALIDA HASTA 31/03/2026',
+    'JIMENEZ GARCIA, ALBERTO SEBASTIAN  78717432R  S/C DE TENERIFE',
+    'VT NACIONAL  10561733  07/03/2023  8053-KKX',
+    'SERVICIO PUBLICO',
+    'CONDICIONES DE LA AUTORIZACIÓN',
+    'El transporte no podrá ser facturado de forma independiente.',
+].join('\n');
+
+describe('CLAVE: la Tarjeta de Transporte no es una factura de taller', () => {
+    it('clasifica como TARJETA_TRANSPORTE, no como factura', () => {
+        expect(clasificarDocumento(TARJETA_TRANSPORTE_REAL)).toBe('TARJETA_TRANSPORTE');
+    });
+
+    it('"facturado" no activa el patrón de factura (límite de palabra)', () => {
+        // Sin nada más que la hiciera parecer una factura de taller.
+        expect(clasificarDocumento('el transporte no podrá ser facturado de forma independiente')).toBe(
+            'DOCUMENTO_VEHICULO_SIN_CLASIFICAR',
+        );
+    });
+
+    it('"factura" sigue reconociéndose como palabra suelta', () => {
+        expect(clasificarDocumento('FACTURA A-2026/145')).toBe('FACTURA_TALLER');
+    });
+
+    it('lee la fecha de validez y resuelve el mantenimiento "Tarjeta de transporte"', () => {
+        const r = analizarDocumentoVehiculo(TARJETA_TRANSPORTE_REAL);
+        expect(r.tipo).toBe('TARJETA_TRANSPORTE');
+        expect(r.valida_hasta).toBe('31/03/2026');
+        expect(r.mantenimientos_detectados).toEqual(['Tarjeta de transporte']);
+    });
+});
+
+/**
+ * Segundo caso real del mismo día: un acta de "Inspección Técnica Auto-Taxi"
+ * del Ayuntamiento (Servicio de Movilidad) es un trámite MUNICIPAL, no la ITV
+ * de tráfico/DGT — aunque las dos usen la frase "inspección técnica" y caigan
+ * en el mismo `tipo`. Además, el acta trae su propio checklist impreso
+ * ("Neumáticos: Sí/No", "Póliza de seguro: Sí/No"), y el escaneo genérico de
+ * mantenimientos lo leía como si esos servicios se hubieran hecho de verdad.
+ */
+const ACTA_MUNICIPAL_AUTOTAXI = [
+    'Santa Cruz de Tenerife',
+    'AYUNTAMIENTO',
+    'Área de Gobierno de Seguridad, Movilidad y Accesibilidad Universal',
+    'ACTA DE INSPECCIÓN TÉCNICA AUTO-TAXI',
+    'Fecha: 14/05/2026',
+    'Inspección sanitaria: X no',
+    'Póliza de seguro: X no',
+    'Neumáticos: X no',
+    'FAVORABLE',
+].join('\n');
+
+describe('CLAVE: el acta municipal de inspección auto-taxi no es la ITV de tráfico', () => {
+    it('resuelve "Inspeccion tecnica autotaxi", no "ITV del vehiculo"', () => {
+        const r = analizarDocumentoVehiculo(ACTA_MUNICIPAL_AUTOTAXI, 'CERTIFICADO_ITV');
+        expect(r.mantenimientos_detectados).toEqual(['Inspeccion tecnica autotaxi']);
+    });
+
+    it('no confunde el checklist del acta (neumáticos, seguro) con mantenimientos hechos', () => {
+        const r = analizarDocumentoVehiculo(ACTA_MUNICIPAL_AUTOTAXI, 'CERTIFICADO_ITV');
+        expect(r.mantenimientos_detectados).not.toContain('Neumaticos');
+        expect(r.mantenimientos_detectados).not.toContain('Seguro del vehiculo');
+    });
+
+    it('una ITV real (sin ayuntamiento/auto-taxi) sigue resolviendo "ITV del vehiculo"', () => {
+        const r = analizarDocumentoVehiculo('ESTACION ITV\nFicha tecnica\nPROXIMA INSPECCION 14/08/2028', 'CERTIFICADO_ITV');
+        expect(r.mantenimientos_detectados).toEqual(['ITV del vehiculo']);
+    });
+});
+
+// ─────────────────────────────────────────────────────────
 // El importe de una factura (C-064)
 // ─────────────────────────────────────────────────────────
 

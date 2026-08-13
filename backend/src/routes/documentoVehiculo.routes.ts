@@ -28,7 +28,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { requireAuth, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
-import { TipoDocumentoVehiculo, analizarYRegistrarDocumento } from '../services/ocrDocumentoVehiculo.service';
+import { TipoDocumentoVehiculo, analizarYRegistrarDocumento, analizarDocumentoRegistrado } from '../services/ocrDocumentoVehiculo.service';
 import { aplicarDocumentoConfirmado, DatosDocumentoConfirmados } from '../services/aplicarDocumento.service';
 
 const router = Router();
@@ -38,6 +38,7 @@ const TIPOS_VEHICULO = [
     'CERTIFICADO_ITV',
     'FACTURA_TALLER',
     'POLIZA_SEGURO',
+    'TARJETA_TRANSPORTE',
     'DOCUMENTO_VEHICULO_SIN_CLASIFICAR',
 ];
 
@@ -98,6 +99,54 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
         res.status(201).json({ status: 'OK', data: doc, propuesta });
     } catch (err: any) {
         console.error('[DOC-VEHICULO] Error al registrar:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
+/**
+ * POST /api/documentos-vehiculo/:id/reprocesar (2026-08-13, C-070)
+ *
+ * Vuelve a leer el fichero YA guardado — no hace falta resubir la foto — y
+ * reemplaza `ocr_texto`/`ocr_datos_extraidos`/`tipo` con el resultado nuevo.
+ * Existe porque hasta hoy la única forma de reintentar una lectura mala era
+ * pedírselo a Claude por SSH: Alberto lo pidió directamente ("no puedo
+ * volver a pasar por el OCR?") mientras esperaba delante de la pantalla.
+ *
+ * Solo tiene sentido mientras el documento sigue pendiente: uno ya aplicado
+ * no se puede reabrir por aquí (para eso está /revisar, con el rastro de
+ * quién lo tocó). `tipo_forzado` opcional, por si la persona ya sabe qué es
+ * y el lector se equivocó también en eso.
+ */
+router.post('/:id/reprocesar', requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        const doc = await prisma.documento.findUnique({
+            where: { id: req.params.id },
+            include: { vehiculo: { select: { cliente_id: true, matricula: true } } },
+        });
+        if (!doc || !doc.vehiculo || !isSameTenant(req, doc.vehiculo.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
+        }
+        if (doc.estado !== 'PENDIENTE_CONFIRMACION' && doc.estado !== 'ANALIZANDO') {
+            res.status(409).json({
+                status: 'FAIL', error: 'ya_confirmado',
+                message: 'Este documento ya se confirmó. Usa /revisar para reabrirlo.',
+            });
+            return;
+        }
+
+        const { tipo_forzado } = req.body as { tipo_forzado?: string };
+        const rutaLocal = urlToLocalPath(doc.url);
+
+        await analizarDocumentoRegistrado(
+            doc.id,
+            rutaLocal,
+            TIPOS_VEHICULO.includes(tipo_forzado ?? '') ? (tipo_forzado as TipoDocumentoVehiculo) : undefined,
+        );
+
+        const actualizado = await prisma.documento.findUnique({ where: { id: doc.id } });
+        res.json({ status: 'OK', data: actualizado });
+    } catch (err: any) {
+        console.error('[DOC-VEHICULO] Error al reprocesar:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });

@@ -28,9 +28,9 @@ import { prisma } from '../lib/prisma';
 import { analizarImagen, extraerTextoImagen, normalizarNumerosOcr } from './ocr.service';
 
 /** Qué papel es, para que el lector por visión sepa qué esperar (C-068). */
-const CONTEXTO_DOCUMENTO = 'documento de un vehículo: factura de taller, tarjeta de ITV o póliza de seguro';
+const CONTEXTO_DOCUMENTO = 'documento de un vehículo: factura de taller, tarjeta de ITV, tarjeta de transporte o póliza de seguro';
 
-export type TipoDocumentoVehiculo = 'CERTIFICADO_ITV' | 'FACTURA_TALLER' | 'POLIZA_SEGURO' | 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR';
+export type TipoDocumentoVehiculo = 'CERTIFICADO_ITV' | 'FACTURA_TALLER' | 'POLIZA_SEGURO' | 'TARJETA_TRANSPORTE' | 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR';
 
 export interface PropuestaDocumento {
     tipo: TipoDocumentoVehiculo;
@@ -57,9 +57,17 @@ export interface PropuestaDocumento {
  * Decide qué es el documento por las palabras que aparecen. Si no lo tiene
  * claro, devuelve SIN_CLASIFICAR y que lo diga la persona: adivinar mal el
  * tipo es peor que preguntar.
+ *
+ * El orden importa, y es deliberado (2026-08-13, C-070): "tarjeta de
+ * transporte" primero porque si no, el texto de ese papel ("las condiciones
+ * de la autorización... el transporte no podrá ser facturado...") lo
+ * clasificaría mal — ver la lección de \b más abajo.
  */
 export function clasificarDocumento(texto: string): TipoDocumentoVehiculo {
     const t = texto.toLowerCase();
+
+    const esTarjetaTransporte = /tarjeta\s+de\s+transporte|autorizaci[oó]n\s+de\s+transporte/.test(t);
+    if (esTarjetaTransporte) return 'TARJETA_TRANSPORTE';
 
     const esItv = /inspecci[oó]n\s+t[eé]cnica|\bi\.?t\.?v\.?\b|estaci[oó]n\s+itv|ficha\s+t[eé]cnica/.test(t);
     if (esItv) return 'CERTIFICADO_ITV';
@@ -67,7 +75,13 @@ export function clasificarDocumento(texto: string): TipoDocumentoVehiculo {
     const esSeguro = /p[oó]liza|compa[ñn][ií]a\s+de\s+seguros|seguro\s+del?\s+veh[ií]culo|cobertura/.test(t);
     if (esSeguro) return 'POLIZA_SEGURO';
 
-    const esFactura = /factura|taller|mano\s+de\s+obra|base\s+imponible|neum[aá]tic|reparaci[oó]n/.test(t);
+    // \b en 'factura': el 2026-08-13 (C-070) una Tarjeta de Transporte real
+    // clasificó como FACTURA_TALLER porque su texto legal dice "el transporte
+    // no podrá ser facturado de forma independiente" — "factura" SIN límite
+    // de palabra casa con "facturado". Sin \b, cualquier papel que mencione
+    // de pasada una obligación de facturar (que no es poco frecuente en letra
+    // pequeña administrativa) se cuela aquí.
+    const esFactura = /\bfactura(s)?\b|\btaller\b|mano\s+de\s+obra|base\s+imponible|neum[aá]tic|reparaci[oó]n/.test(t);
     if (esFactura) return 'FACTURA_TALLER';
 
     return 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR';
@@ -350,11 +364,37 @@ export function analizarDocumentoVehiculo(
         propuesta.valida_hasta = extraerValidaHasta(texto);
         if (!propuesta.valida_hasta) propuesta.faltantes.push('valida_hasta');
         if (!propuesta.fecha) propuesta.faltantes.push('fecha');
-        // Una ITV siempre resuelve el mantenimiento "ITV del vehiculo",
-        // aparezca o no la palabra suelta en el texto.
-        if (!mantenimientos_detectados.includes('ITV del vehiculo')) {
-            propuesta.mantenimientos_detectados.push('ITV del vehiculo');
-        }
+        // La ITV siempre resuelve UN mantenimiento — pero no siempre el
+        // mismo (2026-08-13, C-070). Un acta de "Inspección Técnica
+        // Auto-Taxi" del ayuntamiento (Servicio de Movilidad) NO es la ITV
+        // de tráfico/DGT, aunque las dos usen la frase "inspección técnica" y
+        // por eso caen en el mismo `tipo`. Se resuelve el mantenimiento
+        // correcto, no siempre "ITV del vehiculo".
+        //
+        // Y se IGNORA el escaneo genérico de `detectarMantenimientos` para
+        // este tipo: un acta de inspección trae su propio checklist impreso
+        // ("Neumáticos: Sí/No", "Póliza de seguro: Sí/No"...) y ese barrido
+        // de palabras sueltas los confunde con mantenimientos realmente
+        // hechos. Alberto lo vio: el acta subida hoy proponía "Neumaticos" y
+        // "Seguro del vehiculo" sin que nadie hubiera cambiado ruedas ni
+        // renovado el seguro — solo estaban en la casilla de verificación.
+        const esMunicipalAutoTaxi = /ayuntamiento/i.test(texto) && /auto-?taxi/i.test(texto);
+        propuesta.mantenimientos_detectados = [
+            esMunicipalAutoTaxi ? 'Inspeccion tecnica autotaxi' : 'ITV del vehiculo',
+        ];
+        return propuesta;
+    }
+
+    if (tipo === 'TARJETA_TRANSPORTE') {
+        // Misma forma que la ITV: fecha de expedición + validez, un único
+        // mantenimiento resuelto, sin el escaneo genérico (este papel trae
+        // condiciones legales en letra pequeña que pueden mencionar de
+        // pasada palabras de otros catálogos sin que apliquen).
+        propuesta.fecha = fechas[0];
+        propuesta.valida_hasta = extraerValidaHasta(texto);
+        if (!propuesta.valida_hasta) propuesta.faltantes.push('valida_hasta');
+        if (!propuesta.fecha) propuesta.faltantes.push('fecha');
+        propuesta.mantenimientos_detectados = ['Tarjeta de transporte'];
         return propuesta;
     }
 

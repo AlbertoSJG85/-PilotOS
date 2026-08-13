@@ -21,7 +21,7 @@ import { PageHeader } from '@/components/layout';
 import { Card, Badge, Skeleton, Button, Input } from '@/components/ui';
 import { getVehiculos, uploadFoto } from '@/lib/api';
 import {
-  getDocumentosVehiculo, registrarDocumentoVehiculo, confirmarDocumento, revisarDocumento,
+  getDocumentosVehiculo, registrarDocumentoVehiculo, confirmarDocumento, revisarDocumento, reprocesarDocumento,
   type DocumentoVehiculo, type PropuestaDocumento, type DatosDocumento,
 } from '@/lib/api/documentos-vehiculo';
 import { formatCurrency, formatDate, urlDocumento } from '@/lib/utils';
@@ -29,10 +29,15 @@ import { FileText, Upload, CheckCircle2, AlertTriangle, Pencil, FolderOpen } fro
 import type { Vehiculo } from '@/types';
 import { ConexionDrive } from '@/components/features/conexion-drive';
 
+// CERTIFICADO_ITV ya NO se enseña como "ITV" a secas (2026-08-13, C-070): el
+// mismo `tipo` cubre tanto la ITV de tráfico/DGT como el acta municipal de
+// "Inspección Técnica Auto-Taxi" del ayuntamiento, que NO es la ITV aunque
+// las dos usen esa frase. Alberto lo señaló dos veces con el mismo documento.
 const ETIQUETA_TIPO: Record<string, string> = {
-  CERTIFICADO_ITV: 'ITV',
+  CERTIFICADO_ITV: 'Inspección técnica',
   FACTURA_TALLER: 'Factura de taller',
   POLIZA_SEGURO: 'Póliza de seguro',
+  TARJETA_TRANSPORTE: 'Tarjeta de transporte',
   DOCUMENTO_VEHICULO_SIN_CLASIFICAR: 'Sin clasificar',
 };
 
@@ -59,7 +64,7 @@ function Confirmacion({
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const esItv = propuesta.tipo === 'CERTIFICADO_ITV' || propuesta.tipo === 'POLIZA_SEGURO';
+  const esItv = ['CERTIFICADO_ITV', 'POLIZA_SEGURO', 'TARJETA_TRANSPORTE'].includes(propuesta.tipo);
 
   async function enviar(aceptaOcr: boolean) {
     setError(null);
@@ -183,6 +188,7 @@ export default function DocumentosPage() {
   const [subiendo, setSubiendo] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [errorSubida, setErrorSubida] = useState<string | null>(null);
+  const [reprocesandoId, setReprocesandoId] = useState<string | null>(null);
 
   const cargar = useCallback(() => {
     setLoading(true);
@@ -216,6 +222,22 @@ export default function DocumentosPage() {
     } finally {
       setSubiendo(false);
       e.target.value = '';
+    }
+  }
+
+  // 2026-08-13, C-070: Alberto lo pidió directamente mientras esperaba
+  // delante de la pantalla — no hace falta resubir la foto, solo releer el
+  // fichero que ya está guardado.
+  async function handleReprocesar(id: string) {
+    setReprocesandoId(id);
+    setAviso(null);
+    try {
+      await reprocesarDocumento(id);
+      cargar();
+    } catch {
+      setErrorSubida('No se pudo volver a leer el documento. Inténtalo de nuevo.');
+    } finally {
+      setReprocesandoId(null);
     }
   }
 
@@ -268,14 +290,25 @@ export default function DocumentosPage() {
                         Subido el {formatDate(doc.created_at)} · {doc.vehiculo?.matricula ?? '—'}
                       </p>
                     </div>
-                    <a
-                      href={urlDocumento(doc.url)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs text-pilot-lime hover:text-pilot-lime-light"
-                    >
-                      Ver documento
-                    </a>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <a
+                        href={urlDocumento(doc.url)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-pilot-lime hover:text-pilot-lime-light"
+                      >
+                        Ver documento
+                      </a>
+                      <button
+                        type="button"
+                        disabled={reprocesandoId === doc.id}
+                        onClick={() => handleReprocesar(doc.id)}
+                        className="text-xs text-zinc-400 hover:text-zinc-200 disabled:opacity-50"
+                        title="Volver a leer el documento (no hace falta resubirlo)"
+                      >
+                        {reprocesandoId === doc.id ? 'Leyendo…' : 'Reprocesar'}
+                      </button>
+                    </div>
                   </div>
 
                   {propuesta ? (
