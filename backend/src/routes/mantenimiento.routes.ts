@@ -6,9 +6,12 @@ import { resolverPreferenciasAvisos } from '../services/mantenimientoAlertas.ser
 
 const router = Router();
 
+// Sin auth (usado antes de que exista sesion). Por eso SOLO el catalogo
+// global: un endpoint publico no puede devolver el mantenimiento
+// personalizado de un cliente (2026-08-13, ver POST .../personalizado).
 router.get('/catalogo', async (_req: any, res: Response) => {
     try {
-        const catalogo = await prisma.mantenimientoCatalogo.findMany({ where: { activo: true }, orderBy: { tipo: 'asc' } });
+        const catalogo = await prisma.mantenimientoCatalogo.findMany({ where: { activo: true, cliente_id: null }, orderBy: { tipo: 'asc' } });
         res.json({ status: 'OK', data: catalogo });
     } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
 });
@@ -89,6 +92,85 @@ router.get('/vehiculo/:vehiculoId/proximos', requireAuth, async (req: AuthReques
 
         res.json({ status: 'OK', data, km_actuales: vehiculo.km_actuales });
     } catch (err: any) { res.status(500).json({ status: 'FAIL', error: 'server_error' }); }
+});
+
+// POST /api/mantenimientos/vehiculo/:vehiculoId/personalizado — 2026-08-13.
+//
+// El catalogo global (seed.ts) es el mismo para todos, pero el papeleo del
+// taxi varia por ayuntamiento: lo que a Alberto le exige el suyo no tiene
+// por que aplicarle a otro cliente. Esto crea un mantenimiento SOLO para el
+// cliente autenticado (`MantenimientoCatalogo.cliente_id`) y lo engancha de
+// inmediato al vehiculo indicado — no aparece en el catalogo de nadie mas,
+// ni se hereda en el onboarding de otro cliente (ver onboarding.routes.ts).
+//
+// Para "quitar" uno que no aplica (global o propio) ya existe PUT /:id con
+// `activo: false` — desactiva el enganche a ESE vehiculo sin tocar el
+// catalogo. Aqui solo hace falta anadir lo que falta.
+router.post('/vehiculo/:vehiculoId/personalizado', requireAuth, requireClienteContext, requirePatron, async (req: AuthRequest, res: Response) => {
+    try {
+        const vehiculo = await prisma.vehiculo.findUnique({ where: { id: req.params.vehiculoId } });
+        if (!vehiculo || !isSameTenant(req, vehiculo.cliente_id)) {
+            res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
+        }
+
+        const { nombre, tipo, frecuencia_km, frecuencia_meses } = req.body as {
+            nombre?: string; tipo?: string; frecuencia_km?: number; frecuencia_meses?: number;
+        };
+        if (!nombre || !nombre.trim()) {
+            res.status(400).json({ status: 'FAIL', error: 'falta_nombre' }); return;
+        }
+        const tiposValidos = ['POR_KILOMETRAJE', 'POR_FECHA', 'SEGUN_USO'];
+        if (!tipo || !tiposValidos.includes(tipo)) {
+            res.status(400).json({ status: 'FAIL', error: 'tipo_invalido', tipos_validos: tiposValidos }); return;
+        }
+        if (tipo === 'POR_KILOMETRAJE' && !frecuencia_km) {
+            res.status(400).json({ status: 'FAIL', error: 'falta_frecuencia_km' }); return;
+        }
+        if (tipo === 'POR_FECHA' && !frecuencia_meses) {
+            res.status(400).json({ status: 'FAIL', error: 'falta_frecuencia_meses' }); return;
+        }
+
+        const clienteId = req.usuario!.cliente_id!;
+        const nombreLimpio = nombre.trim();
+
+        // No dos mantenimientos con el mismo nombre para el mismo cliente
+        // (el catalogo global ya no puede chocar: es otro cliente_id).
+        const existente = await prisma.mantenimientoCatalogo.findUnique({
+            where: { nombre_cliente_id: { nombre: nombreLimpio, cliente_id: clienteId } },
+        });
+        if (existente) {
+            res.status(409).json({ status: 'FAIL', error: 'ya_existe', catalogo_id: existente.id }); return;
+        }
+
+        const resultado = await prisma.$transaction(async (tx) => {
+            const item = await tx.mantenimientoCatalogo.create({
+                data: {
+                    nombre: nombreLimpio,
+                    tipo,
+                    frecuencia_km: tipo === 'POR_KILOMETRAJE' ? frecuencia_km : null,
+                    frecuencia_meses: tipo === 'POR_FECHA' ? frecuencia_meses : null,
+                    cliente_id: clienteId,
+                },
+            });
+
+            const mantenimiento = await tx.mantenimientoVehiculo.create({
+                data: {
+                    vehiculo_id: vehiculo.id,
+                    catalogo_id: item.id,
+                    proximo_km: item.frecuencia_km ? vehiculo.km_actuales + item.frecuencia_km : null,
+                    proxima_fecha: item.frecuencia_meses ? sumarMeses(new Date(), item.frecuencia_meses) : null,
+                },
+                include: { catalogo: true },
+            });
+
+            return mantenimiento;
+        });
+
+        res.status(201).json({ status: 'OK', data: resultado });
+    } catch (err: any) {
+        console.error('[MANTENIMIENTOS] Error creando personalizado:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
 });
 
 // POST /api/mantenimientos/:id/resolver — Resolver mantenimiento (DT-012: transaccion)

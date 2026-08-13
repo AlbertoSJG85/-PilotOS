@@ -81,6 +81,9 @@ model Cliente {
   vehiculos              Vehiculo[]
   /// Permiso para dejar sus documentos en SU Drive (2026-08-12).
   conexionDrive          ConexionDrive?
+  /// Mantenimientos que este cliente se ha anadido al catalogo, fuera del
+  /// global (2026-08-13). Ver MantenimientoCatalogo.cliente_id.
+  mantenimientosPropios  MantenimientoCatalogo[]
 
   @@map("clientes")
   @@schema("pilotos")
@@ -282,18 +285,18 @@ model Documento {
   // confirma (`datos_confirmados`, que es lo que vale). Se guardan los dos a
   // propósito: si mañana un importe no cuadra, se ve si lo dijo la máquina o
   // lo escribió alguien.
-  datos_confirmados         Json?
-  confirmado_por            Int?
-  confirmado_at             DateTime?
+  datos_confirmados Json?
+  confirmado_por    Int?
+  confirmado_at     DateTime?
   /// true = la persona contradijo al documento. Si ademas era el asalariado, va a revision del dueno.
-  corregido                 Boolean                @default(false)
-  revisado_por              Int?
-  revisado_at               DateTime?
+  corregido         Boolean   @default(false)
+  revisado_por      Int?
+  revisado_at       DateTime?
   /// Cuando se aplicaron los efectos (mantenimiento al dia + gasto). Candado de idempotencia.
-  aplicado_at               DateTime?
-  gasto_id                  String?
+  aplicado_at       DateTime?
+  gasto_id          String?
   /// Enlace al fichero en el Drive del cliente, si lo tiene conectado.
-  drive_web_link            String?
+  drive_web_link    String?
 
   @@map("documentos")
   @@schema("pilotos")
@@ -456,46 +459,55 @@ model GastoFijo {
 
 model MantenimientoCatalogo {
   id               String                  @id @default(uuid())
-  nombre           String                  @unique
+  nombre           String
   tipo             String
   frecuencia_km    Int?
   frecuencia_meses Int?
   activo           Boolean                 @default(true)
   created_at       DateTime                @default(now())
   vehiculos        MantenimientoVehiculo[]
+  // 2026-08-13: null = catalogo GLOBAL (el seed de siempre, comun a todo el
+  // ecosistema). Con cliente_id, es un mantenimiento PERSONALIZADO que solo
+  // ese cliente ve y usa -- lo que exige un ayuntamiento no tiene por que
+  // aplicarle a otro, y anadirlo al catalogo global se lo colaria a todos.
+  // Unicidad por (nombre, cliente_id): dos clientes pueden llamar igual a su
+  // mantenimiento propio sin chocar entre si ni con el catalogo global.
+  cliente_id       String?
+  cliente          Cliente?                @relation(fields: [cliente_id], references: [id])
 
+  @@unique([nombre, cliente_id])
   @@map("mantenimiento_catalogo")
   @@schema("pilotos")
 }
 
 model MantenimientoVehiculo {
-  id                     String                     @id @default(uuid())
-  vehiculo_id            String
-  catalogo_id            String
-  ultima_ejecucion_km    Int?
-  ultima_ejecucion_fecha DateTime?
-  proximo_km             Int?
-  proxima_fecha          DateTime?
-  estado                 String                     @default("PENDIENTE")
-  frecuencia_aprendida   Int?
-  activo                 Boolean                    @default(true)
+  id                             String                     @id @default(uuid())
+  vehiculo_id                    String
+  catalogo_id                    String
+  ultima_ejecucion_km            Int?
+  ultima_ejecucion_fecha         DateTime?
+  proximo_km                     Int?
+  proxima_fecha                  DateTime?
+  estado                         String                     @default("PENDIENTE")
+  frecuencia_aprendida           Int?
+  activo                         Boolean                    @default(true)
   frecuencia_km_personalizada    Int?
   frecuencia_meses_personalizada Int?
   // Fase 6 (2026-07-24): ultimo escalon de aviso ya notificado, para no
   // avisar el mismo umbral cada dia (dedupe). null = ningun aviso emitido
   // todavia. Ver services/mantenimientoAlertas.service.ts para la semantica
   // de los niveles (1000/500/250/0/-250/... para km, 30/0/-15/... para dias).
-  ultimo_nivel_aviso_km   Int?
-  ultimo_nivel_aviso_dias Int?
-  created_at             DateTime                   @default(now())
-  updated_at             DateTime                   @updatedAt
-  catalogo               MantenimientoCatalogo      @relation(fields: [catalogo_id], references: [id])
-  vehiculo               Vehiculo                   @relation(fields: [vehiculo_id], references: [id])
-  seguimiento            SeguimientoMantenimiento[]
+  ultimo_nivel_aviso_km          Int?
+  ultimo_nivel_aviso_dias        Int?
+  created_at                     DateTime                   @default(now())
+  updated_at                     DateTime                   @updatedAt
+  catalogo                       MantenimientoCatalogo      @relation(fields: [catalogo_id], references: [id])
+  vehiculo                       Vehiculo                   @relation(fields: [vehiculo_id], references: [id])
+  seguimiento                    SeguimientoMantenimiento[]
   // Factura/documento que resolvió (o que se está evaluando si resuelve)
   // este mantenimiento — 2026-08-11, terreno para el reconocimiento OCR
   // de facturas (todavía sin construir la extracción, ver docs/learning).
-  documentos             Documento[]
+  documentos                     Documento[]
 
   @@unique([vehiculo_id, catalogo_id])
   @@map("mantenimientos_vehiculos")

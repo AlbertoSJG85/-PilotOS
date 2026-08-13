@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/layout';
 import { Card, Badge, Skeleton, Button, Input } from '@/components/ui';
-import { getVehiculos, getMantenimientosVehiculo, resolverMantenimiento, updateMantenimientoVehiculo } from '@/lib/api';
+import { getVehiculos, getMantenimientosVehiculo, resolverMantenimiento, updateMantenimientoVehiculo, crearMantenimientoPersonalizado } from '@/lib/api';
 import { formatKm, formatDate } from '@/lib/utils';
 import { getSessionUser } from '@/lib/auth';
 import type { Vehiculo, MantenimientoVehiculo } from '@/types';
@@ -49,6 +49,14 @@ export default function MantenimientosPage() {
   // Estado para editar configuración
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<any>(null);
+
+  // Estado para añadir un mantenimiento propio (2026-08-13): lo que exige un
+  // ayuntamiento no tiene por qué aplicarle a otro cliente, así que esto no
+  // toca el catálogo global — crea uno visible solo para este cliente.
+  const [addingCustom, setAddingCustom] = useState(false);
+  const [customForm, setCustomForm] = useState({ nombre: '', tipo: 'POR_FECHA' as 'POR_KILOMETRAJE' | 'POR_FECHA' | 'SEGUN_USO', frecuencia_km: '', frecuencia_meses: '' });
+  const [customLoading, setCustomLoading] = useState(false);
+  const [customError, setCustomError] = useState<string | null>(null);
 
   async function fetchData() {
     setLoading(true);
@@ -99,6 +107,39 @@ export default function MantenimientosPage() {
     }
   }
 
+  async function handleCrearCustom(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedVehiculo) return;
+    setCustomError(null);
+    if (!customForm.nombre.trim()) { setCustomError('Falta el nombre.'); return; }
+    if (customForm.tipo === 'POR_KILOMETRAJE' && !customForm.frecuencia_km) {
+      setCustomError('Indica cada cuántos km.'); return;
+    }
+    if (customForm.tipo === 'POR_FECHA' && !customForm.frecuencia_meses) {
+      setCustomError('Indica cada cuántos meses.'); return;
+    }
+    setCustomLoading(true);
+    try {
+      const r = await crearMantenimientoPersonalizado(selectedVehiculo, {
+        nombre: customForm.nombre.trim(),
+        tipo: customForm.tipo,
+        frecuencia_km: customForm.frecuencia_km ? parseInt(customForm.frecuencia_km, 10) : undefined,
+        frecuencia_meses: customForm.frecuencia_meses ? parseInt(customForm.frecuencia_meses, 10) : undefined,
+      });
+      if (r.status !== 'OK') {
+        setCustomError(r.error === 'ya_existe' ? 'Ya tienes un mantenimiento con ese nombre.' : 'No se pudo crear.');
+        return;
+      }
+      setAddingCustom(false);
+      setCustomForm({ nombre: '', tipo: 'POR_FECHA', frecuencia_km: '', frecuencia_meses: '' });
+      await fetchData();
+    } catch {
+      setCustomError('No se pudo crear.');
+    } finally {
+      setCustomLoading(false);
+    }
+  }
+
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
     if (!editingId) return;
@@ -145,9 +186,9 @@ export default function MantenimientosPage() {
         <Card className="py-8 text-center text-zinc-500">Sin vehiculos registrados</Card>
       ) : (
         <>
-          {/* Vehicle selector */}
-          {vehiculos.length > 1 && (
-            <div className="mb-4">
+          {/* Vehicle selector + añadir mantenimiento propio */}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            {vehiculos.length > 1 ? (
               <select
                 className="h-10 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 focus:border-pilot-lime focus:outline-none"
                 value={selectedVehiculo || ''}
@@ -159,7 +200,79 @@ export default function MantenimientosPage() {
                   </option>
                 ))}
               </select>
-            </div>
+            ) : <div />}
+
+            {isPatron && selectedVehiculo && !addingCustom && (
+              <Button size="sm" variant="outline" onClick={() => setAddingCustom(true)}>
+                + Añadir mantenimiento
+              </Button>
+            )}
+          </div>
+
+          {/* Alta de un mantenimiento propio del cliente (2026-08-13): lo que
+              exige un ayuntamiento no tiene por qué exigirlo otro. No toca el
+              catálogo global, solo el de este cliente. */}
+          {addingCustom && (
+            <Card className="mb-6 flex flex-col gap-3">
+              <p className="text-sm font-semibold text-pilot-lime">Nuevo mantenimiento (solo para ti)</p>
+              <form onSubmit={handleCrearCustom} className="flex flex-col gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-[10px] uppercase text-zinc-500">Nombre</label>
+                    <Input
+                      className="h-9 text-sm"
+                      placeholder="p. ej. Inspección técnica autotaxi"
+                      value={customForm.nombre}
+                      onChange={(e) => setCustomForm({ ...customForm, nombre: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase text-zinc-500">Tipo</label>
+                    <select
+                      className="h-9 w-full rounded border border-zinc-700 bg-zinc-900 px-2 text-sm text-zinc-100"
+                      value={customForm.tipo}
+                      onChange={(e) => setCustomForm({ ...customForm, tipo: e.target.value as typeof customForm.tipo })}
+                    >
+                      <option value="POR_FECHA">Por fecha</option>
+                      <option value="POR_KILOMETRAJE">Por kilometraje</option>
+                      <option value="SEGUN_USO">Según uso</option>
+                    </select>
+                  </div>
+                </div>
+
+                {customForm.tipo === 'POR_FECHA' && (
+                  <div className="w-40 space-y-1">
+                    <label className="text-[10px] uppercase text-zinc-500">Cada cuántos meses</label>
+                    <Input
+                      type="number" className="h-9 text-sm" placeholder="12"
+                      value={customForm.frecuencia_meses}
+                      onChange={(e) => setCustomForm({ ...customForm, frecuencia_meses: e.target.value })}
+                    />
+                  </div>
+                )}
+                {customForm.tipo === 'POR_KILOMETRAJE' && (
+                  <div className="w-40 space-y-1">
+                    <label className="text-[10px] uppercase text-zinc-500">Cada cuántos km</label>
+                    <Input
+                      type="number" className="h-9 text-sm" placeholder="15000"
+                      value={customForm.frecuencia_km}
+                      onChange={(e) => setCustomForm({ ...customForm, frecuencia_km: e.target.value })}
+                    />
+                  </div>
+                )}
+
+                {customError && <p className="text-xs text-red-400">{customError}</p>}
+
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" variant="ghost" type="button" disabled={customLoading} onClick={() => { setAddingCustom(false); setCustomError(null); }}>
+                    Cancelar
+                  </Button>
+                  <Button size="sm" type="submit" disabled={customLoading} className="bg-pilot-lime text-black hover:bg-pilot-lime/90">
+                    Guardar
+                  </Button>
+                </div>
+              </form>
+            </Card>
           )}
 
           {/* Pending / overdue */}

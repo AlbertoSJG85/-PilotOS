@@ -21,3 +21,17 @@ export async function resolverMantenimiento(id: string, data: {
 export async function updateMantenimientoVehiculo(id: string, data: Partial<MantenimientoVehiculo>): Promise<ApiResponse<MantenimientoVehiculo>> {
   return apiFetch(`/api/mantenimientos/${id}`, { method: 'PUT', body: data });
 }
+
+// 2026-08-13: el catálogo global es el mismo para todos, pero el papeleo del
+// taxi varía por ayuntamiento. Esto crea un mantenimiento SOLO para el
+// cliente autenticado y lo engancha al vehículo indicado — no aparece para
+// nadie más. Para quitar uno que no aplica, usa updateMantenimientoVehiculo
+// con { activo: false } sobre el mantenimiento del vehículo (global o propio).
+export async function crearMantenimientoPersonalizado(vehiculoId: string, data: {
+  nombre: string;
+  tipo: 'POR_KILOMETRAJE' | 'POR_FECHA' | 'SEGUN_USO';
+  frecuencia_km?: number;
+  frecuencia_meses?: number;
+}): Promise<ApiResponse<MantenimientoVehiculo>> {
+  return apiFetch(`/api/mantenimientos/vehiculo/${vehiculoId}/personalizado`, { method: 'POST', body: data });
+}

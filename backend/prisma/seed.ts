@@ -1,7 +1,11 @@
 /**
  * Seed de PilotOS — Catalogo de mantenimientos.
  * Adaptado al nuevo schema PostgreSQL (pilotos.*).
- * Los upserts usan campo `nombre` como key unica.
+ *
+ * Esto es SOLO el catalogo GLOBAL (cliente_id null) — 2026-08-13. Los
+ * upserts usan (nombre, cliente_id) como key unica; aqui siempre se busca
+ * con cliente_id: null porque este seed no sabe de clientes personalizados,
+ * esos se crean en caliente vía POST /vehiculo/:id/personalizado.
  */
 import { PrismaClient } from '@prisma/client';
 
@@ -46,7 +50,7 @@ async function main() {
 
     for (const m of mantenimientosPorKm) {
         await prisma.mantenimientoCatalogo.upsert({
-            where: { nombre: m.nombre },
+            where: { nombre_cliente_id: { nombre: m.nombre, cliente_id: null } },
             update: {},
             create: { nombre: m.nombre, tipo: 'POR_KILOMETRAJE', frecuencia_km: m.frecuencia_km },
         });
@@ -54,7 +58,7 @@ async function main() {
 
     for (const m of mantenimientosSegunUso) {
         await prisma.mantenimientoCatalogo.upsert({
-            where: { nombre: m.nombre },
+            where: { nombre_cliente_id: { nombre: m.nombre, cliente_id: null } },
             update: {},
             create: { nombre: m.nombre, tipo: 'SEGUN_USO' },
         });
@@ -62,7 +66,7 @@ async function main() {
 
     for (const m of mantenimientosPorFecha) {
         await prisma.mantenimientoCatalogo.upsert({
-            where: { nombre: m.nombre },
+            where: { nombre_cliente_id: { nombre: m.nombre, cliente_id: null } },
             update: {},
             create: { nombre: m.nombre, tipo: 'POR_FECHA', frecuencia_meses: m.frecuencia_meses },
         });

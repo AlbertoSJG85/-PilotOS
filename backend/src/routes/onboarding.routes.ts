@@ -301,7 +301,13 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
             // calculando desde "ahora" y los km actuales del alta, no desde
             // la fecha real de la ultima ITV/revision/seguro — requeriria
             // pedir esos datos en el formulario de onboarding.
-            const catalogo = await tx.mantenimientoCatalogo.findMany();
+            //
+            // Solo el catalogo GLOBAL (cliente_id null) — 2026-08-13. Antes
+            // este findMany() traia TODO el catalogo sin filtrar; en cuanto
+            // exista un mantenimiento personalizado de otro cliente (ver
+            // POST /vehiculo/:id/personalizado), un alta nueva se lo habria
+            // heredado sin ser suyo.
+            const catalogo = await tx.mantenimientoCatalogo.findMany({ where: { cliente_id: null, activo: true } });
             for (const item of catalogo) {
                 await tx.mantenimientoVehiculo.create({
                     data: {
