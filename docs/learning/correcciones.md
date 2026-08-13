@@ -1017,3 +1017,130 @@ Cuatro decisiones que importan más que el cambio en sí:
 - **Prevención, y es la cara de las seis:** *cuando el mismo síntoma vuelve por tercera vez, deja de arreglarlo y cambia la pieza.* Tres correcciones sobre lo mismo no son mala suerte: son la señal de que el problema está una capa más abajo de donde se está mirando. Aquí costó seis, un conductor acusado injustamente y tres días de Alberto.
 - **Corolario, de C-063 y repetido hoy:** una llamada real vale más que siete tests verdes. Los tests solo comprueban lo que crees que devuelve el proveedor; el proveedor devuelve lo que devuelve.
 - **Deuda declarada:** el módulo está copiado dentro de PilotOS (`src/vendor/`) porque Coolify construye el repositorio solo y no hay registro npm privado del ecosistema. El original es el de `NexOS/core`; falta la forma de consumirlo (registro privado o dependencia de git). El segundo producto que lea papeles debe partir del original, no de la copia.
+
+---
+
+### C-069 · El lector por visión no reintentaba, y un 500 puntual de OpenAI tiraba la lectura entera a Tesseract
+- Fecha: 2026-08-13
+- Área: `NexOS/core/ocr-vision`, copiado en `backend/src/vendor/nexos-ocr-vision.ts`
+
+**El síntoma.** El mismo día que se cerró C-068, la primera acta real que subió Alberto por WhatsApp (una Inspección Técnica Auto-Taxi del Ayuntamiento) se leyó al 55% de confianza, con el texto roto: *"No JE Ga Santa Cruz y 0, Movilidad y | m0 Ne AYUNTAMIE..."*. Justo el síntoma que C-068 llevaba seis correcciones intentando cerrar.
+
+**La causa.** No era una regresión de C-068 — el lector por visión estaba ahí y configurado. Lo que pasó, visto en el log de producción:
+
+```
+[OCR-VISION] 500: {"error":{"message":"An error occurred while processing your
+request...","type":"server_error"}}
+```
+
+Un 500 puntual de OpenAI, sin más detalle. `transcribirImagen()` no reintentaba nada: cualquier fallo, transitorio o no, devolvía `null` y el documento caía entero a Tesseract — que en un acta borrosa, con agujeros de carpeta y manchas de fotocopia, hace exactamente lo que seis correcciones anteriores ya documentaron que hace mal.
+
+**La corrección.** Un reintento, y solo uno, y solo cuando tiene sentido:
+
+```ts
+function mereceReintento(status: number | undefined): boolean {
+    if (status === undefined) return true; // fallo de red / timeout / abort
+    return status >= 500;
+}
+```
+
+Un 5xx o un fallo de red es plausible que sea del momento — se reintenta tras 800 ms. Un 4xx (clave mala, payload rechazado, límite de contenido) va a fallar exactamente igual la segunda vez: reintentarlo solo dobla la espera antes de caer a Tesseract, así que no se reintenta.
+
+Reprocesado el mismo documento tras el fix: confianza 95%, texto limpio ("Área de Gobierno de Seguridad, Movilidad y Accesibilidad Universal...").
+
+- 17/17 tests del módulo compartido (3 nuevos: 500 con reintento y éxito, 429 sin reintento, fallo de red con reintento).
+- **Prevención:** *"nunca romper al que llama" y "reintentar lo que merece la pena" no son la misma garantía.* El módulo prometía lo primero desde C-068 y lo cumplía — devolvía `null` limpiamente. Lo que faltaba era la segunda: que un fallo *transitorio* de un proveedor externo no tuviera el mismo peso que uno persistente. La distinción (5xx/red vs. 4xx) es barata de programar y cara de no tenerla.
+- **Nota aparte, deuda encontrada de paso:** este paquete (`NexOS/core/ocr-vision`) nunca se había metido en control de versiones — a diferencia de sus hermanos `nexos-core-alertas` y `nexos-core-multichannel-lead-routing`, no tenía ni `git init`. Se le dio historial local; falta crearle el repo remoto en GitHub (no había `gh` CLI disponible en el momento de escribir esto).
+
+---
+
+### C-070 · Un documento de taxi puede parecer una factura, y "ITV" no siempre es la ITV
+- Fecha: 2026-08-13
+- Área: `backend/src/services/ocrDocumentoVehiculo.service.ts`, `backend/src/routes/documentoVehiculo.routes.ts`, `app/.../documentos/page.tsx`
+
+**El primer síntoma, y el más fácil.** Alberto subió su Tarjeta de Transporte (Cabildo de Tenerife) y el sistema la clasificó como `FACTURA_TALLER`. La causa, encontrada con una consulta directa al texto guardado:
+
+```sql
+SELECT ocr_texto ~* 'factura' FROM documentos WHERE id='...'; -- true
+```
+
+El texto de la tarjeta no menciona ninguna factura de taller. Lo que casaba era esto, en la letra pequeña legal del documento: *"El transporte no podrá ser **facturado** de forma independiente."* El patrón `esFactura` no tenía límite de palabra: `factura` sin `\b` casa dentro de `facturado`. Cualquier papel administrativo que mencione de pasada una obligación de facturar —y no es raro— caía aquí.
+
+No existía tampoco un tipo `TARJETA_TRANSPORTE`: hasta ese momento, la tarjeta de transporte no era un documento que el sistema supiera nombrar.
+
+**El segundo síntoma, más importante.** El acta de Inspección Técnica Auto-Taxi del Ayuntamiento (Servicio de Movilidad) clasificó como `CERTIFICADO_ITV` — y la pantalla lo enseñaba como **"ITV"**, a secas. Alberto lo señaló dos veces con el mismo documento: *"NO es itv"*. Tenía razón — el acta municipal y la ITV de tráfico/DGT son trámites distintos que comparten la frase "inspección técnica", y el sistema los trataba como si fueran el mismo hecho.
+
+Encima, el acta trae su propio checklist impreso ("Neumáticos: Sí/No", "Póliza de seguro: Sí/No" — casillas de la inspección, no servicios hechos), y el escaneo genérico de mantenimientos (`detectarMantenimientos`) leía esas casillas como si el conductor hubiera cambiado ruedas y renovado el seguro de verdad.
+
+**La corrección.**
+1. `\bfactura(s)?\b` con límite de palabra, y `tarjeta de transporte`/`autorización de transporte` comprobados **antes** que el resto de patrones — el orden de clasificación importa.
+2. Tipo `TARJETA_TRANSPORTE` nuevo, con su propia extracción de fecha y validez (igual que la ITV: fecha más antigua = alta, `extraerValidaHasta` = vencimiento).
+3. Para `CERTIFICADO_ITV`, se detecta `ayuntamiento` + `auto-taxi` en el texto y se resuelve el mantenimiento correcto — `"Inspeccion tecnica autotaxi"`, no `"ITV del vehiculo"` — **y se ignora el escaneo genérico de mantenimientos para este tipo**: un acta de inspección no es una factura de taller, su checklist no cuenta como trabajo hecho.
+4. La pantalla ya no dice "ITV" a secas: dice "Inspección técnica".
+5. **Botón "Reprocesar"** en la pantalla de Documentos + `POST /:id/reprocesar`: relee el fichero ya guardado sin resubir nada. Alberto lo pidió en caliente, delante de la pantalla: *"¿no puedo volver a pasar por el OCR?"*.
+
+- 37/37 tests (7 nuevos: Tarjeta de Transporte real con "facturado" en el texto, "factura" suelta sigue reconociéndose, acta municipal no confunde su checklist con mantenimientos hechos, ITV real sin ayuntamiento/auto-taxi sigue resolviendo "ITV del vehiculo").
+- **Prevención:** *dos documentos distintos pueden compartir vocabulario sin ser lo mismo.* "Factura" e "inspección técnica" son señales útiles, pero ninguna palabra suelta prueba qué es un documento — hace falta mirar el contexto (límite de palabra, combinación de términos, procedencia del papel) antes de decidir. Y un patrón de clasificación sin `\b` es una fuga de falsos positivos silenciosa: no rompe nada, solo clasifica mal, calladamente.
+
+---
+
+### C-071 · El sistema le daba prioridad a la fecha que peor lee, y 155 mantenimientos no existían donde deberían
+- Fecha: 2026-08-13
+- Área: `backend/src/services/aplicarDocumento.service.ts`
+
+**El síntoma.** Alberto confirmó el acta municipal (C-070) corrigiendo la fecha de alta a 12/09/2024. El sistema, tras guardarlo, seguía diciendo que el mantenimiento estaba "al día" — con vencimiento en el **año 2094**.
+
+**La causa, primera mitad.** `aplicarDocumentoConfirmado` calculaba el vencimiento así:
+
+```ts
+const proximaFecha = validaHasta ?? (frecMeses ? sumarMeses(fechaDoc, frecMeses) : null);
+```
+
+El `validaHasta` que propone el OCR **siempre ganaba** cuando existía, aunque la persona hubiera corregido la fecha de alta. Y `valida_hasta` es precisamente el campo que peor lee el OCR — un dígito confundido (2094 por 2024) se colaba como vencimiento oficial por encima de un dato que el propio dueño acababa de corregir. Alberto lo resumió mejor que cualquier ticket: *"yo doy la fecha de alta, el sistema tiene que calcular el final"*.
+
+**La causa, segunda mitad — más grave.** Su Tarjeta de Transporte (tipo nuevo de C-070) no aparecía en ningún sitio para poder anularla. El motivo: `"Tarjeta de transporte"` se añadió al catálogo **global** ese mismo día, pero solo el onboarding crea el enganche `mantenimiento_vehiculo` — y el vehículo de Alberto ya existía. El documento se aplicó igual ("APLICADO", en silencio), sin tocar ningún mantenimiento, y el aviso que el backend sí generaba (`avisos: ["No hay un mantenimiento..."]`) se descartaba en el frontend sin mostrarse a nadie.
+
+Una consulta cruzando toda la flota contra el catálogo global reveló el alcance real:
+
+```sql
+SELECT count(*) FROM vehiculos v CROSS JOIN mantenimiento_catalogo c
+WHERE c.cliente_id IS NULL AND c.activo AND NOT EXISTS (
+  SELECT 1 FROM mantenimientos_vehiculos mv
+  WHERE mv.vehiculo_id=v.id AND mv.catalogo_id=c.id
+); -- 155
+```
+
+155 huecos vehículo↔catálogo en toda la flota, no solo el de hoy: cada vez que el catálogo global crece, los vehículos dados de alta antes se quedan atrás para siempre, sin que nada lo note.
+
+**La corrección.**
+1. **Prioridad invertida:** la periodicidad del catálogo manda cuando existe (`fecha alta + frecuencia_meses`); el `valida_hasta` del documento solo se usa si el catálogo no tiene cadencia propia (p. ej. "Inspecciones municipales").
+2. **Auto-sanado:** si al confirmar un documento no existe el enganche `mantenimiento_vehiculo`, se crea en el momento (con el catálogo global o propio del cliente) en vez de solo avisar y no hacer nada.
+3. **Backfill de los 155 huecos** existentes, de una vez.
+4. Los `avisos` del backend ya se muestran en pantalla — dejaron de descartarse en silencio.
+
+- 64/64 tests (backend completo relacionado con documentos y mantenimientos).
+- **Prevención:** *cuando dos fuentes de un mismo dato compiten (lo que dice el papel, lo que dice la fórmula), la que se sabe menos fiable no puede ganar por defecto.* El OCR ya llevaba seis correcciones (C-068) documentando que falla con dígitos; dejar que ese campo concreto pisara una corrección humana explícita era repetir la lección en un sitio nuevo.
+- **Corolario:** *un catálogo que crece necesita alguien que actualice a los que ya estaban.* Un campo nuevo en una tabla de referencia no es gratis si hay filas de negocio que dependen de tener una por cada combinación — sin backfill, "añadir una opción" y "romper silenciosamente lo existente" son la misma operación.
+
+---
+
+### C-072 · Una fecha de mantenimiento no se supone — y lo mismo, otra vez, en Drive
+- Fecha: 2026-08-13
+- Área: `app/.../mantenimientos/page.tsx`, `backend/src/services/drive.service.ts`
+
+**El primer aviso, sobre el propio backfill de C-071.** El backfill de los 155 huecos calculó `proximo_km`/`proxima_fecha` como si cada mantenimiento se hubiera hecho **hoy** — la misma fórmula que usa el alta de un vehículo nuevo. Alberto lo cazó al momento, con la pantalla de pestañas recién pedida delante: *"yo no te he dicho cuándo se ha hecho anteriormente cada uno, tú has supuesto y eso está mal"*. Tenía razón sin matices: no hay ningún dato real detrás de esa fecha, y el sistema la enseñaba como si lo hubiera. El mismo patrón, además, llevaba desde el **alta original de cada vehículo** — el onboarding hace exactamente el mismo supuesto para todo el catálogo, no solo lo de hoy.
+
+Corrección: para todo mantenimiento sin `ultima_ejecucion_fecha` ni `ultima_ejecucion_km` reales, `proximo_km`/`proxima_fecha` se dejan en blanco — no se calcula ningún vencimiento sin una fecha real de la que partir. 129 filas corregidas en toda la flota (113 del backfill + 16 del alta original de otros vehículos), dejando solo los mantenimientos con un dato real detrás.
+
+**La pantalla, pedida directamente.** Tres pestañas — Caducado / Al día / Sin configurar — sustituyendo las dos listas apiladas de antes. Las tres con "Editar"/"Resolver" visibles: antes "Al día" era de solo lectura, así que anular un mantenimiento que ya estaba al día no tenía botón visible.
+
+**El mismo problema, en Drive.** Alberto: *"el drive lo veo igual"*, tras el primer intento de arreglo. Comprobado contra la API de Drive: el archivo bueno SÍ estaba en la carpeta correcta y el malo SÍ estaba en la papelera — pero **las carpetas viejas seguían ahí, vacías**. "ITV" (vacía) y "Otros" (vacía) seguían siendo visibles junto a las carpetas nuevas "Inspección técnica" y "Tarjeta de transporte", así que a simple vista no cambiaba nada.
+
+Causas de fondo, dos:
+1. `CARPETA_POR_TIPO` no tenía entrada para `TARJETA_TRANSPORTE` (tipo nuevo de C-070) → caía en "Otros". Y `CERTIFICADO_ITV` seguía apuntando a la carpeta "ITV", aunque la etiqueta en pantalla ya se había corregido a "Inspección técnica" en C-070 — se corrigió la vista y no el archivado.
+2. `drive_file_id` nunca se guardaba: `subirDocumentoADrive` pedía el `id` a la API de Drive y lo tiraba. Sin él, corregir un archivado malo exigía sacar el id a mano de la URL guardada.
+
+Corrección: `CARPETA_POR_TIPO` alineado con las etiquetas de pantalla; `drive_file_id` persistido; función `papeleraDrive()` nueva para poder corregir un archivado sin perder el original. Los dos ficheros mal archivados, movidos a la papelera y resubidos con la carpeta y fecha correctas; las dos carpetas huérfanas que quedaron vacías, también a la papelera.
+
+- **Prevención, y es la misma lección tres veces en un día (C-070, C-071, C-072):** *arreglar una superficie sin arreglar el origen deja el síntoma en otro sitio.* La etiqueta de pantalla, el catálogo de mantenimientos y la carpeta de Drive son tres representaciones del mismo dato (`tipo` de documento, fecha real de ejecución); corregir una y no las otras dos no arregla nada, solo mueve la inconsistencia a donde todavía no se ha mirado.
+- **Corolario operativo:** cuando se corrige un dato que ya generó efectos secundarios (aquí: un archivo subido a Drive con la carpeta/fecha mala), la corrección tiene que alcanzar también a esos efectos ya producidos, no solo a la causa. Un `UPDATE` en la base de datos no repara un fichero que ya viajó a un sistema externo.

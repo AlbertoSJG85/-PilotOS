@@ -370,3 +370,25 @@ Registro de decisiones tecnicas importantes del proyecto.
 - Justificacion: Un patrón que trabaja solo veía referencias a asalariados/conductor/liquidación sin tener empleados. Confunde y sugiere que falta un dato. Resolver vía lectura de la estructura de la sesión es 10 LOC de backend y evita inferencias frágiles en frontend (vacío != ausencia).
 - Limitación conocida (V1): el flag se calcula al login y se cachea hasta logout/login. Si el patrón añade un asalariado desde `/flota` durante una sesión activa, la UI sigue mostrando modo "solo propietario" hasta cerrar y volver a abrir sesión. Aceptable para V1. Para V2: extender `/auth/me` para refrescar.
 - Cálculo económico (`calculo.service.ts`, `resumen.service.ts`, `compararDocumentosConParte`) **no** depende de este flag: solo controla copy y visibilidad de tarjetas. La lógica de reparto sigue calculada por configuración económica del cliente.
+
+---
+
+## DT-035 · Catálogo de mantenimientos: global por defecto, personalizable por cliente
+
+- Fecha: 2026-08-13
+- Area: Backend / modelo de mantenimientos (`mantenimiento_catalogo`, `mantenimientos_vehiculos`)
+- Decision: `MantenimientoCatalogo.cliente_id` (nullable). `null` = catálogo global compartido por todo el ecosistema (el seed de siempre). Con valor = mantenimiento **privado de ese cliente**, invisible para el resto. Unicidad pasa de `nombre` (único global) a `(nombre, cliente_id)`, para que dos clientes puedan llamar igual a su propia obligación sin chocar entre sí ni con el catálogo global.
+- Justificacion: el papeleo del taxi varía por ayuntamiento — lo que le exige uno a un cliente no tiene por qué exigírselo a otro. Antes de esto no había forma de añadir una obligación propia sin metérsela a toda la flota (o de quitarla sin desactivarla para todos). Endpoint: `POST /api/mantenimientos/vehiculo/:id/personalizado`.
+- Efecto secundario que hubo que cerrar aparte: el catálogo global puede seguir creciendo (como pasó el mismo día: se añadió "Tarjeta de transporte"), y un vehículo dado de alta ANTES de ese crecimiento no recibe el enganche automáticamente — solo lo hace el onboarding, una vez, al alta. Sin un mecanismo que lo repare, cada ampliación del catálogo global deja atrás a la flota existente en silencio. Mitigado con auto-sanado en `aplicarDocumentoConfirmado` (si falta el enganche al confirmar un documento, se crea en el momento) — ver C-071 en `correcciones.md`. Sigue sin existir un backfill automático programado; el de hoy fue manual.
+- Riesgo aceptado: el `UNIQUE(nombre, cliente_id)` con `cliente_id` nullable no impide a nivel de base de datos dos filas globales con el mismo nombre (Postgres trata `NULL` como distinto de sí mismo en índices únicos). La protección contra ese caso vive en la capa de aplicación (`seed.ts` para el global, comprobación explícita en el endpoint de alta para el propio de cada cliente), no en el esquema.
+
+---
+
+## DT-036 · Un mantenimiento nunca se supone "al día": sin fecha real, está "sin configurar"
+
+- Fecha: 2026-08-13
+- Area: Backend + Frontend / modelo de mantenimientos
+- Decision: `mantenimientos_vehiculos.proximo_km` / `proxima_fecha` (el vencimiento) solo se calculan a partir de una `ultima_ejecucion_fecha` / `ultima_ejecucion_km` **real** — un dato que vino de un documento confirmado o de una corrección explícita de la persona. Nunca se fabrica una fecha de partida asumiendo "como si se hubiera hecho hoy". Sin una ejecución real detrás, el mantenimiento se enseña como **Sin configurar**, no como "Al día".
+- Justificacion: tanto el alta de un vehículo nuevo (onboarding) como el backfill de huecos del catálogo (DT-035) calculaban el vencimiento asumiendo el día del alta/backfill como fecha de la última ejecución. Alberto lo señaló sin matices al ver la pantalla de pestañas nueva: *"yo no te he dicho cuándo se ha hecho anteriormente cada uno, tú has supuesto y eso está mal"*. Un vencimiento calculado sobre un dato inventado no es una alerta útil — es peor que no tener la alerta, porque parece confiable y no lo es.
+- Estados de la pantalla `/mantenimientos` (tres pestañas, no dos): **Caducado** (vencido de verdad), **Al día** (tiene una ejecución real y no está vencido), **Sin configurar** (nunca se ha registrado cuándo se hizo, y por tanto no hay vencimiento que calcular). Las tres pestañas comparten la misma tarjeta con "Editar"/"Resolver" — antes "Al día" era de solo lectura.
+- Pendiente de revisar con el mismo criterio: el propio flujo de onboarding (`onboarding.routes.ts`) sigue fabricando `proximo_km`/`proxima_fecha` para cada vehículo nuevo asumiendo el día del alta. No se tocó en esta pasada (fuera del incidente concreto que la motivó); si vuelve a dar el mismo síntoma, aplicar aquí el mismo criterio.
