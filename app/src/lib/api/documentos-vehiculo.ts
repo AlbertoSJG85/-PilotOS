@@ -90,6 +90,6 @@ export async function revisarDocumento(
   id: string,
   aprobar: boolean,
   datos?: DatosDocumento,
-): Promise<{ status: string; aplicado?: boolean; mantenimientos_actualizados?: string[]; gasto_id?: string | null }> {
+): Promise<{ status: string; aplicado?: boolean; mantenimientos_actualizados?: string[]; gasto_id?: string | null; avisos?: string[] }> {
   return apiFetch(`/api/documentos-vehiculo/${id}/revisar`, { method: 'POST', body: { aprobar, datos } });
 }

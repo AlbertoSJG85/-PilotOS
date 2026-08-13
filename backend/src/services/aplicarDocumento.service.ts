@@ -102,7 +102,7 @@ export async function aplicarDocumentoConfirmado(
         // trazado en su seguimiento.
         let primerMantenimientoId: string | null = null;
         for (const nombreCatalogo of datos.mantenimientos ?? []) {
-            const mant = await tx.mantenimientoVehiculo.findFirst({
+            let mant = await tx.mantenimientoVehiculo.findFirst({
                 where: {
                     vehiculo_id: doc.vehiculo_id,
                     activo: true,
@@ -110,18 +110,47 @@ export async function aplicarDocumentoConfirmado(
                 },
                 include: { catalogo: true },
             });
+
+            // Auto-sanar el enganche que falta (2026-08-13, C-071). Pasó de
+            // verdad: se añadió "Tarjeta de transporte" al catálogo global el
+            // mismo día que Alberto confirmó un documento de ese tipo, y su
+            // vehículo (dado de alta antes) nunca recibió la fila de
+            // mantenimiento_vehiculo correspondiente — solo el ONBOARDING la
+            // crea. El documento se aplicó igualmente («APLICADO»,
+            // silenciosamente sin tocar nada) y el mantenimiento no aparecía
+            // en ningún sitio para poder anularlo o revisarlo. Aquí se crea
+            // el enganche que falta con el catálogo (global o propio del
+            // cliente) en vez de limitarse a avisar y no hacer nada — que es
+            // lo que pasaba antes.
             if (!mant) {
-                avisos.push(`No hay un mantenimiento "${nombreCatalogo}" dado de alta en este vehículo.`);
-                continue;
+                const catalogo = await tx.mantenimientoCatalogo.findFirst({
+                    where: { nombre: nombreCatalogo, activo: true, OR: [{ cliente_id: null }, { cliente_id: clienteId }] },
+                });
+                if (!catalogo) {
+                    avisos.push(`"${nombreCatalogo}" no existe en el catálogo de mantenimientos.`);
+                    continue;
+                }
+                mant = await tx.mantenimientoVehiculo.create({
+                    data: { vehiculo_id: doc.vehiculo_id, catalogo_id: catalogo.id },
+                    include: { catalogo: true },
+                });
+                avisos.push(`"${nombreCatalogo}" no estaba dado de alta en este vehículo — se ha añadido.`);
             }
 
             const frecKm = mant.frecuencia_km_personalizada ?? mant.frecuencia_aprendida ?? mant.catalogo.frecuencia_km;
             const frecMeses = mant.frecuencia_meses_personalizada ?? mant.catalogo.frecuencia_meses;
 
-            // La fecha del documento manda cuando la trae (una ITV dice hasta
-            // cuándo vale; no hay que calcularlo). Si no, se calcula con la
-            // frecuencia del catálogo, igual que en /resolver.
-            const proximaFecha = validaHasta ?? (frecMeses ? sumarMeses(fechaDoc, frecMeses) : null);
+            // La periodicidad del catálogo manda cuando existe: se calcula
+            // desde la fecha del documento (2026-08-13, C-071 — antes era al
+            // revés). El "válida hasta" que lee el OCR es, dos veces el mismo
+            // día, el campo que peor sale: una cifra mal leída ahí ("2094"
+            // por "2024") se colaba como vencimiento oficial aunque la
+            // persona hubiera corregido la fecha de alta. Alberto lo dijo
+            // directo: "yo doy la fecha de alta, el sistema calcula el
+            // final". Solo se usa el "válida hasta" del documento cuando el
+            // catálogo no tiene periodicidad propia (p. ej. "Inspecciones
+            // municipales", que no tiene una cadencia fija).
+            const proximaFecha = frecMeses ? sumarMeses(fechaDoc, frecMeses) : validaHasta;
             const proximoKm = frecKm ? kmEjecucion + frecKm : null;
             const tieneRecurrencia = proximoKm !== null || proximaFecha !== null;
 

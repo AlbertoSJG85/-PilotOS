@@ -79,11 +79,15 @@ function Confirmacion({
         return;
       }
       const puestos = r.mantenimientos_actualizados ?? [];
-      onHecho(
-        puestos.length > 0
-          ? `Al día: ${puestos.join(', ')}${r.gasto_id ? ' · gasto registrado' : ''}`
-          : r.gasto_id ? 'Gasto registrado' : 'Documento guardado',
-      );
+      // Los avisos del backend (p. ej. "no estaba dado de alta, se ha
+      // añadido") se estaban descartando en silencio (2026-08-13, C-071):
+      // el documento quedaba APLICADO sin que nadie se enterara de que algo
+      // no había ido del todo bien. Ahora se enseñan siempre que existan.
+      const avisos = r.avisos ?? [];
+      const mensaje = puestos.length > 0
+        ? `Al día: ${puestos.join(', ')}${r.gasto_id ? ' · gasto registrado' : ''}`
+        : r.gasto_id ? 'Gasto registrado' : 'Documento guardado';
+      onHecho(avisos.length > 0 ? `${mensaje} — ${avisos.join(' ')}` : mensaje);
     } catch {
       setError('No se pudo guardar. Inténtalo de nuevo.');
     } finally {
