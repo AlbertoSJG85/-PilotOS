@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -18,6 +19,7 @@ import {
   UsersRound,
   Wrench,
 } from 'lucide-react';
+import { ScrollReveal } from '@/components/marketing/scroll-reveal';
 
 export const metadata: Metadata = {
   title: 'PilotOS | Gestion inteligente para flotas',
@@ -90,6 +92,19 @@ const dashboardStats = [
   { label: 'Actividad reciente', value: '18', detail: 'Registros validados' },
 ];
 
+/** Las cuatro capacidades que el hero enseña sobre la fotografia. */
+const heroCards = [
+  { label: 'Partes diarios', icon: CalendarCheck },
+  { label: 'Gastos', icon: ReceiptText },
+  { label: 'Alertas', icon: AlertTriangle },
+  { label: 'Reportes', icon: FileText },
+];
+
+/** Retardo de aparicion, para escalonar tarjetas dentro de una misma rejilla. */
+function delay(ms: number): CSSProperties {
+  return { '--reveal-delay': `${ms}ms` } as CSSProperties;
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-pilotos-yellow/30 bg-pilotos-yellow/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-pilotos-yellow">
@@ -110,65 +125,109 @@ function CtaLink({
 }) {
   const classes =
     variant === 'primary'
-      ? 'bg-pilotos-yellow text-pilotos-black hover:bg-[#ffc533]'
-      : 'border border-white/[0.16] bg-white/[0.06] text-white hover:border-pilotos-yellow/40 hover:bg-pilotos-yellow/10';
+      ? 'bg-pilotos-yellow text-pilotos-black shadow-[0_10px_34px_-10px_rgba(255,183,3,0.65)] hover:bg-[#ffc533] hover:shadow-[0_16px_44px_-10px_rgba(255,183,3,0.8)]'
+      : 'border border-white/[0.16] bg-white/[0.06] text-white backdrop-blur hover:border-pilotos-yellow/40 hover:bg-pilotos-yellow/10';
 
   return (
     <Link
       href={href}
-      className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-lg px-5 text-sm font-bold transition ${classes}`}
+      className={`group inline-flex min-h-12 items-center justify-center gap-2 rounded-lg px-5 text-sm font-bold transition duration-200 hover:-translate-y-0.5 ${classes}`}
     >
       {children}
-      <ArrowRight className="h-4 w-4" />
+      <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
     </Link>
+  );
+}
+
+/** Filete luminoso que cose una seccion con la siguiente. */
+function Costura() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none mx-auto h-px w-full max-w-7xl bg-[linear-gradient(90deg,transparent,rgba(255,183,3,0.28),transparent)]"
+    />
   );
 }
 
 export default function Home() {
   return (
     <main className="min-h-screen overflow-hidden bg-pilotos-black text-white">
-      <section className="relative flex min-h-[92svh] items-center border-b border-white/10 px-5 py-8 sm:px-8 lg:px-12">
-        <Image
-          src="/branding/pilotos/landing-hero-mockup.png"
-          alt="Vista premium de PilotOS para control operativo de flotas"
-          fill
-          priority
-          sizes="100vw"
-          className="object-cover object-center opacity-70"
+      <ScrollReveal />
+
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.06] bg-pilotos-black/70 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 sm:px-8 lg:px-12">
+          <Image
+            src="/branding/pilotos/logo-full.png"
+            alt="PilotOS"
+            width={190}
+            height={56}
+            className="h-10 w-auto object-contain sm:h-12"
+            priority
+          />
+          <Link
+            href="/login"
+            className="rounded-lg border border-white/[0.14] px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:border-pilotos-yellow/40 hover:text-white"
+          >
+            Acceder
+          </Link>
+        </div>
+      </header>
+
+      {/* ── HERO ───────────────────────────────────────────────
+          Cabina real de fondo, entrando desde la derecha, con el
+          texto sobre negro a la izquierda. */}
+      <section className="relative flex min-h-[100svh] items-center overflow-hidden px-5 pb-16 pt-28 sm:px-8 sm:pt-32 lg:px-12">
+        <div className="absolute inset-0 overflow-hidden">
+          <Image
+            src="/img/hero-cabina.webp"
+            alt="Interior de un vehiculo en marcha de noche, con el volante y el cuadro digital iluminados"
+            fill
+            priority
+            sizes="100vw"
+            className="hero-foto object-cover object-[68%_center]"
+          />
+        </div>
+
+        {/* Degradados: el texto siempre cae sobre negro solido. */}
+        <div
+          aria-hidden
+          className="absolute inset-0 bg-[linear-gradient(90deg,#05070B_0%,rgba(5,7,11,0.97)_28%,rgba(5,7,11,0.72)_52%,rgba(5,7,11,0.42)_78%,rgba(5,7,11,0.78)_100%)]"
         />
-        <div className="absolute inset-0 bg-[linear-gradient(90deg,#05070B_0%,rgba(5,7,11,0.92)_34%,rgba(5,7,11,0.62)_70%,rgba(5,7,11,0.92)_100%)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(5,7,11,0.45)_0%,rgba(5,7,11,0.1)_45%,#05070B_100%)]" />
+        <div
+          aria-hidden
+          className="absolute inset-0 bg-[linear-gradient(180deg,rgba(5,7,11,0.9)_0%,rgba(5,7,11,0.25)_35%,rgba(5,7,11,0.6)_72%,#05070B_100%)]"
+        />
+        {/* Iluminacion amarilla muy contenida. */}
+        <div
+          aria-hidden
+          className="hero-glow pointer-events-none absolute -left-32 top-1/3 h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(255,183,3,0.16),transparent_66%)] blur-2xl"
+        />
 
-        <div className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-10">
-          <header className="flex items-center justify-between gap-4">
-            <Image
-              src="/branding/pilotos/logo-full.png"
-              alt="PilotOS"
-              width={190}
-              height={56}
-              className="h-12 w-auto object-contain"
-              priority
-            />
-            <Link
-              href="/login"
-              className="rounded-lg border border-white/[0.14] px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:border-pilotos-yellow/40 hover:text-white"
+        <div className="relative z-10 mx-auto w-full max-w-7xl">
+          <div className="max-w-4xl">
+            <p
+              className="hero-entra mb-5 text-sm font-semibold uppercase tracking-[0.28em] text-pilotos-yellow"
+              style={{ animationDelay: '0.75s' }}
             >
-              Acceder
-            </Link>
-          </header>
-
-          <div className="max-w-4xl pt-6 sm:pt-12">
-            <p className="mb-5 text-sm font-semibold uppercase tracking-[0.28em] text-pilotos-yellow">
               PilotOS by NexOS
             </p>
-            <h1 className="max-w-3xl text-5xl font-black leading-[0.98] tracking-normal text-white sm:text-6xl lg:text-7xl">
+            <h1
+              className="hero-entra max-w-3xl text-5xl font-black leading-[0.98] tracking-tight text-white sm:text-6xl lg:text-7xl"
+              style={{ animationDelay: '0.9s' }}
+            >
               Gestion inteligente para flotas
             </h1>
-            <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-200 sm:text-xl">
+            <p
+              className="hero-entra mt-6 max-w-2xl text-lg leading-8 text-zinc-300 sm:text-xl"
+              style={{ animationDelay: '1.05s' }}
+            >
               Centraliza la operacion diaria, reduce errores manuales y convierte partes,
               gastos, mantenimientos y alertas en una vision de negocio clara.
             </p>
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            <div
+              className="hero-entra mt-8 flex flex-col gap-3 sm:flex-row"
+              style={{ animationDelay: '1.2s' }}
+            >
               <CtaLink href="/demo">Solicitar demo</CtaLink>
               <CtaLink href="/demo" variant="secondary">
                 Ver como funciona
@@ -176,24 +235,33 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="grid max-w-3xl grid-cols-2 gap-3 pt-4 sm:grid-cols-4">
-            {['Partes diarios', 'Gastos', 'Alertas', 'Reportes'].map((item) => (
+          <div className="mt-14 grid max-w-3xl grid-cols-2 gap-3 sm:grid-cols-4">
+            {heroCards.map(({ label, icon: Icon }, i) => (
               <div
-                key={item}
-                className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm font-semibold text-zinc-200 backdrop-blur"
+                key={label}
+                className="hero-tarjeta rounded-xl border border-white/[0.12] bg-[#0B0D12]/80 p-4 shadow-[0_18px_44px_-18px_rgba(0,0,0,0.9)] backdrop-blur-md transition duration-200 hover:-translate-y-1 hover:border-pilotos-yellow/30"
+                style={{ animationDelay: `${1.35 + i * 0.1}s` }}
               >
-                {item}
+                <Icon className="mb-3 h-5 w-5 text-pilotos-yellow" />
+                <p className="text-sm font-semibold text-zinc-100">{label}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      <section className="border-b border-white/10 px-5 py-20 sm:px-8 lg:px-12">
-        <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
-          <div>
+      <Costura />
+
+      {/* ── EL PROBLEMA ────────────────────────────────────── */}
+      <section className="relative px-5 py-24 sm:px-8 lg:px-12">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute right-0 top-10 h-96 w-96 rounded-full bg-[radial-gradient(circle,rgba(239,68,68,0.07),transparent_70%)] blur-2xl"
+        />
+        <div className="relative mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+          <div data-reveal>
             <SectionLabel>El problema</SectionLabel>
-            <h2 className="max-w-2xl text-3xl font-black leading-tight text-white sm:text-4xl">
+            <h2 className="max-w-2xl text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
               Muchas flotas siguen funcionando con informacion dispersa.
             </h2>
             <p className="mt-5 max-w-xl text-base leading-7 text-zinc-400">
@@ -204,10 +272,12 @@ export default function Home() {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            {painPoints.map((point) => (
+            {painPoints.map((point, i) => (
               <div
                 key={point}
-                className="flex min-h-24 items-center gap-4 rounded-lg border border-white/10 bg-white/[0.03] p-5"
+                data-reveal
+                style={delay(i * 70)}
+                className="flex min-h-24 items-center gap-4 rounded-xl border border-white/[0.08] bg-[#0B0D12] p-5 shadow-[0_20px_50px_-30px_rgba(0,0,0,1)] transition duration-200 hover:-translate-y-1 hover:border-white/[0.16]"
               >
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-500/10 text-red-300">
                   <AlertTriangle className="h-5 w-5" />
@@ -219,9 +289,19 @@ export default function Home() {
         </div>
       </section>
 
-      <section id="como-funciona" className="border-b border-white/10 px-5 py-20 sm:px-8 lg:px-12">
-        <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
-          <div className="relative overflow-hidden rounded-lg border border-pilotos-yellow/20 bg-pilotos-panel">
+      <Costura />
+
+      {/* ── LA SOLUCION ────────────────────────────────────── */}
+      <section id="como-funciona" className="relative px-5 py-24 sm:px-8 lg:px-12">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -left-20 top-1/4 h-[420px] w-[420px] rounded-full bg-[radial-gradient(circle,rgba(255,183,3,0.09),transparent_68%)] blur-2xl"
+        />
+        <div className="relative mx-auto grid max-w-7xl gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+          <div
+            data-reveal
+            className="relative overflow-hidden rounded-2xl border border-pilotos-yellow/20 bg-pilotos-panel shadow-[0_50px_120px_-40px_rgba(0,0,0,1)]"
+          >
             <Image
               src="/branding/pilotos/dashboard-mockup.png"
               alt="Dashboard operativo de PilotOS"
@@ -230,11 +310,15 @@ export default function Home() {
               sizes="(max-width: 1024px) 100vw, 52vw"
               className="h-auto w-full object-cover"
             />
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/[0.06]"
+            />
           </div>
 
-          <div>
+          <div data-reveal style={delay(90)}>
             <SectionLabel>La solucion</SectionLabel>
-            <h2 className="text-3xl font-black leading-tight text-white sm:text-4xl">
+            <h2 className="text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
               Un sistema operativo para controlar la flota sin perseguir datos.
             </h2>
             <p className="mt-5 text-base leading-7 text-zinc-400">
@@ -243,7 +327,10 @@ export default function Home() {
             </p>
             <div className="mt-8 grid gap-4">
               {solutionPoints.map((point) => (
-                <div key={point} className="flex gap-3">
+                <div
+                  key={point}
+                  className="flex gap-3 rounded-lg border border-transparent p-2 transition hover:border-white/[0.08] hover:bg-white/[0.02]"
+                >
                   <CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-pilotos-yellow" />
                   <p className="text-sm leading-6 text-zinc-200">{point}</p>
                 </div>
@@ -253,37 +340,53 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="border-b border-white/10 px-5 py-20 sm:px-8 lg:px-12">
+      <Costura />
+
+      {/* ── FUNCIONALIDADES ────────────────────────────────── */}
+      <section className="relative px-5 py-24 sm:px-8 lg:px-12">
         <div className="mx-auto max-w-7xl">
-          <div className="max-w-3xl">
+          <div className="max-w-3xl" data-reveal>
             <SectionLabel>Funcionalidades</SectionLabel>
-            <h2 className="text-3xl font-black leading-tight text-white sm:text-4xl">
+            <h2 className="text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
               Todo lo importante de la operacion, conectado en una misma capa.
             </h2>
           </div>
 
-          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {features.map(({ title, text, icon: Icon }) => (
+          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {features.map(({ title, text, icon: Icon }, i) => (
               <article
                 key={title}
-                className="min-h-56 rounded-lg border border-white/10 bg-white/[0.035] p-5 transition hover:border-pilotos-yellow/30 hover:bg-white/[0.055]"
+                data-reveal
+                style={delay((i % 4) * 70 + Math.floor(i / 4) * 60)}
+                className="group relative min-h-56 overflow-hidden rounded-xl border border-white/[0.08] bg-[#0B0D12] p-5 shadow-[0_24px_60px_-36px_rgba(0,0,0,1)] transition duration-200 hover:-translate-y-1.5 hover:border-pilotos-yellow/30"
               >
-                <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-lg bg-pilotos-yellow text-pilotos-black">
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-[radial-gradient(circle,rgba(255,183,3,0.14),transparent_70%)] opacity-0 blur-xl transition-opacity duration-300 group-hover:opacity-100"
+                />
+                <div className="relative mb-5 flex h-11 w-11 items-center justify-center rounded-lg bg-pilotos-yellow text-pilotos-black shadow-[0_8px_24px_-8px_rgba(255,183,3,0.7)]">
                   <Icon className="h-5 w-5" />
                 </div>
-                <h3 className="text-base font-bold text-white">{title}</h3>
-                <p className="mt-3 text-sm leading-6 text-zinc-400">{text}</p>
+                <h3 className="relative text-base font-bold text-white">{title}</h3>
+                <p className="relative mt-3 text-sm leading-6 text-zinc-400">{text}</p>
               </article>
             ))}
           </div>
         </div>
       </section>
 
-      <section className="border-b border-white/10 px-5 py-20 sm:px-8 lg:px-12">
-        <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
-          <div>
+      <Costura />
+
+      {/* ── GLORIA ─────────────────────────────────────────── */}
+      <section className="relative px-5 py-24 sm:px-8 lg:px-12">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-1/2 top-1/2 h-[560px] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(255,183,3,0.07),transparent_66%)] blur-3xl"
+        />
+        <div className="relative mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
+          <div data-reveal>
             <SectionLabel>GlorIA / IA</SectionLabel>
-            <h2 className="text-3xl font-black leading-tight text-white sm:text-4xl">
+            <h2 className="text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
               La capa conversacional que convierte mensajes en operacion.
             </h2>
             <p className="mt-5 text-base leading-7 text-zinc-400">
@@ -293,14 +396,26 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="relative grid gap-4 sm:grid-cols-3">
+            {/* Hilo que une los tres pasos. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute left-0 right-0 top-12 hidden h-px bg-[linear-gradient(90deg,transparent,rgba(255,183,3,0.35),transparent)] sm:block"
+            />
             {[
               { title: 'Recibe', text: 'Partes, tickets y avisos desde el canal operativo.', icon: MessageCircle },
               { title: 'Interpreta', text: 'Clasifica informacion y detecta tareas pendientes.', icon: Bot },
               { title: 'Activa', text: 'Prepara registros, alertas y consultas recurrentes.', icon: Sparkles },
-            ].map(({ title, text, icon: Icon }) => (
-              <div key={title} className="rounded-lg border border-white/10 bg-pilotos-panel p-5">
-                <Icon className="h-6 w-6 text-pilotos-yellow" />
+            ].map(({ title, text, icon: Icon }, i) => (
+              <div
+                key={title}
+                data-reveal
+                style={delay(i * 110)}
+                className="relative rounded-xl border border-white/[0.1] bg-pilotos-panel p-5 shadow-[0_28px_70px_-40px_rgba(0,0,0,1)] transition duration-200 hover:-translate-y-1 hover:border-pilotos-yellow/30"
+              >
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-pilotos-yellow/25 bg-pilotos-yellow/10">
+                  <Icon className="h-5 w-5 text-pilotos-yellow" />
+                </div>
                 <h3 className="mt-5 text-base font-bold text-white">{title}</h3>
                 <p className="mt-3 text-sm leading-6 text-zinc-400">{text}</p>
               </div>
@@ -309,12 +424,15 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="border-b border-white/10 px-5 py-20 sm:px-8 lg:px-12">
+      <Costura />
+
+      {/* ── DE UN VISTAZO ──────────────────────────────────── */}
+      <section className="relative px-5 py-24 sm:px-8 lg:px-12">
         <div className="mx-auto max-w-7xl">
-          <div className="grid gap-10 lg:grid-cols-[0.75fr_1.25fr] lg:items-start">
-            <div>
+          <div className="grid gap-12 lg:grid-cols-[0.75fr_1.25fr] lg:items-start">
+            <div data-reveal>
               <SectionLabel>De un vistazo</SectionLabel>
-              <h2 className="text-3xl font-black leading-tight text-white sm:text-4xl">
+              <h2 className="text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
                 Estado, alertas, metricas y actividad reciente sin ruido.
               </h2>
               <p className="mt-5 text-base leading-7 text-zinc-400">
@@ -323,7 +441,10 @@ export default function Home() {
               </p>
             </div>
 
-            <div className="rounded-lg border border-pilotos-yellow/20 bg-[#090B10] p-5 shadow-2xl shadow-black/40">
+            <div
+              data-reveal
+              className="rounded-2xl border border-pilotos-yellow/20 bg-[#090B10] p-5 shadow-[0_60px_140px_-50px_rgba(0,0,0,1)]"
+            >
               <div className="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-pilotos-yellow">
@@ -339,7 +460,10 @@ export default function Home() {
 
               <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {dashboardStats.map((stat) => (
-                  <div key={stat.label} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                  <div
+                    key={stat.label}
+                    className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 transition duration-200 hover:border-pilotos-yellow/25 hover:bg-white/[0.05]"
+                  >
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
                       {stat.label}
                     </p>
@@ -350,7 +474,7 @@ export default function Home() {
               </div>
 
               <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_0.9fr]">
-                <div className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
+                <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-5">
                   <div className="mb-5 flex items-center justify-between">
                     <h4 className="text-sm font-bold text-white">Actividad reciente</h4>
                     <Clock3 className="h-4 w-4 text-pilotos-yellow" />
@@ -359,13 +483,13 @@ export default function Home() {
                     (item) => (
                       <div key={item} className="flex items-center justify-between border-t border-white/10 py-3">
                         <span className="text-sm text-zinc-300">{item}</span>
-                        <span className="h-2 w-2 rounded-full bg-pilotos-yellow" />
+                        <span className="h-2 w-2 rounded-full bg-pilotos-yellow shadow-[0_0_10px_rgba(255,183,3,0.8)]" />
                       </div>
                     ),
                   )}
                 </div>
 
-                <div className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
+                <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-5">
                   <div className="mb-5 flex items-center justify-between">
                     <h4 className="text-sm font-bold text-white">Metricas principales</h4>
                     <Gauge className="h-4 w-4 text-pilotos-yellow" />
@@ -376,10 +500,10 @@ export default function Home() {
                         <span className="text-zinc-300">{item}</span>
                         <span className="font-semibold text-white">{82 - index * 9}%</span>
                       </div>
-                      <div className="h-2 rounded-full bg-white/10">
+                      <div className="h-2 overflow-hidden rounded-full bg-white/10">
                         <div
-                          className="h-2 rounded-full bg-pilotos-yellow"
-                          style={{ width: `${82 - index * 9}%` }}
+                          className="barra-metrica h-2 rounded-full bg-pilotos-yellow"
+                          style={{ width: `${82 - index * 9}%`, ...delay(120 + index * 110) }}
                         />
                       </div>
                     </div>
@@ -391,8 +515,15 @@ export default function Home() {
         </div>
       </section>
 
-      <section id="solicitar-demo" className="px-5 py-20 sm:px-8 lg:px-12">
-        <div className="mx-auto max-w-5xl text-center">
+      <Costura />
+
+      {/* ── CIERRE ─────────────────────────────────────────── */}
+      <section id="solicitar-demo" className="relative overflow-hidden px-5 py-28 sm:px-8 lg:px-12">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-1/2 top-1/2 h-[620px] w-[620px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(255,183,3,0.11),transparent_64%)] blur-3xl"
+        />
+        <div className="relative mx-auto max-w-5xl text-center" data-reveal>
           <Image
             src="/branding/pilotos/logo-compact.png"
             alt="PilotOS"
@@ -400,7 +531,7 @@ export default function Home() {
             height={48}
             className="mx-auto h-12 w-auto object-contain"
           />
-          <h2 className="mt-8 text-3xl font-black leading-tight text-white sm:text-5xl">
+          <h2 className="mt-8 text-3xl font-black leading-tight tracking-tight text-white sm:text-5xl">
             Convierte la gestion de tu flota en un sistema automatico, ordenado y controlado.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-zinc-400">

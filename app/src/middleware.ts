@@ -23,7 +23,10 @@ export function middleware(request: NextRequest) {
     pathname.startsWith('/uploads') ||
     pathname === '/sw.js' ||
     pathname === '/manifest.json' ||
-    pathname.match(/\.(png|svg|ico|webmanifest)$/)
+    // webp/jpg/avif entraron con la fotografia de la landing: el optimizador de
+    // next/image pide el fichero original por HTTP, y si el middleware lo manda
+    // a /login recibe un HTML y responde 400 ("isn't a valid image").
+    pathname.match(/\.(png|svg|ico|webmanifest|webp|jpg|jpeg|avif)$/)
   ) {
     return NextResponse.next();
   }
