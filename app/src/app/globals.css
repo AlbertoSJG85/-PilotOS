@@ -134,10 +134,12 @@ input, select, textarea {
   transform: none;
 }
 
-/* Entrada del hero al cargar: fondo, foto, tarjetas, texto. */
+/* Entrada del hero: primero el logo grande se encoge hasta la cabecera
+   (ver HeroIntro), y solo entonces entran la foto, el texto y las tarjetas.
+   Mientras dura la intro, [data-hero-phase="intro"] los mantiene ocultos. */
 @keyframes heroFoto {
-  from { opacity: 0; transform: translateX(7%) scale(1.06); }
-  to   { opacity: 1; transform: translateX(0) scale(1.03); }
+  from { opacity: 0; transform: translateX(-20%) scale(1.06); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
 }
 @keyframes heroSube {
   from { opacity: 0; transform: translateY(22px); }
@@ -147,11 +149,12 @@ input, select, textarea {
   from { opacity: 0; transform: translateY(16px) scale(0.97); }
   to   { opacity: 1; transform: none; }
 }
-/* Movimiento ambiental mínimo una vez todo ha entrado. */
+/* Movimiento ambiental mínimo una vez todo ha entrado: deriva sutil, sin
+   acercar la imagen (el zoom decorativo se retiró para "alejar" la foto). */
 @keyframes derivaAmbiental {
   0%,
-  100% { transform: translate3d(0, 0, 0) scale(1.03); }
-  50%  { transform: translate3d(-0.8%, -0.6%, 0) scale(1.045); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(-0.6%, -0.4%, 0) scale(1.012); }
 }
 @keyframes respiraGlow {
   0%,
@@ -159,22 +162,44 @@ input, select, textarea {
   50%  { opacity: 0.78; }
 }
 
-.hero-foto {
+.hero-foto,
+.hero-entra,
+.hero-tarjeta {
   opacity: 0;
+}
+[data-hero-phase='revealed'] .hero-foto {
   animation:
-    heroFoto 1.5s cubic-bezier(0.16, 0.84, 0.3, 1) 0.15s forwards,
-    derivaAmbiental 26s ease-in-out 1.9s infinite;
+    heroFoto 2.3s cubic-bezier(0.16, 0.84, 0.3, 1) forwards,
+    derivaAmbiental 26s ease-in-out 2.3s infinite;
 }
 .hero-glow {
   animation: respiraGlow 12s ease-in-out 1.9s infinite;
 }
-.hero-entra {
-  opacity: 0;
+[data-hero-phase='revealed'] .hero-entra {
   animation: heroSube 0.8s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  animation-delay: var(--reveal-delay, 0ms);
 }
-.hero-tarjeta {
-  opacity: 0;
+[data-hero-phase='revealed'] .hero-tarjeta {
   animation: heroTarjeta 0.7s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  animation-delay: var(--reveal-delay, 0ms);
+}
+
+/* Intro del hero (como en RentOS): el logo grande se encoge hasta el hueco
+   de la cabecera y, al terminar, entran la foto, el texto y las tarjetas.
+   Sin la clase (JS desactivado) no hay parpadeo: todo se ve en su estado final. */
+html.pilotos-intro #pilotos-header-logo {
+  opacity: 0;
+}
+#pilotos-intro-logo {
+  display: none;
+}
+html.pilotos-intro #pilotos-intro-logo {
+  display: flex;
+}
+#pilotos-intro-logo-img {
+  width: min(480px, 70vw);
+  height: auto;
+  will-change: transform, opacity;
 }
 
 /* Barras del panel que crecen cuando la sección entra en viewport. */
@@ -209,5 +234,12 @@ input, select, textarea {
   [data-reveal='in'] .barra-metrica {
     transform: scaleX(1);
     transition: none;
+  }
+  /* Sin animación: directamente el estado final, sin logo grande de intro. */
+  #pilotos-intro-logo {
+    display: none !important;
+  }
+  html.pilotos-intro #pilotos-header-logo {
+    opacity: 1;
   }
 }

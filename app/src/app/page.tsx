@@ -20,6 +20,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { ScrollReveal } from '@/components/marketing/scroll-reveal';
+import { HeroIntro } from '@/components/marketing/hero-intro';
 
 export const metadata: Metadata = {
   title: 'PilotOS | Gestion inteligente para flotas',
@@ -92,12 +93,12 @@ const dashboardStats = [
   { label: 'Actividad reciente', value: '18', detail: 'Registros validados' },
 ];
 
-/** Las cuatro capacidades que el hero enseña sobre la fotografia. */
+/** Las cuatro capacidades que el hero enseña, flotando sobre la fotografia. */
 const heroCards = [
-  { label: 'Partes diarios', icon: CalendarCheck },
-  { label: 'Gastos', icon: ReceiptText },
-  { label: 'Alertas', icon: AlertTriangle },
-  { label: 'Reportes', icon: FileText },
+  { label: 'Partes diarios', value: '24', detail: '+12% vs ayer', icon: CalendarCheck },
+  { label: 'Gastos', value: '1.250 €', detail: '+8% vs semana pasada', icon: ReceiptText },
+  { label: 'Alertas', value: '3', detail: 'Requieren atencion', icon: AlertTriangle },
+  { label: 'Reportes', value: '18', detail: 'Listos este mes', icon: FileText },
 ];
 
 /** Retardo de aparicion, para escalonar tarjetas dentro de una misma rejilla. */
@@ -153,10 +154,20 @@ export default function Home() {
   return (
     <main className="min-h-screen overflow-hidden bg-pilotos-black text-white">
       <ScrollReveal />
+      <HeroIntro />
+
+      {/* Marca el <html> antes de pintar para que el CSS pueda ocultar el
+          estado final (logo de cabecera + contenido del hero) mientras
+          corre la intro. Sin esta clase (JS desactivado) todo se ve igual
+          que siempre, sin logo grande ni parpadeos. */}
+      <script
+        dangerouslySetInnerHTML={{ __html: "document.documentElement.classList.add('pilotos-intro');" }}
+      />
 
       <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.06] bg-pilotos-black/70 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 sm:px-8 lg:px-12">
           <Image
+            id="pilotos-header-logo"
             src="/branding/pilotos/logo-full.png"
             alt="PilotOS"
             width={190}
@@ -174,9 +185,27 @@ export default function Home() {
       </header>
 
       {/* ── HERO ───────────────────────────────────────────────
-          Cabina real de fondo, entrando desde la derecha, con el
-          texto sobre negro a la izquierda. */}
-      <section className="relative flex min-h-[100svh] items-center overflow-hidden px-5 pb-16 pt-28 sm:px-8 sm:pt-32 lg:px-12">
+          Primero el logo grande (intro) se encoge hasta la cabecera; al
+          terminar, la cabina entra desde la izquierda como un coche en
+          marcha y el texto y las tarjetas aparecen desde el fondo. */}
+      <section data-hero-phase="intro" className="relative flex min-h-[100svh] items-center overflow-hidden px-5 pb-16 pt-28 sm:px-8 sm:pt-32 lg:px-12">
+        {/* Logo grande de la intro: arranca centrado en el hero y se encoge
+            hasta el hueco exacto del logo de la cabecera (ver HeroIntro). */}
+        <div
+          id="pilotos-intro-logo"
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-30 hidden items-center justify-center px-5 sm:px-8 lg:px-12"
+        >
+          <Image
+            id="pilotos-intro-logo-img"
+            src="/branding/pilotos/logo-full.png"
+            alt=""
+            width={760}
+            height={224}
+            priority
+          />
+        </div>
+
         <div className="absolute inset-0 overflow-hidden">
           <Image
             src="/img/hero-cabina.webp"
@@ -184,7 +213,7 @@ export default function Home() {
             fill
             priority
             sizes="100vw"
-            className="hero-foto object-cover object-[68%_center]"
+            className="hero-foto object-cover object-[58%_34%]"
           />
         </div>
 
@@ -205,29 +234,30 @@ export default function Home() {
 
         <div className="relative z-10 mx-auto w-full max-w-7xl">
           <div className="max-w-4xl">
-            <p
-              className="hero-entra mb-5 text-sm font-semibold uppercase tracking-[0.28em] text-pilotos-yellow"
-              style={{ animationDelay: '0.75s' }}
-            >
-              PilotOS by NexOS
+            <p className="hero-entra mb-5 inline-flex items-center gap-2 text-sm font-semibold" style={delay(550)}>
+              <Image
+                src="/branding/pilotos/logo-icon.png"
+                alt=""
+                width={20}
+                height={20}
+                className="h-5 w-5 rounded-md"
+              />
+              <span className="text-zinc-100">
+                Pilot<span className="text-pilotos-yellow">OS</span> by Nex
+                <span className="text-[#38BDF8]">OS</span>
+              </span>
             </p>
             <h1
               className="hero-entra max-w-3xl text-5xl font-black leading-[0.98] tracking-tight text-white sm:text-6xl lg:text-7xl"
-              style={{ animationDelay: '0.9s' }}
+              style={delay(680)}
             >
               Gestion inteligente para flotas
             </h1>
-            <p
-              className="hero-entra mt-6 max-w-2xl text-lg leading-8 text-zinc-300 sm:text-xl"
-              style={{ animationDelay: '1.05s' }}
-            >
+            <p className="hero-entra mt-6 max-w-2xl text-lg leading-8 text-zinc-300 sm:text-xl" style={delay(800)}>
               Centraliza la operacion diaria, reduce errores manuales y convierte partes,
               gastos, mantenimientos y alertas en una vision de negocio clara.
             </p>
-            <div
-              className="hero-entra mt-8 flex flex-col gap-3 sm:flex-row"
-              style={{ animationDelay: '1.2s' }}
-            >
+            <div className="hero-entra mt-8 flex flex-col gap-3 sm:flex-row" style={delay(920)}>
               <CtaLink href="/demo">Solicitar demo</CtaLink>
               <CtaLink href="/demo" variant="secondary">
                 Ver como funciona
@@ -235,17 +265,55 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="mt-14 grid max-w-3xl grid-cols-2 gap-3 sm:grid-cols-4">
-            {heroCards.map(({ label, icon: Icon }, i) => (
+          {/* Metricas: apiladas debajo del texto en movil/tablet. */}
+          <div className="mt-14 grid max-w-3xl grid-cols-2 gap-3 sm:grid-cols-4 xl:hidden">
+            {heroCards.map(({ label, value, detail, icon: Icon }, i) => (
               <div
                 key={label}
                 className="hero-tarjeta rounded-xl border border-white/[0.12] bg-[#0B0D12]/80 p-4 shadow-[0_18px_44px_-18px_rgba(0,0,0,0.9)] backdrop-blur-md transition duration-200 hover:-translate-y-1 hover:border-pilotos-yellow/30"
-                style={{ animationDelay: `${1.35 + i * 0.1}s` }}
+                style={delay(950 + i * 100)}
               >
                 <Icon className="mb-3 h-5 w-5 text-pilotos-yellow" />
                 <p className="text-sm font-semibold text-zinc-100">{label}</p>
+                <p className="mt-1 text-lg font-black text-white">{value}</p>
+                <p className="text-xs text-zinc-400">{detail}</p>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Metricas flotando sobre la fotografia, en cascada por el borde derecho. */}
+        <div className="pointer-events-none absolute inset-y-0 right-4 z-10 hidden w-80 items-center xl:right-6 xl:flex">
+          <div
+            aria-hidden
+            className="absolute right-[6.75rem] top-[14%] bottom-[18%] w-px bg-[linear-gradient(180deg,transparent,rgba(255,183,3,0.35)_15%,rgba(255,183,3,0.35)_85%,transparent)]"
+          />
+          <div className="flex w-full flex-col gap-3.5 py-6">
+            {heroCards.map(({ label, value, detail, icon: Icon }, i) => (
+              <div
+                key={label}
+                className="hero-tarjeta pointer-events-auto relative rounded-xl border border-white/[0.12] bg-[#0B0D12]/85 p-4 shadow-[0_18px_44px_-18px_rgba(0,0,0,0.9)] backdrop-blur-md transition duration-200 hover:-translate-y-1 hover:border-pilotos-yellow/30"
+                style={delay(950 + i * 120)}
+              >
+                <span
+                  aria-hidden
+                  className="absolute right-[-2.05rem] top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-pilotos-yellow shadow-[0_0_10px_2px_rgba(255,183,3,0.6)]"
+                />
+                <div className="flex items-center gap-2 text-zinc-300">
+                  <Icon className="h-4 w-4 text-pilotos-yellow" />
+                  <p className="text-xs font-semibold uppercase tracking-wide">{label}</p>
+                </div>
+                <p className="mt-1.5 text-2xl font-black text-white">{value}</p>
+                <p className="text-xs text-zinc-400">{detail}</p>
+              </div>
+            ))}
+            <div
+              className="hero-tarjeta pointer-events-auto mt-1 inline-flex w-fit items-center gap-2 self-end rounded-full border border-white/[0.14] bg-[#0B0D12]/85 px-3 py-1.5 text-xs font-semibold text-zinc-200 backdrop-blur-md"
+              style={delay(950 + heroCards.length * 120)}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-pilotos-yellow" />
+              Vista en tiempo real
+            </div>
           </div>
         </div>
       </section>
