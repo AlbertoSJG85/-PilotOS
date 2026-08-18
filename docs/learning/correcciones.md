@@ -1144,3 +1144,19 @@ Corrección: `CARPETA_POR_TIPO` alineado con las etiquetas de pantalla; `drive_f
 
 - **Prevención, y es la misma lección tres veces en un día (C-070, C-071, C-072):** *arreglar una superficie sin arreglar el origen deja el síntoma en otro sitio.* La etiqueta de pantalla, el catálogo de mantenimientos y la carpeta de Drive son tres representaciones del mismo dato (`tipo` de documento, fecha real de ejecución); corregir una y no las otras dos no arregla nada, solo mueve la inconsistencia a donde todavía no se ha mirado.
 - **Corolario operativo:** cuando se corrige un dato que ya generó efectos secundarios (aquí: un archivo subido a Drive con la carpeta/fecha mala), la corrección tiene que alcanzar también a esos efectos ya producidos, no solo a la causa. Un `UPDATE` en la base de datos no repara un fichero que ya viajó a un sistema externo.
+
+---
+
+### C-073 · "Esa no es la imagen que te di" — producción tenía razón, el navegador de Alberto no
+
+- Fecha: 2026-08-18
+- Área: Despliegue / verificación (landing, `pilotos.nexostudios.digital`)
+
+**El síntoma.** Tras rediseñar el hero de la landing y forzar el deploy manual (el webhook de Coolify, otra vez, no encoló nada — ver `project-coolify-autodeploy-no-dispara` en la memoria del workspace), Alberto insistió dos veces seguidas: la imagen en producción no era la nueva, seguía viendo la antigua. La primera comprobación (`curl` a `/img/hero-cabina.webp`, comparando tamaño en bytes con el archivo local) decía que sí coincidía — pero eso no bastaba como prueba y Alberto lo dejó claro: *"Te estoy diciendo que no. Revisa bien."*
+
+**La causa.** No había ningún problema en el servidor. `/img/hero-cabina.webp` en el origen era, confirmado por segunda vez con más rigor (tamaño, `Last-Modified` coincidiendo con la hora exacta del deploy, y la URL real que pide el navegador — `/_next/image?url=...` con `X-Nextjs-Cache: MISS`, o sea generada fresca), idéntico al archivo nuevo. Lo que Alberto veía en su navegador normal era una copia vieja servida desde caché de cliente — PilotOS es una PWA instalable, con un service worker (`sw.js`) que aunque usa estrategia network-first, junto con el propio caché HTTP del navegador, puede dejar una pestaña o una instalación de la app mostrando contenido de antes del deploy. Confirmado al pedirle que probara en una ventana de incógnito: *"en incognito la veo bien"*.
+
+**La corrección.** Ninguna en el código — el despliegue estaba bien desde el primer intento. La única acción fue diagnosticar correctamente: verificar el origen de forma independiente del navegador de Alberto (tamaño en bytes, `Last-Modified`, y sobre todo la URL exacta que consume el `<img>` real, no solo el archivo fuente) antes de descartar su reporte, y después aislar la variable — incógnito — para separar "problema de servidor" de "problema de caché local".
+
+- **Prevención:** cuando alguien dice "eso no es lo que subiste" tras un deploy, la respuesta no es repetir la misma comprobación superficial con más confianza — es verificar más profundo (la URL real que pide el navegador, no la ruta del archivo fuente) y, si el origen resulta correcto, dar un paso que aísle la caché del cliente (incógnito, `Ctrl+Shift+R`, DevTools con caché desactivada) antes de insistir en que "el servidor está bien". Alberto tenía razón en desconfiar de lo que veía; la explicación era caché, no que la comprobación del servidor sobrara.
+- **Corolario:** en un producto con PWA/service worker, "está desplegado" y "el usuario lo ve" son dos afirmaciones distintas — la segunda depende de una capa (caché de cliente, SW instalado) que el equipo no controla desde el servidor. Vale la pena recordarlo activamente cada vez que se despliega un cambio visual en la landing, no solo cuando alguien se queja.
