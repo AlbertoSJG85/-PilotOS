@@ -48,6 +48,17 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     }
 });
 
+/**
+ * Un alta que no se puede completar por el estado del ecosistema, no por un
+ * fallo del servidor. Se distingue para poder devolver 409 con un motivo que
+ * el patron entienda, en vez de un 500 mudo.
+ */
+class ConflictoAlta extends Error {
+    constructor(public readonly codigo: string, mensaje: string) {
+        super(mensaje);
+        this.name = 'ConflictoAlta';
+    }
+}
 // POST /api/usuarios — Crear conductor (Fase 3 RBAC: solo el patron puede dar de alta conductores)
 router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
@@ -65,14 +76,54 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
             });
             return;
         }
-        const asalaEmail = email || `${telefono}@pilotos.app`;
+        const asalaEmail = (email || `${telefono}@pilotos.app`).trim().toLowerCase();
 
+        // PIL-02 — dar de alta a un asalariado no puede tocar la cuenta de otro.
+        //
+        // Antes esto era un `upsert` por email, y `minos."Users"` es la tabla de
+        // identidad COMPARTIDA de todo el ecosistema. Es decir: un patrón que
+        // escribía el email de un usuario ya existente —de RentOS, de IngresOS,
+        // de otro taxi— le **sobrescribía el teléfono** con el suyo y lo
+        // enganchaba como conductor de su flota. La víctima perdía el acceso
+        // (su login es por teléfono) sin haber hecho nada ni enterarse.
+        //
+        // Ahora se comprueba antes. Solo se crea gente nueva; a alguien que ya
+        // existe se le puede incorporar, pero **nunca modificando sus datos**, y
+        // solo si no es ya conductor de otro cliente.
         const conductor = await prisma.$transaction(async (tx) => {
             // 1. MinosUser
-            const user = await tx.minosUser.upsert({
-                where: { email: asalaEmail },
-                update: { nombre: nombre || undefined, telefono },
-                create: {
+            const existente = await tx.minosUser.findUnique({ where: { email: asalaEmail } });
+
+            if (existente) {
+                const yaEsConductor = await tx.conductor.findFirst({
+                    where: { usuario_id: existente.id, activo: true },
+                });
+
+                if (yaEsConductor && yaEsConductor.cliente_id !== cliente_id) {
+                    throw new ConflictoAlta(
+                        'conductor_de_otro_cliente',
+                        'Esa persona ya conduce para otra empresa. Pídele que se dé de baja allí antes de añadirla aquí.',
+                    );
+                }
+                if (yaEsConductor) {
+                    throw new ConflictoAlta(
+                        'ya_es_conductor',
+                        'Esa persona ya está dada de alta en tu flota.',
+                    );
+                }
+                // Existe en el ecosistema pero no conduce para nadie: se le
+                // engancha tal cual. Ni nombre ni teléfono se tocan — son suyos,
+                // no del patrón que le da de alta.
+                if (existente.telefono && existente.telefono !== telefono) {
+                    throw new ConflictoAlta(
+                        'telefono_no_coincide',
+                        'Ese email ya pertenece a una cuenta con otro teléfono. Comprueba los datos con la persona antes de darla de alta.',
+                    );
+                }
+            }
+
+            const user = existente ?? await tx.minosUser.create({
+                data: {
                     nombre: nombre || 'Conductor',
                     telefono,
                     email: asalaEmail,
@@ -128,6 +179,10 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
         sincronizarCantidadAsalariados(cliente_id, `asalariado-creado-${conductor.id}`)
             .catch((error) => console.warn('[nexos-pay] sync asalariados fallida:', error?.message));
     } catch (err: any) {
+        if (err instanceof ConflictoAlta) {
+            res.status(409).json({ status: 'FAIL', error: err.codigo, message: err.message });
+            return;
+        }
         console.error('[USUARIOS] Error al crear:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }

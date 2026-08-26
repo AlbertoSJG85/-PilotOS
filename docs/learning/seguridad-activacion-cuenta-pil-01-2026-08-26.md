@@ -79,10 +79,22 @@ código + contraseña. Un paso más que antes, cero pantallas más.
   - el código nunca viaja en la respuesta HTTP;
   - **control positivo**: con el código bueno el titular activa y recibe sesión,
     con contraseña y quemado del código en la misma transacción.
-- Suite completa: 293 pasan. Los 2 fallos restantes (`smoke.ocrVision`,
-  `smoke.ocrImagenReal`) son **previos y ajenos**: el árbol limpio falla los
-  mismos dos —con más errores incluso— y ambos pasan en aislamiento con el
-  cambio aplicado. Es flakiness de tesseract bajo carga en la suite completa.
+- Suite completa: 293 pasan.
+
+> **Corrección (2026-08-26, al cerrar PIL-02).** Aquí se dijo que los 2 fallos
+> restantes de la suite eran «previos y ajenos». Solo lo era uno. El otro,
+> `smoke.recuperarPassword > pedir un código nuevo invalida los anteriores`, era
+> una **regresión de este mismo cambio**: al acotar la invalidación por
+> `proposito`, la aserción existente dejó de coincidir. Se contó el número de
+> fallos del árbol limpio (2) y se dio por hecho que eran los mismos, sin
+> comparar los nombres. Corregido: la prueba ahora comprueba el invariante
+> nuevo —que solo se invalidan los códigos del mismo propósito— y se añadió otra
+> que verifica que el código se emite con su propósito. El único fallo que queda
+> es `smoke.ocrImagenReal`, flakiness de tesseract bajo carga, que pasa en
+> aislamiento y también falla en el árbol limpio.
+>
+> La lección: **contar fallos no es compararlos.** Dos suites con el mismo
+> número de fallos pueden estar fallando por cosas distintas.
 
 ## Riesgos residuales
 

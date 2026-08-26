@@ -106,14 +106,25 @@ describe('POST /recuperar — no debe revelar quién tiene cuenta', () => {
         expect(res.json.mock.calls[0][0].message).toMatch(/Si el telefono corresponde/i);
     });
 
-    it('pedir un código nuevo invalida los anteriores', async () => {
+    // Desde PIL-01 la invalidación va acotada por propósito. Pedir un código de
+    // recuperación no puede quemar el de activación de cuenta (ni al revés): si
+    // lo hiciera, cualquiera podría anular el alta ajena pidiendo un reset.
+    it('pedir un código nuevo invalida los anteriores DEL MISMO propósito', async () => {
         prismaMock.minosUser.findMany.mockResolvedValue([USUARIO]);
         const res = mockRes();
         await manejadorDe('/recuperar')({ body: { telefono: '+34615380646' } } as Request, res);
 
         expect(prismaMock.passwordReset.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-            where: { usuario_id: 25, usado_at: null },
+            where: { usuario_id: 25, proposito: 'RECUPERACION', usado_at: null },
         }));
+    });
+
+    it('el código de recuperación se emite con su propósito', async () => {
+        prismaMock.minosUser.findMany.mockResolvedValue([USUARIO]);
+        const res = mockRes();
+        await manejadorDe('/recuperar')({ body: { telefono: '+34615380646' } } as Request, res);
+
+        expect(prismaMock.passwordReset.create.mock.calls[0][0].data.proposito).toBe('RECUPERACION');
     });
 
     it('el código NO se guarda en claro, solo su hash', async () => {
