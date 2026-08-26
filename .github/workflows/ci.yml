@@ -1,0 +1,118 @@
+# CI mínimo de PilotOS — Fase 3 del roadmap de seguridad.
+#
+# POR QUÉ EXISTE. Hasta hoy ningún repositorio del ecosistema tenía CI. Durante
+# la auditoría de agosto de 2026 eso costó caro dos veces:
+#
+#   · Cinco subfases de seguridad marcadas como "verificadas" vivían solo en
+#     árboles de trabajo, sin un commit. Un `git checkout` las borraba.
+#   · Una de ellas estaba a medias, con 88 pruebas en rojo, y figuraba como
+#     "pendiente" en vez de como rota.
+#
+# Las dos cosas se ven a la primera con esto puesto.
+#
+# NO pretende ser una fortaleza. Comprueba lo mínimo que debe ser cierto siempre:
+# que compila, que las pruebas pasan y que no se ha colado un secreto.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# Un push nuevo cancela la ejecución anterior de la misma rama: no tiene sentido
+# gastar minutos validando un commit que ya está superado.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — typecheck y pruebas
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      # `npm ci` y no `npm install`: instala exactamente lo del lock. Si el lock
+      # y el package.json no concuerdan, falla en vez de resolver por su cuenta.
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Generar cliente de Prisma
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
+      # Se excluyen los tests de OCR con imagen real: dependen de tesseract y
+      # fallan de forma intermitente bajo carga, también sin ningún cambio. Un
+      # CI que está rojo por costumbre no lo mira nadie, y entonces no sirve
+      # para nada. Se ejecutan aparte, sin bloquear (ver job `ocr`).
+      - name: Pruebas
+        run: npx vitest run --exclude 'tests/smoke.ocr*Real.test.ts' --exclude 'tests/smoke.ocrVision.test.ts'
+
+  frontend:
+    name: App — typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  secretos:
+    name: Sin secretos en el código
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Buscar credenciales versionadas
+        run: bash .github/scripts/buscar-secretos.sh
+
+  dependencias:
+    name: Vulnerabilidades conocidas
+    runs-on: ubuntu-latest
+    # Informativo: una vulnerabilidad publicada aguas arriba no debe bloquear un
+    # arreglo urgente. Se mira, se decide, no se automatiza el bloqueo.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm audit --audit-level=high
+        working-directory: backend
+
+  ocr:
+    name: OCR (intermitente, no bloquea)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx vitest run tests/smoke.ocrVision.test.ts tests/smoke.ocrImagenReal.test.ts
