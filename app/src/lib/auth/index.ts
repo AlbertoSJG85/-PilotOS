@@ -1,5 +1,4 @@
 export {
-  getToken,
   getSessionUser,
   setSession,
   clearSession,

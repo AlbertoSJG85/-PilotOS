@@ -52,7 +52,10 @@ function mockRes() {
     const res: any = {};
     res.status = vi.fn().mockReturnValue(res);
     res.json = vi.fn().mockReturnValue(res);
-    return res as Response & { json: any; status: any };
+    // PIL-04: la sesion se entrega en una cookie HttpOnly, no en el cuerpo.
+    res.cookie = vi.fn().mockReturnValue(res);
+    res.clearCookie = vi.fn().mockReturnValue(res);
+    return res as Response & { json: any; status: any; cookie: any; clearCookie: any };
 }
 
 const TELEFONO = '+34600111222';
@@ -110,6 +113,11 @@ describe('PIL-01 — el teléfono ya no basta para activar una cuenta', () => {
         await establecer({ body: { telefono: TELEFONO, password: PASSWORD_NUEVA } } as Request, res);
 
         expect(res.status).toHaveBeenCalledWith(400);
+        // PIL-04: "no crea sesión" ya no se comprueba mirando el cuerpo — el
+        // token no viaja ahí para nadie, así que esa aserción se habría vuelto
+        // cierta siempre y habría dejado de probar el fallo. Se comprueba donde
+        // ahora vive la sesión: la cookie.
+        expect(res.cookie).not.toHaveBeenCalled();
         expect(res.json.mock.calls[0][0]).not.toHaveProperty('token');
         expect(prismaMock.$transaction).not.toHaveBeenCalled();
     });
@@ -141,7 +149,11 @@ describe('PIL-01 — el teléfono ya no basta para activar una cuenta', () => {
         );
 
         expect(res.status).not.toHaveBeenCalledWith(400);
-        expect(res.json.mock.calls[0][0]).toHaveProperty('token');
+        // La sesión llega en la cookie `HttpOnly`, y NO en el cuerpo: si
+        // volviera al cuerpo, el frontal la guardaría otra vez en
+        // `localStorage`, que es el agujero que se cerró.
+        expect(res.cookie).toHaveBeenCalledWith('pilotos_token', expect.any(String), expect.objectContaining({ httpOnly: true }));
+        expect(res.json.mock.calls[0][0]).not.toHaveProperty('token');
         // Contraseña y quemado del código, en la MISMA transacción.
         expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
     });

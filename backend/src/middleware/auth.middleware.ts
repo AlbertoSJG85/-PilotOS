@@ -10,6 +10,15 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
+import {
+    VIDA_ACCESO_MS,
+    tokenDeLaPeticion,
+    emitirCookieSesion,
+    inicioDeSesion,
+    tocaRotar,
+    dentroDelTecho,
+    origenAjeno,
+} from '../lib/sesion-cookie';
 
 // JWT_SECRET se valida al arrancar en index.ts
 const JWT_SECRET = process.env.JWT_SECRET!;
@@ -25,10 +34,18 @@ const JWT_SECRET = process.env.JWT_SECRET!;
  * ahora se puede echar a alguien de inmediato. Los 7 días son el techo de lo que
  * dura una sesión que nadie revoca.
  *
- * Pendiente (Fase 3): access token corto + refresh rotativo, que permitiría
- * bajar esto a minutos sin molestar a nadie.
+ * PIL-04 — de 7 días fijos a 24 h que rotan, con techo de 7 días.
+ *
+ * Los 7 días dejan de ser la vida del token y pasan a ser solo el techo. El
+ * acceso dura 24 h y se renueva mientras se usa (`sesionDesde` arrastra el
+ * inicio real, así que la rotación no puede saltarse el techo).
+ *
+ * Efecto: un conductor que trabaja a diario sigue dentro sin enterarse; un
+ * móvil robado que se queda quieto 24 h tiene la sesión muerta, cuando antes
+ * le quedaban siete días. No hace falta refresh rotativo con tabla propia para
+ * conseguir eso — ver `lib/sesion-cookie.ts`.
  */
-const JWT_EXPIRATION = '7d';
+const JWT_EXPIRATION_MS = VIDA_ACCESO_MS;
 
 export interface AuthRequest extends Request {
     usuario?: {
@@ -46,11 +63,26 @@ export interface AuthRequest extends Request {
 /**
  * Genera JWT token para un usuario autenticado.
  */
-export function generarToken(usuario: { id: number; telefono: string; role: string; es_patron?: boolean; cliente_id?: string | null }): string {
+export function generarToken(
+    usuario: { id: number; telefono: string; role: string; es_patron?: boolean; cliente_id?: string | null },
+    /**
+     * Cuándo empezó la sesión. Se pasa al rotar, para que el token nuevo herede
+     * el inicio del viejo. Si la rotación reiniciara este reloj, el techo de 7
+     * días no existiría: una sesión que se renueva sola no caducaría nunca.
+     */
+    inicioSesionMs: number = Date.now(),
+): string {
     return jwt.sign(
-        { id: usuario.id, telefono: usuario.telefono, role: usuario.role, es_patron: !!usuario.es_patron, cliente_id: usuario.cliente_id ?? null },
+        {
+            id: usuario.id,
+            telefono: usuario.telefono,
+            role: usuario.role,
+            es_patron: !!usuario.es_patron,
+            cliente_id: usuario.cliente_id ?? null,
+            sesionDesde: Math.floor(inicioSesionMs / 1000),
+        },
         JWT_SECRET,
-        { expiresIn: JWT_EXPIRATION }
+        { expiresIn: Math.floor(JWT_EXPIRATION_MS / 1000) }
     );
 }
 
@@ -71,15 +103,29 @@ export function isSameTenant(req: AuthRequest, resourceClienteId: string | null 
 export async function requireAuth(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
     if (req.usuario) { next(); return; }
     try {
-        const authHeader = req.headers.authorization;
+        // PIL-04 — el token llega en una cookie `HttpOnly`, no en `localStorage`.
+        // La cabecera `Authorization` está apagada por defecto: ver
+        // `lib/sesion-cookie.ts` para por qué no se dejó como puente.
+        const { token } = tokenDeLaPeticion(req);
 
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        if (!token) {
             res.status(401).json({ status: 'FAIL', error: 'auth_required', message: 'Token de autenticacion requerido' });
             return;
         }
 
-        const token = authHeader.split(' ')[1];
-        const decoded = jwt.verify(token, JWT_SECRET) as { id: number; telefono: string; role: string; iat?: number };
+        // CSRF. `SameSite=Lax` ya impide que la cookie viaje en una escritura
+        // cross-site, pero eso lo decide el navegador. Esto lo decide el
+        // servidor. Solo cuando el `Origin` viene: una llamada de servidor a
+        // servidor no lo manda ni tiene cookie que robar.
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && origenAjeno(req)) {
+            console.warn(`[AUTH] Origen rechazado en ${req.method} ${req.path}: ${req.get('origin')}`);
+            res.status(403).json({ status: 'FAIL', error: 'origen_no_permitido', message: 'Peticion no permitida' });
+            return;
+        }
+
+        const decoded = jwt.verify(token, JWT_SECRET) as {
+            id: number; telefono: string; role: string; iat?: number; sesionDesde?: number;
+        };
 
         // Buscar en minos.Users
         const usuario = await prisma.minosUser.findUnique({
@@ -129,6 +175,29 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
             conductor_id: conductor?.id,
             es_patron: conductor?.es_patron ?? (cliente?.patron_id === usuario.id),
         };
+
+        // PIL-04 — rotación. Va DESPUÉS del corte de sesión, y el orden importa:
+        // si se rotara antes, alguien con un token robado se renovaría a sí
+        // mismo en la misma petición en la que debería ser expulsado, y el corte
+        // de PIL-03 no llegaría a surtir efecto nunca.
+        //
+        // Si el techo ya se pasó no se corta aquí: el token vigente sigue
+        // valiendo hasta que caduque solo. Echar a un conductor a mitad de un
+        // parte por un umbral que él no ve es peor que dejar correr las horas
+        // que le queden.
+        if (tocaRotar(decoded) && dentroDelTecho(decoded)) {
+            const renovado = generarToken(
+                {
+                    id: usuario.id,
+                    telefono: usuario.telefono || '',
+                    role: usuario.role || 'user',
+                    es_patron: req.usuario.es_patron,
+                    cliente_id: req.usuario.cliente_id ?? null,
+                },
+                inicioDeSesion(decoded) ?? Date.now(),
+            );
+            emitirCookieSesion(res, renovado);
+        }
 
         next();
     } catch (error) {

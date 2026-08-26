@@ -8,6 +8,7 @@ import helmet from 'helmet';
 // DT-011: PrismaClient singleton
 import { prisma } from './lib/prisma';
 import { resolverClienteIdDeArchivo } from './services/propiedadArchivo.service';
+import { tokenDeLaPeticion } from './lib/sesion-cookie';
 
 // Routes — Public API
 import authRoutes from './routes/auth.routes';
@@ -99,14 +100,11 @@ const uploadsDir = path.join(process.cwd(), 'uploads');
 // services/propiedadArchivo.service.ts, para que se pueda probar (2026-08-12).
 
 app.use('/uploads', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const cookieHeader = req.headers.cookie || '';
-    const tokenFromCookie = cookieHeader.split(';')
-        .map((c) => c.trim())
-        .find((c) => c.startsWith('pilotos_token='))
-        ?.slice('pilotos_token='.length);
-    const authHeader = req.headers.authorization;
-    const tokenFromBearer = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : undefined;
-    const token = tokenFromBearer || tokenFromCookie;
+    // PIL-04: una sola forma de sacar el token de una petición, la de
+    // `lib/sesion-cookie.ts`. Antes esto tenía su propio parseo y aceptaba
+    // `Bearer` por su cuenta: dos criterios distintos para lo mismo, y el de
+    // aquí se habría quedado atrás al cerrar el otro.
+    const { token } = tokenDeLaPeticion(req);
     if (!token) { res.status(401).json({ error: 'auth_required' }); return; }
 
     let decoded: { role?: string; cliente_id?: string | null };

@@ -47,7 +47,10 @@ function mockRes() {
     const res: any = {};
     res.status = vi.fn().mockReturnValue(res);
     res.json = vi.fn().mockReturnValue(res);
-    return res as Response & { json: any; status: any };
+    // PIL-04: la sesion se entrega en una cookie HttpOnly, no en el cuerpo.
+    res.cookie = vi.fn().mockReturnValue(res);
+    res.clearCookie = vi.fn().mockReturnValue(res);
+    return res as Response & { json: any; status: any; cookie: any; clearCookie: any };
 }
 
 const USUARIO = { id: 25, telefono: '+34615380646', email: 'alberto@nexostudios.digital', nombre: 'Alberto', role: 'landlord', password_hash: '$2b$10$loquesea' };
@@ -171,7 +174,9 @@ describe('POST /restablecer — validación del código', () => {
         );
 
         expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
-        expect(res.json.mock.calls[0][0].token).toBeDefined();
+        // PIL-04: la sesión se entrega en la cookie `HttpOnly`, no en el cuerpo.
+        expect(res.cookie).toHaveBeenCalledWith('pilotos_token', expect.any(String), expect.objectContaining({ httpOnly: true }));
+        expect(res.json.mock.calls[0][0]).not.toHaveProperty('token');
     });
 
     it('CLAVE: la contraseña y el quemado del código van en la MISMA transacción', async () => {

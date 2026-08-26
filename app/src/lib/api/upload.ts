@@ -18,14 +18,13 @@ export async function uploadFoto(file: File): Promise<UploadResult> {
   const formData = new FormData();
   formData.append('foto', file);
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('pilotos_token') : null;
-
   let res: Response;
   try {
     res = await fetch(`${API_BASE}/api/upload`, {
       method: 'POST',
       body: formData,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      // PIL-04: la sesion va en la cookie HttpOnly, no en una cabecera.
+      credentials: 'include',
     });
   } catch (e) {
     throw new ApiError(0, 'network_error', 'Sin conexión, reintenta cuando vuelvas.');
@@ -39,7 +38,7 @@ export async function uploadFoto(file: File): Promise<UploadResult> {
   }
   if (res.status === 401) {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('pilotos_token');
+      localStorage.removeItem('pilotos_user');
       window.location.href = '/login';
     }
     throw new ApiError(401, 'unauthorized', 'Sesión expirada. Inicia sesión de nuevo.');

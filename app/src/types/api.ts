@@ -19,7 +19,11 @@ export interface PaginatedResponse<T> extends ApiResponse<T[]> {
 /** Respuesta real de POST /api/auth/login */
 export interface LoginResponse {
   status: 'OK' | 'FAIL';
-  token?: string;
+  // PIL-04: sin `token`. La sesión viene en una cookie `HttpOnly` que el
+  // navegador guarda solo y este código no puede leer. Si vuelve a aparecer
+  // aquí, es que alguien la ha devuelto también por el cuerpo — y entonces el
+  // frontal volverá a guardarla en `localStorage`, que es el agujero que se
+  // cerró.
   user?: {
     id: number;
     nombre: string;

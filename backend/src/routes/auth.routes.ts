@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { esPlaceholder, hashPassword, validarFortalezaPassword, verificarPassword } from '../lib/password';
 import { enviarAvisoGloria } from '../services/notificacion.service';
 import { enviarEmail, esEmailEntregable, cuerpoCodigoRecuperacion, cuerpoCodigoActivacion } from '../services/email.service';
+import { emitirCookieSesion, borrarCookieSesion } from '../lib/sesion-cookie';
 
 const router = Router();
 
@@ -55,7 +56,15 @@ async function resolverCandidatoPilotOS(telefono: string) {
  * y arma el payload de sesion (token + user + context). Compartido por login
  * y por establecer-password (que tambien inicia sesion tras fijar la contrasena).
  */
-async function emitirSesion(usuario: { id: number; telefono: string | null; nombre: string | null; role: string | null }) {
+async function emitirSesion(
+    usuario: { id: number; telefono: string | null; nombre: string | null; role: string | null },
+    /**
+     * PIL-04: la sesión se pone en una cookie `HttpOnly`, no se devuelve en el
+     * cuerpo. Devolverla aquí Y ponerla en la cookie sería no haber arreglado
+     * nada: el frontal la guardaría igual en `localStorage`.
+     */
+    res: Response,
+) {
     const conductor = await prisma.conductor.findFirst({
         where: { usuario_id: usuario.id, activo: true },
         include: { cliente: true },
@@ -82,9 +91,10 @@ async function emitirSesion(usuario: { id: number; telefono: string | null; nomb
         cliente_id: cliente?.id ?? null,
     });
 
+    emitirCookieSesion(res, token);
+
     return {
         status: 'OK' as const,
-        token,
         user: { id: usuario.id, nombre: usuario.nombre || '', telefono: usuario.telefono || '', role: usuario.role || 'user' },
         context: cliente ? {
             cliente_id: cliente.id,
@@ -142,7 +152,7 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
             return;
         }
 
-        res.json(await emitirSesion(usuario));
+        res.json(await emitirSesion(usuario, res));
     } catch (err: any) {
         console.error('[AUTH] login error:', err.message);
         const isDev = process.env.NODE_ENV === 'development';
@@ -271,7 +281,7 @@ router.post('/establecer-password', authLimiter, async (req: Request, res: Respo
         ]);
 
         console.log(`[AUTH] Cuenta activada (primera contrasena) para el usuario ${usuario.id}`);
-        res.json(await emitirSesion(usuario));
+        res.json(await emitirSesion(usuario, res));
     } catch (err: any) {
         console.error('[AUTH] establecer-password error:', err.message);
         const isDev = process.env.NODE_ENV === 'development';
@@ -318,7 +328,7 @@ router.post('/cambiar-password', requireAuth, async (req: AuthRequest, res: Resp
 
         // La sesión de quien acaba de cambiarla también queda cortada, así que
         // se le devuelve una nueva y no se le echa de la aplicación.
-        const sesion = await emitirSesion(usuario);
+        const sesion = await emitirSesion(usuario, res);
         res.json({ ...sesion, message: 'Contrasena actualizada' });
     } catch (err: any) {
         console.error('[AUTH] cambiar-password error:', err.message);
@@ -569,7 +579,7 @@ router.post('/restablecer', authLimiter, async (req: Request, res: Response) => 
         ]);
 
         console.log(`[AUTH] Contrasena restablecida para el usuario ${usuario.id}`);
-        res.json(await emitirSesion(usuario));
+        res.json(await emitirSesion(usuario, res));
     } catch (err: any) {
         console.error('[AUTH] restablecer error:', err.message);
         const isDev = process.env.NODE_ENV === 'development';
@@ -590,6 +600,10 @@ router.post('/restablecer', authLimiter, async (req: Request, res: Response) => 
 router.post('/logout', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
         await revocarSesiones(req.usuario!.id);
+        // PIL-04: además del corte en servidor, se retira la cookie de este
+        // dispositivo. El corte es lo que vale; borrar la cookie evita que el
+        // usuario siga viendo pantallas a medio cargar hasta el siguiente 401.
+        borrarCookieSesion(res);
         res.json({ status: 'OK', message: 'Sesion cerrada en todos los dispositivos' });
     } catch (err: any) {
         console.error('[AUTH] logout error:', err.message);

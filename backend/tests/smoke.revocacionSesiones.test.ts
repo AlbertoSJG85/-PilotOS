@@ -32,13 +32,26 @@ function mockRes() {
     const res: any = {};
     res.status = vi.fn().mockReturnValue(res);
     res.json = vi.fn().mockReturnValue(res);
-    return res as Response & { json: any; status: any };
+    // PIL-04: la rotación pone una cookie nueva cuando toca.
+    res.cookie = vi.fn().mockReturnValue(res);
+    res.clearCookie = vi.fn().mockReturnValue(res);
+    return res as Response & { json: any; status: any; cookie: any; clearCookie: any };
 }
 
 const USUARIO = { id: 7, telefono: '+34600111222', nombre: 'Conductor', role: 'user', email: 'c@x.test' };
 
+/**
+ * PIL-04: el token llega por cookie, no por cabecera. La cabecera `Authorization`
+ * está apagada por defecto — dejarla abierta habría dejado el cierre en nada,
+ * porque un token robado de `localStorage` antes del despliegue seguiría
+ * entrando por ahí.
+ */
 function peticionCon(token: string): AuthRequest {
-    return { headers: { authorization: `Bearer ${token}` } } as unknown as AuthRequest;
+    return {
+        method: 'GET',
+        headers: { cookie: `pilotos_token=${token}` },
+        get: () => undefined,
+    } as unknown as AuthRequest;
 }
 
 /** Un token firmado "hace N segundos". */
@@ -139,12 +152,16 @@ describe('PIL-03 — revocarSesiones', () => {
 });
 
 describe('PIL-03 — la duración deja de ser un mes', () => {
-    it('el token no dura más de 7 días', () => {
+    // PIL-04 afinó esto. "No más de 7 días" seguiría siendo cierto con un token
+    // de 24 h, así que la aserción habría dejado de decir lo que cree decir: se
+    // habría vuelto una comprobación que pasa siempre. Ahora se comprueba el
+    // valor real, y los 7 días pasan a ser el techo de la SESIÓN, no la vida
+    // del token — eso se prueba en `smoke.sesionCookie.test.ts`.
+    it('el token de acceso dura 24 h, no una semana ni un mes', () => {
         const token = generarToken({ id: 1, telefono: '+34600000000', role: 'user' });
         const { iat, exp } = jwt.decode(token) as { iat: number; exp: number };
-        const dias = (exp - iat) / 86400;
+        const horas = (exp - iat) / 3600;
 
-        expect(dias).toBeLessThanOrEqual(7);
-        expect(dias).toBeGreaterThan(0);
+        expect(horas).toBe(24);
     });
 });

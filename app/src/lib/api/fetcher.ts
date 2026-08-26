@@ -1,7 +1,10 @@
 /**
  * Cliente HTTP base para PilotOS Backend.
- * Inyecta JWT automáticamente desde localStorage.
- * No contiene lógica de negocio — solo transporte.
+ *
+ * PIL-04: ya no inyecta ningún JWT. La sesión va en una cookie `HttpOnly` que
+ * este código no puede leer y que el navegador manda sola — solo hay que
+ * pedirlo con `credentials: 'include'`. No contiene lógica de negocio, solo
+ * transporte.
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
@@ -24,12 +27,16 @@ export class ApiError extends Error {
   }
 }
 
-/** Limpia sesión y redirige a login. Solo en browser. */
+/**
+ * Limpia sesión y redirige a login. Solo en browser.
+ *
+ * No se llama a `/api/auth/logout`: si estamos aquí es porque el servidor ya ha
+ * dicho que la sesión no vale, así que no hay nada que cerrar y la llamada
+ * respondería otro 401. Solo se limpia lo local; la cookie caduca sola.
+ */
 function handleUnauthorized(): never {
   if (typeof window !== 'undefined') {
-    localStorage.removeItem('pilotos_token');
     localStorage.removeItem('pilotos_user');
-    document.cookie = 'pilotos_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     window.location.href = '/login';
   }
   throw new ApiError(401, 'unauthorized', 'Sesión expirada. Inicia sesión de nuevo.');
@@ -46,18 +53,16 @@ export async function apiFetch<T = unknown>(
     ...((customHeaders as Record<string, string>) || {}),
   };
 
-  if (!isPublic && typeof window !== 'undefined') {
-    const token = localStorage.getItem('pilotos_token');
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-  }
-
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
 
   const res = await fetch(url, {
     ...rest,
     headers,
+    // La cookie de sesión solo viaja si se pide. `include` y no `same-origin`
+    // porque en desarrollo la app (3000) y el backend (3001) son orígenes
+    // distintos; en producción `NEXT_PUBLIC_API_URL` va vacía y todo pasa por
+    // el proxy de Next, así que es el mismo origen. `include` cubre los dos.
+    credentials: 'include',
     body: body ? JSON.stringify(body) : undefined,
   });
 

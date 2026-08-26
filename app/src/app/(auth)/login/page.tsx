@@ -9,8 +9,10 @@ import { setSession } from '@/lib/auth';
 import type { LoginResponse } from '@/types';
 
 function aplicarSesion(res: LoginResponse) {
-  if (!res.token || !res.user) return;
-  setSession(res.token, {
+  // PIL-04: la respuesta ya no trae token. La sesión llegó en la cookie
+  // `HttpOnly` que puso el backend; aquí solo se guarda quién es.
+  if (!res.user) return;
+  setSession({
     id: res.user.id,
     nombre: res.user.nombre,
     telefono: res.user.telefono,
