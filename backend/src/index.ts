@@ -187,12 +187,68 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
     });
 });
 
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-    console.log('SIGTERM received, shutting down...');
-    await prisma.$disconnect();
-    process.exit(0);
-});
+/**
+ * Apagado limpio — Fase 5 del roadmap de resiliencia.
+ *
+ * QUÉ ESTABA MAL, y es sutil: **había** un manejador de `SIGTERM`, así que
+ * parecía resuelto. Pero hacía las cosas en el orden contrario.
+ *
+ * Desconectaba Prisma y salía **sin cerrar antes el servidor HTTP**. Es decir:
+ * a las peticiones que se estaban atendiendo en ese momento se les arrancaba la
+ * base de datos de debajo, a mitad de consulta, y un instante después moría el
+ * proceso. En un producto donde una petición puede estar cerrando un parte
+ * diario o registrando un gasto, eso es una escritura perdida — y nadie llega a
+ * leer el error, porque el proceso se va justo detrás.
+ *
+ * Un apagado en el orden equivocado es peor que no tener apagado: no tenerlo se
+ * ve, y tenerlo mal parece que está bien.
+ *
+ * El orden correcto:
+ *   1. Cerrar el servidor — deja de aceptar conexiones nuevas y atiende las que
+ *      ya están dentro.
+ *   2. Desconectar Prisma — cuando ya no queda nadie usándolo.
+ *
+ * Con plazo máximo: un apagado que no termina de apagar deja el despliegue
+ * colgado y acaba con alguien matando el proceso a lo bruto, que es justo lo
+ * que esto evita.
+ */
+const PLAZO_APAGADO_MS = 15000;
+let apagando = false;
+
+async function apagarLimpio(senal: string): Promise<void> {
+    if (apagando) return;
+    apagando = true;
+    console.log(`[apagado] ${senal} recibida. Drenando…`);
+
+    const alarma = setTimeout(() => {
+        console.error(`[apagado] no se terminó en ${PLAZO_APAGADO_MS} ms. Saliendo de todas formas.`);
+        process.exit(1);
+    }, PLAZO_APAGADO_MS);
+    alarma.unref();
+
+    try {
+        await new Promise<void>((resolver) => servidor.close(() => resolver()));
+        console.log('[apagado] servidor cerrado, sin peticiones en vuelo.');
+
+        // Antes de soltar la base de datos: `purgarBorradoresAntiguos` borra
+        // partes diarios dentro de una transacción, y arrancarla mientras se
+        // cierra el pool es la forma de dejar un borrado a medias.
+        scheduler?.detener();
+
+        await prisma.$disconnect();
+        console.log('[apagado] Prisma desconectado.');
+
+        clearTimeout(alarma);
+        process.exit(0);
+    } catch (err: any) {
+        console.error('[apagado] error durante el drenaje:', err?.message ?? err);
+        clearTimeout(alarma);
+        process.exit(1);
+    }
+}
+
+process.on('SIGTERM', () => { void apagarLimpio('SIGTERM'); });
+process.on('SIGINT', () => { void apagarLimpio('SIGINT'); });
 
 // Protectores globales (R-SY-001: El backend nunca debe caer).
 // 2026-07-25: antes NO se salia del proceso tras una excepcion no capturada,
@@ -212,9 +268,11 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
-app.listen(PORT, () => {
+let scheduler: { detener: () => void } | null = null;
+
+const servidor = app.listen(PORT, () => {
     console.log(`PilotOS Backend running on port ${PORT}`);
-    iniciarScheduler();
+    scheduler = iniciarScheduler();
 });
 
 export { app, prisma };
