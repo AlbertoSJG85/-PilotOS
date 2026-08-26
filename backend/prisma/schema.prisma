@@ -577,6 +577,11 @@ model PasswordReset {
   usado_at    DateTime?
   /// Intentos fallidos contra este código; al pasarse, se quema.
   intentos    Int       @default(0)
+  /// Para qué se pidió: RECUPERACION (olvidé la contraseña) o BOOTSTRAP
+  /// (fijar la primera de una cuenta placeholder). Un código no vale para el
+  /// otro propósito: si valiera, pedir uno de recuperación abriría el bootstrap
+  /// y al revés. El default conserva el significado de las filas ya existentes.
+  proposito   String    @default("RECUPERACION")
   created_at  DateTime  @default(now())
 
   @@index([usuario_id])

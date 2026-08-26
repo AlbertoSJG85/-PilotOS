@@ -4,7 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Button, Input } from '@/components/ui';
-import { login, establecerPassword, pedirCodigoRecuperacion, restablecerPassword, ApiError } from '@/lib/api';
+import { login, establecerPassword, pedirCodigoActivacion, pedirCodigoRecuperacion, restablecerPassword, ApiError } from '@/lib/api';
 import { setSession } from '@/lib/auth';
 import type { LoginResponse } from '@/types';
 
@@ -52,8 +52,13 @@ export default function LoginPage() {
       router.replace('/conductor');
     } catch (err: unknown) {
       if (err instanceof ApiError && err.code === 'password_not_set') {
-        setModo('set-password');
+        // La cuenta existe pero nadie la ha activado. Pedimos el codigo aqui
+        // mismo: el telefono ya esta escrito, asi que obligar a teclearlo otra
+        // vez en una pantalla aparte solo sumaria un paso sin aportar nada.
         setError('');
+        await pedirCodigoActivacion(telefono.trim()).catch(() => { /* respuesta neutra: nada que mirar */ });
+        setAviso('Te hemos enviado un codigo a tu correo para activar la cuenta.');
+        setModo('set-password');
         return;
       }
       const msg = err instanceof ApiError ? err.message : 'Error al iniciar sesion';
@@ -130,7 +135,7 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      const res = await establecerPassword(telefono.trim(), password);
+      const res = await establecerPassword(telefono.trim(), codigo.trim(), password);
       aplicarSesion(res);
       router.replace('/conductor');
     } catch (err: unknown) {
@@ -310,10 +315,20 @@ export default function LoginPage() {
           ) : (
             <>
               <p className="mb-6 text-sm text-zinc-400 text-center">
-                Tu cuenta todavia no tiene contrasena. Crea una para continuar.
+                {aviso || 'Tu cuenta todavia no tiene contrasena. Crea una para continuar.'}
               </p>
 
               <form onSubmit={handleSetPassword} className="space-y-5">
+                <Input
+                  label="Codigo recibido"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="6 digitos"
+                  value={codigo}
+                  onChange={(e) => setCodigo(e.target.value)}
+                  required
+                  autoComplete="one-time-code"
+                />
                 <Input
                   label="Nueva contrasena"
                   type="password"
@@ -345,7 +360,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300"
-                  onClick={() => { setModo('login'); setError(''); setPassword(''); setPassword2(''); }}
+                  onClick={volverALogin}
                 >
                   Volver
                 </button>

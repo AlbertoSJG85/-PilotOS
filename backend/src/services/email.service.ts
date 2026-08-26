@@ -99,6 +99,31 @@ export async function enviarEmail(
 }
 
 /** Texto del correo con el código de recuperación. Separado para poder probarlo. */
+/**
+ * Código para ACTIVAR la cuenta (fijar la primera contraseña).
+ *
+ * Va aparte del de recuperación a propósito: quien recibe esto todavía no ha
+ * entrado nunca, así que el texto tiene que explicar qué es. Y sobre todo, el
+ * aviso final es distinto — si no ha pedido nada, alguien que conoce su
+ * teléfono está intentando quedarse con su cuenta, y eso hay que decirlo.
+ */
+export function cuerpoCodigoActivacion(codigo: string, minutos: number): { asunto: string; cuerpo: string } {
+    return {
+        asunto: 'Tu código para activar tu cuenta de PilotOS',
+        cuerpo: [
+            'Estás activando tu cuenta de PilotOS y eligiendo tu primera contraseña.',
+            '',
+            `Tu código es: ${codigo}`,
+            '',
+            `Caduca en ${minutos} minutos y solo se puede usar una vez.`,
+            'Si no has sido tú, NO uses este código y avisa a tu responsable:',
+            'alguien que conoce tu teléfono está intentando activar tu cuenta.',
+            '',
+            '— PilotOS',
+        ].join('\n'),
+    };
+}
+
 export function cuerpoCodigoRecuperacion(codigo: string, minutos: number): { asunto: string; cuerpo: string } {
     return {
         asunto: 'Tu código para restablecer la contraseña de PilotOS',

@@ -9,7 +9,7 @@ import { generarToken, requireAuth, AuthRequest } from '../middleware/auth.middl
 import crypto from 'crypto';
 import { esPlaceholder, hashPassword, validarFortalezaPassword, verificarPassword } from '../lib/password';
 import { enviarAvisoGloria } from '../services/notificacion.service';
-import { enviarEmail, esEmailEntregable, cuerpoCodigoRecuperacion } from '../services/email.service';
+import { enviarEmail, esEmailEntregable, cuerpoCodigoRecuperacion, cuerpoCodigoActivacion } from '../services/email.service';
 
 const router = Router();
 
@@ -150,25 +150,88 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
     }
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// Activación de cuenta — fijar la PRIMERA contraseña (PIL-01, 2026-08-26)
+//
+// QUÉ ESTABA MAL. `/establecer-password` pedía teléfono y contraseña nueva, y
+// con eso emitía sesión. Es decir: **conocer un número de teléfono bastaba
+// para quedarse con una cuenta** que aún no se había activado. Y un teléfono
+// no es un secreto — está en un albarán, en un grupo de WhatsApp, en la puerta
+// de un taxi. Si la cuenta era la del patrón, quien llegaba primero se llevaba
+// la flota entera, los partes y la economía.
+//
+// El comentario anterior lo reconocía y lo dejaba "pendiente de decidir el
+// canal de verificación". Esa decisión ya estaba tomada en este mismo producto
+// el 2026-08-12, para el problema idéntico de recuperación: **el código va por
+// email**, porque WhatsApp depende de que Meta apruebe una plantilla y a día de
+// hoy no ha aprobado ninguna de las cuatro enviadas. Se aplica lo mismo aquí en
+// vez de inventar un canal nuevo.
+//
+// Queda en dos pasos, como la recuperación:
+//   1. `/establecer-password/solicitar` → manda el código al email de la cuenta.
+//   2. `/establecer-password`           → código + contraseña → sesión.
+//
+// La sesión NO se emite hasta haber verificado el código.
+// ─────────────────────────────────────────────────────────────────────────
+
 /**
- * POST /api/auth/establecer-password
- * Fija la contrasena inicial de una cuenta que todavia tiene el marcador
- * placeholder (creada en onboarding o por el patron antes de esta fase).
- *
- * NOTA DE SEGURIDAD (pendiente de decision de negocio, ver auditoria Fase 1):
- * este endpoint solo exige "conocer el telefono" para fijar la PRIMERA
- * contrasena — la misma superficie de exposicion que tenia el login antiguo,
- * pero acotada a una unica vez por cuenta (en cuanto hay contrasena real,
- * esta ruta deja de aceptar esa cuenta y solo sirve /cambiar-password con
- * la contrasena anterior). Es un cierre parcial: ideal seria verificar
- * posesion del telefono (OTP WhatsApp via GlorIA) antes de fijarla. Queda
- * pendiente de que Alberto decida el canal de verificacion del bootstrap.
+ * POST /api/auth/establecer-password/solicitar   { telefono }
+ * Manda el código de activación. Responde igual exista o no la cuenta.
+ */
+router.post('/establecer-password/solicitar', authLimiter, async (req: Request, res: Response) => {
+    // Respuesta única para todos los caminos: si distinguiera "no existe" de
+    // "ya está activada", cualquiera podría averiguar qué teléfonos usan
+    // PilotOS y cuáles siguen sin activar — justo los que valdría la pena
+    // atacar.
+    const respuestaNeutra = {
+        status: 'OK',
+        message: 'Si el telefono corresponde a una cuenta pendiente de activar, recibiras un codigo en tu correo.',
+    };
+
+    try {
+        const { telefono } = req.body;
+        if (!telefono) {
+            res.status(400).json({ status: 'FAIL', error: 'missing_telefono', message: 'El telefono es obligatorio' });
+            return;
+        }
+
+        const usuario = await resolverCandidatoPilotOS(String(telefono).trim());
+        if (!usuario || !esPlaceholder(usuario.password_hash)) {
+            res.json(respuestaNeutra);
+            return;
+        }
+
+        // Los asalariados dados de alta antes del 2026-08-12 llevan un email
+        // sintético (telefono@pilotos.app) al que no se puede escribir. No
+        // pueden activarse solos y hay que verlo en el log: el patrón tiene que
+        // ponerles un email real. Antes "funcionaban" porque no se verificaba
+        // nada, que es precisamente el fallo.
+        if (!esEmailEntregable(usuario.email)) {
+            console.error(`[AUTH] El usuario ${usuario.id} esta pendiente de activar pero no tiene email entregable (${usuario.email}): no puede activarse solo.`);
+            res.json(respuestaNeutra);
+            return;
+        }
+
+        await emitirCodigoPosesion(usuario, 'BOOTSTRAP');
+        res.json(respuestaNeutra);
+    } catch (err: any) {
+        console.error('[AUTH] establecer-password/solicitar error:', err.message);
+        res.json(respuestaNeutra);
+    }
+});
+
+/**
+ * POST /api/auth/establecer-password   { telefono, codigo, password }
+ * Verifica el código de activación y fija la primera contraseña.
  */
 router.post('/establecer-password', authLimiter, async (req: Request, res: Response) => {
     try {
-        const { telefono, password } = req.body;
-        if (!telefono || !password) {
-            res.status(400).json({ status: 'FAIL', error: 'missing_fields', message: 'Telefono y contrasena son obligatorios' });
+        const { telefono, codigo, password } = req.body;
+        if (!telefono || !codigo || !password) {
+            res.status(400).json({
+                status: 'FAIL', error: 'missing_fields',
+                message: 'Telefono, codigo y contrasena son obligatorios',
+            });
             return;
         }
 
@@ -178,24 +241,34 @@ router.post('/establecer-password', authLimiter, async (req: Request, res: Respo
             return;
         }
 
-        const usuario = await resolverCandidatoPilotOS(telefono);
-        if (!usuario) {
-            res.status(404).json({ status: 'FAIL', error: 'user_not_found', message: 'Usuario no registrado', action: 'REDIRECT_ONBOARDING' });
-            return;
-        }
+        // Mismo mensaje para "no existe", "ya activada", "código incorrecto" y
+        // "caducado". Distinguirlos volvería a convertir el teléfono en un
+        // oráculo sobre qué cuentas están sin activar.
+        const rechazar = () => res.status(400).json({
+            status: 'FAIL', error: 'codigo_invalido',
+            message: 'El codigo no es valido o ha caducado. Pide uno nuevo.',
+        });
 
-        if (!esPlaceholder(usuario.password_hash)) {
-            res.status(409).json({
-                status: 'FAIL',
-                error: 'password_already_set',
-                message: 'Esta cuenta ya tiene contrasena. Usa el cambio de contrasena si necesitas actualizarla.',
-            });
-            return;
-        }
+        const usuario = await resolverCandidatoPilotOS(String(telefono).trim());
+        if (!usuario || !esPlaceholder(usuario.password_hash)) { rechazar(); return; }
 
-        const nuevoHash = await hashPassword(password);
-        await prisma.minosUser.update({ where: { id: usuario.id }, data: { password_hash: nuevoHash } });
+        const verificacion = await verificarCodigoPosesion(usuario.id, String(codigo).trim(), 'BOOTSTRAP');
+        if (!verificacion.ok) { rechazar(); return; }
 
+        // Contraseña y quemado del código, atómicos: que no pueda quedar la
+        // cuenta activada con el código todavía vivo.
+        await prisma.$transaction([
+            prisma.minosUser.update({
+                where: { id: usuario.id },
+                data: { password_hash: await hashPassword(password) },
+            }),
+            prisma.passwordReset.update({
+                where: { id: verificacion.resetId },
+                data: { usado_at: new Date() },
+            }),
+        ]);
+
+        console.log(`[AUTH] Cuenta activada (primera contrasena) para el usuario ${usuario.id}`);
         res.json(await emitirSesion(usuario));
     } catch (err: any) {
         console.error('[AUTH] establecer-password error:', err.message);
@@ -307,6 +380,90 @@ function generarCodigo(): string {
 }
 
 /**
+ * Para qué se emitió un código de posesión.
+ *
+ * Los dos flujos acaban igual —contraseña nueva y sesión— pero parten de
+ * situaciones distintas: RECUPERACION es una cuenta viva cuyo dueño ya
+ * demostró ser él alguna vez; BOOTSTRAP es una cuenta que nadie ha usado
+ * todavía. Separarlos impide que pedir un código por un camino abra el otro.
+ */
+type PropositoCodigo = 'RECUPERACION' | 'BOOTSTRAP';
+
+/**
+ * Emite un código, lo manda por email e invalida los anteriores del MISMO
+ * propósito. Si no invalidara los previos, pedir varios dejaría varias puertas
+ * abiertas a la vez. Solo los del mismo propósito: quemar los de recuperación
+ * al pedir uno de activación daría una forma de anular el flujo ajeno.
+ */
+async function emitirCodigoPosesion(
+    usuario: { id: number; email: string },
+    proposito: PropositoCodigo,
+): Promise<void> {
+    await prisma.passwordReset.updateMany({
+        where: { usuario_id: usuario.id, proposito, usado_at: null },
+        data: { usado_at: new Date() },
+    });
+
+    const codigo = generarCodigo();
+    await prisma.passwordReset.create({
+        data: {
+            usuario_id: usuario.id,
+            codigo_hash: await hashPassword(codigo),
+            expira_at: new Date(Date.now() + RESET_VIGENCIA_MIN * 60 * 1000),
+            proposito,
+        },
+    });
+
+    const { asunto, cuerpo } = proposito === 'BOOTSTRAP'
+        ? cuerpoCodigoActivacion(codigo, RESET_VIGENCIA_MIN)
+        : cuerpoCodigoRecuperacion(codigo, RESET_VIGENCIA_MIN);
+
+    const envio = await enviarEmail(usuario.email, asunto, cuerpo);
+    if (!envio.ok) {
+        // No se le cuenta al usuario (revelaría que la cuenta existe), pero
+        // tiene que verse en el log: si esto falla, nadie puede entrar.
+        console.error(`[AUTH] No se pudo enviar el codigo (${proposito}) al usuario ${usuario.id}: ${envio.error}`);
+    }
+}
+
+type VerificacionCodigo = { ok: true; resetId: string } | { ok: false };
+
+/**
+ * Comprueba un código contra el propósito indicado.
+ *
+ * No consume el código: devuelve su id para que quien llama lo queme en la
+ * misma transacción que el cambio de contraseña. Así nunca queda la contraseña
+ * cambiada con el código todavía utilizable.
+ */
+async function verificarCodigoPosesion(
+    usuarioId: number,
+    codigo: string,
+    proposito: PropositoCodigo,
+): Promise<VerificacionCodigo> {
+    const reset = await prisma.passwordReset.findFirst({
+        where: { usuario_id: usuarioId, proposito, usado_at: null, expira_at: { gt: new Date() } },
+        orderBy: { created_at: 'desc' },
+    });
+    if (!reset) return { ok: false };
+
+    // Se quema al pasarse de intentos: si no, el código de 6 dígitos se saca a
+    // fuerza bruta. El limitador por IP no basta — un atacante con varias IPs
+    // seguiría teniendo un millón de combinaciones y todo el TTL por delante.
+    if (reset.intentos >= RESET_MAX_INTENTOS) {
+        await prisma.passwordReset.update({ where: { id: reset.id }, data: { usado_at: new Date() } });
+        return { ok: false };
+    }
+
+    const coincide = await verificarPassword(codigo, reset.codigo_hash);
+    if (!coincide) {
+        await prisma.passwordReset.update({ where: { id: reset.id }, data: { intentos: { increment: 1 } } });
+        return { ok: false };
+    }
+
+    return { ok: true, resetId: reset.id };
+}
+
+/**
  * POST /api/auth/recuperar   { telefono }
  * Manda un código por email. Responde igual exista o no la cuenta.
  */
@@ -341,30 +498,7 @@ router.post('/recuperar', authLimiter, async (req: Request, res: Response) => {
             return;
         }
 
-        // Un código nuevo invalida los anteriores: si no, pedir varios dejaría
-        // varias puertas abiertas a la vez.
-        await prisma.passwordReset.updateMany({
-            where: { usuario_id: usuario.id, usado_at: null },
-            data: { usado_at: new Date() },
-        });
-
-        const codigo = generarCodigo();
-        await prisma.passwordReset.create({
-            data: {
-                usuario_id: usuario.id,
-                codigo_hash: await hashPassword(codigo),
-                expira_at: new Date(Date.now() + RESET_VIGENCIA_MIN * 60 * 1000),
-            },
-        });
-
-        const { asunto, cuerpo } = cuerpoCodigoRecuperacion(codigo, RESET_VIGENCIA_MIN);
-        const envio = await enviarEmail(usuario.email, asunto, cuerpo);
-        if (!envio.ok) {
-            // No se le cuenta al usuario (revelaría que la cuenta existe), pero
-            // tiene que verse en el log: si esto falla, nadie puede recuperar.
-            console.error(`[AUTH] No se pudo enviar el codigo de recuperacion al usuario ${usuario.id}: ${envio.error}`);
-        }
-
+        await emitirCodigoPosesion(usuario, 'RECUPERACION');
         res.json(respuestaNeutra);
     } catch (err: any) {
         console.error('[AUTH] recuperar error:', err.message);
@@ -404,24 +538,8 @@ router.post('/restablecer', authLimiter, async (req: Request, res: Response) => 
         const usuario = await resolverCandidatoPilotOS(String(telefono).trim());
         if (!usuario) { rechazar(); return; }
 
-        const reset = await prisma.passwordReset.findFirst({
-            where: { usuario_id: usuario.id, usado_at: null, expira_at: { gt: new Date() } },
-            orderBy: { created_at: 'desc' },
-        });
-        if (!reset) { rechazar(); return; }
-
-        if (reset.intentos >= RESET_MAX_INTENTOS) {
-            await prisma.passwordReset.update({ where: { id: reset.id }, data: { usado_at: new Date() } });
-            rechazar();
-            return;
-        }
-
-        const coincide = await verificarPassword(String(codigo).trim(), reset.codigo_hash);
-        if (!coincide) {
-            await prisma.passwordReset.update({ where: { id: reset.id }, data: { intentos: { increment: 1 } } });
-            rechazar();
-            return;
-        }
+        const verificacion = await verificarCodigoPosesion(usuario.id, String(codigo).trim(), 'RECUPERACION');
+        if (!verificacion.ok) { rechazar(); return; }
 
         // Código bueno: contraseña nueva y código quemado, de forma atómica —
         // que no pueda quedar la contraseña cambiada con el código aún vivo.
@@ -431,7 +549,7 @@ router.post('/restablecer', authLimiter, async (req: Request, res: Response) => 
                 data: { password_hash: await hashPassword(password) },
             }),
             prisma.passwordReset.update({
-                where: { id: reset.id },
+                where: { id: verificacion.resetId },
                 data: { usado_at: new Date() },
             }),
         ]);

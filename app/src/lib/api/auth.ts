@@ -11,13 +11,37 @@ export async function login(telefono: string, password: string): Promise<LoginRe
 }
 
 /**
- * POST /api/auth/establecer-password — Fija la primera contrasena de una cuenta
- * que todavia tiene el marcador placeholder. Inicia sesion automaticamente.
+ * POST /api/auth/establecer-password/solicitar — Pide el codigo de activacion.
+ *
+ * Responde SIEMPRE lo mismo, exista o no la cuenta y este o no pendiente de
+ * activar: si distinguiera los casos, cualquiera podria averiguar que telefonos
+ * usan PilotOS y cuales siguen sin activar, que son justo los que valdria la
+ * pena atacar. No hay nada que comprobar en la respuesta.
  */
-export async function establecerPassword(telefono: string, password: string): Promise<LoginResponse> {
+export async function pedirCodigoActivacion(telefono: string): Promise<{ status: string; message: string }> {
+  return apiFetch('/api/auth/establecer-password/solicitar', {
+    method: 'POST',
+    body: { telefono },
+    public: true,
+  });
+}
+
+/**
+ * POST /api/auth/establecer-password — Fija la primera contrasena de una cuenta
+ * pendiente de activar. Inicia sesion automaticamente.
+ *
+ * Exige el codigo que llega por correo (PIL-01, 2026-08-26). Antes bastaba con
+ * el telefono, y un telefono no es un secreto: quien lo supiera se quedaba con
+ * la cuenta antes que su titular.
+ */
+export async function establecerPassword(
+  telefono: string,
+  codigo: string,
+  password: string,
+): Promise<LoginResponse> {
   return apiFetch('/api/auth/establecer-password', {
     method: 'POST',
-    body: { telefono, password },
+    body: { telefono, codigo, password },
     public: true,
   });
 }
