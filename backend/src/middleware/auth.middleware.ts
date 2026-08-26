@@ -13,7 +13,22 @@ import { prisma } from '../lib/prisma';
 
 // JWT_SECRET se valida al arrancar en index.ts
 const JWT_SECRET = process.env.JWT_SECRET!;
-const JWT_EXPIRATION = '30d'; // Sesión larga para uso real en móvil (PWA)
+/**
+ * PIL-03 — de 30 días a 7.
+ *
+ * La sesión es larga a propósito: quien usa esto es un taxista con la PWA en el
+ * móvil durante la jornada, y obligarle a entrar cada día sería pelear con el
+ * producto. Pero 30 días sin poder cortar la sesión convertía un móvil robado en
+ * un mes de acceso.
+ *
+ * Lo que de verdad arregla el problema no es acortarlo, es `sesiones_validas_desde`:
+ * ahora se puede echar a alguien de inmediato. Los 7 días son el techo de lo que
+ * dura una sesión que nadie revoca.
+ *
+ * Pendiente (Fase 3): access token corto + refresh rotativo, que permitiría
+ * bajar esto a minutos sin molestar a nadie.
+ */
+const JWT_EXPIRATION = '7d';
 
 export interface AuthRequest extends Request {
     usuario?: {
@@ -64,7 +79,7 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
         }
 
         const token = authHeader.split(' ')[1];
-        const decoded = jwt.verify(token, JWT_SECRET) as { id: number; telefono: string; role: string };
+        const decoded = jwt.verify(token, JWT_SECRET) as { id: number; telefono: string; role: string; iat?: number };
 
         // Buscar en minos.Users
         const usuario = await prisma.minosUser.findUnique({
@@ -74,6 +89,26 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
         if (!usuario) {
             res.status(401).json({ status: 'FAIL', error: 'user_not_found', message: 'Usuario no encontrado' });
             return;
+        }
+
+        // PIL-03 — corte de sesiones.
+        //
+        // `iat` es el instante en que se firmó el token. Si es anterior al corte
+        // del usuario, el token murió aunque no haya caducado. Es lo que hace
+        // que cambiar la contraseña, cerrar sesión o desactivar a un conductor
+        // surtan efecto de inmediato en vez de dentro de una semana.
+        //
+        // El usuario ya se ha leído de la base de datos justo arriba, así que
+        // esto no cuesta ninguna consulta extra.
+        if (usuario.sesiones_validas_desde && typeof decoded.iat === 'number') {
+            const emitido = decoded.iat * 1000;
+            // Un segundo de margen: `iat` va en segundos y el corte en
+            // milisegundos, y sin él un token emitido en el mismo segundo del
+            // corte se invalidaría a sí mismo al nacer.
+            if (emitido + 1000 < usuario.sesiones_validas_desde.getTime()) {
+                res.status(401).json({ status: 'FAIL', error: 'sesion_revocada', message: 'Tu sesion ha caducado. Vuelve a entrar.' });
+                return;
+            }
         }
 
         // Enriquecer con contexto PilotOS
@@ -173,4 +208,22 @@ export function requirePatron(req: AuthRequest, res: Response, next: NextFunctio
     }
 
     next();
+}
+
+/**
+ * Corta todas las sesiones vivas de un usuario.
+ *
+ * Se llama cuando el acceso debe dejar de valer YA: contraseña cambiada o
+ * restablecida, cierre de sesión, o conductor desactivado. No borra tokens
+ * —no hay lista que borrar—: mueve el corte a "ahora", y cualquier JWT firmado
+ * antes deja de servir en la siguiente petición.
+ *
+ * Nunca lanza hacia fuera: si esto falla, quien llama debe poder decidir. Se
+ * devuelve el resultado en vez de tragárselo.
+ */
+export async function revocarSesiones(usuarioId: number): Promise<void> {
+    await prisma.minosUser.update({
+        where: { id: usuarioId },
+        data: { sesiones_validas_desde: new Date() },
+    });
 }

@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { requireAuth, requireClienteContext, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { requireAuth, requireClienteContext, requirePatron, isSameTenant, revocarSesiones, AuthRequest } from '../middleware/auth.middleware';
 import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
 import { sincronizarCantidadAsalariados } from '../services/billing-sync.service';
 import { clienteTieneFeaturePro } from '../middleware/billing-access.middleware';
@@ -268,6 +268,17 @@ router.patch('/:id', requireAuth, requirePatron, async (req: AuthRequest, res: R
                     ...(telefono && { telefono })
                 }
             });
+        }
+
+        // PIL-03 — desactivar a un conductor le corta la sesión de inmediato.
+        //
+        // Este es el caso del despido. Antes, marcar a alguien como inactivo le
+        // quitaba de las listas pero **su token seguía valiendo hasta un mes**:
+        // podía seguir consultando y escribiendo con la app que ya tenía
+        // abierta. Desactivar tiene que significar "fuera ahora", no "fuera
+        // cuando le caduque el token".
+        if (activo === false && existing.activo === true) {
+            await revocarSesiones(conductor.usuario_id);
         }
 
         if (!existing.es_patron && activo !== undefined && activo !== existing.activo) {

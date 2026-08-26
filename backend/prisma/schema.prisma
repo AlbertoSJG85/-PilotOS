@@ -31,6 +31,11 @@ model MinosUser {
   fecha_bloqueo          DateTime?          @db.Timestamp(6)
   telefono               String?            @db.VarChar(50)
   gmail_last_scan        DateTime?          @db.Timestamptz(6)
+  /// PIL-03 — corte de sesiones. Todo JWT emitido ANTES de este instante deja
+  /// de valer. Es lo que permite echar a alguien de verdad: al cambiar la
+  /// contrasena, al cerrar sesion o al desactivar a un conductor. Nulo =
+  /// ninguna revocacion, que es el estado de todas las filas existentes.
+  sesiones_validas_desde DateTime?          @db.Timestamptz(6)
   LegalAcceptances       LegalAcceptances[]
   clientesPilotOS        Cliente[]
   conductoresPilotOS     Conductor[]

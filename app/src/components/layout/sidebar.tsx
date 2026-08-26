@@ -51,8 +51,10 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const isPatron = user?.es_patron ?? false;
   const navItems = isPatron ? patronNav : driverNav;
 
-  function handleLogout() {
-    clearSession();
+  async function handleLogout() {
+    // PIL-03: se espera al servidor antes de salir, para que la sesion quede
+    // cortada de verdad y no solo borrada de este navegador.
+    await clearSession();
     window.location.href = '/login';
   }
 

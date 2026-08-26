@@ -54,8 +54,10 @@ export default function ConductorHome() {
     ]).finally(() => setLoading(false));
   }, [user?.conductor_id]);
 
-  function handleLogout() {
-    clearSession();
+  async function handleLogout() {
+    // PIL-03: se espera al servidor antes de salir, para que la sesion quede
+    // cortada de verdad y no solo borrada de este navegador.
+    await clearSession();
     window.location.href = '/login';
   }
 

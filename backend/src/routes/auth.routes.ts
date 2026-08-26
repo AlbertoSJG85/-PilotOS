@@ -5,7 +5,7 @@
 import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../lib/prisma';
-import { generarToken, requireAuth, AuthRequest } from '../middleware/auth.middleware';
+import { generarToken, requireAuth, revocarSesiones, AuthRequest } from '../middleware/auth.middleware';
 import crypto from 'crypto';
 import { esPlaceholder, hashPassword, validarFortalezaPassword, verificarPassword } from '../lib/password';
 import { enviarAvisoGloria } from '../services/notificacion.service';
@@ -260,7 +260,9 @@ router.post('/establecer-password', authLimiter, async (req: Request, res: Respo
         await prisma.$transaction([
             prisma.minosUser.update({
                 where: { id: usuario.id },
-                data: { password_hash: await hashPassword(password) },
+                // PIL-03: corta las sesiones anteriores. Quien recupera el
+                // acceso espera que quien lo tuviera lo pierda.
+                data: { password_hash: await hashPassword(password), sesiones_validas_desde: new Date() },
             }),
             prisma.passwordReset.update({
                 where: { id: verificacion.resetId },
@@ -305,9 +307,19 @@ router.post('/cambiar-password', requireAuth, async (req: AuthRequest, res: Resp
         }
 
         const nuevoHash = await hashPassword(password_nueva);
-        await prisma.minosUser.update({ where: { id: usuario.id }, data: { password_hash: nuevoHash } });
+        await prisma.minosUser.update({
+            where: { id: usuario.id },
+            // PIL-03: cambiar la contraseña corta TODAS las sesiones vivas. Si
+            // alguien la cambia porque sospecha que le han entrado, echar al
+            // intruso es justo el motivo de cambiarla; antes el intruso seguía
+            // dentro con su token hasta un mes.
+            data: { password_hash: nuevoHash, sesiones_validas_desde: new Date() },
+        });
 
-        res.json({ status: 'OK', message: 'Contrasena actualizada' });
+        // La sesión de quien acaba de cambiarla también queda cortada, así que
+        // se le devuelve una nueva y no se le echa de la aplicación.
+        const sesion = await emitirSesion(usuario);
+        res.json({ ...sesion, message: 'Contrasena actualizada' });
     } catch (err: any) {
         console.error('[AUTH] cambiar-password error:', err.message);
         const isDev = process.env.NODE_ENV === 'development';
@@ -546,7 +558,9 @@ router.post('/restablecer', authLimiter, async (req: Request, res: Response) => 
         await prisma.$transaction([
             prisma.minosUser.update({
                 where: { id: usuario.id },
-                data: { password_hash: await hashPassword(password) },
+                // PIL-03: corta las sesiones anteriores. Quien recupera el
+                // acceso espera que quien lo tuviera lo pierda.
+                data: { password_hash: await hashPassword(password), sesiones_validas_desde: new Date() },
             }),
             prisma.passwordReset.update({
                 where: { id: verificacion.resetId },
@@ -560,6 +574,26 @@ router.post('/restablecer', authLimiter, async (req: Request, res: Response) => 
         console.error('[AUTH] restablecer error:', err.message);
         const isDev = process.env.NODE_ENV === 'development';
         res.status(500).json({ status: 'FAIL', error: 'server_error', message: isDev ? err.message : 'Error interno' });
+    }
+});
+
+/**
+ * POST /api/auth/logout
+ *
+ * Cerrar sesión no era nada: el cliente borraba el token de `localStorage` y
+ * ya. Si alguien lo había copiado antes, seguía sirviendo. Ahora se corta en el
+ * servidor, que es donde se decide.
+ *
+ * Corta TODAS las sesiones del usuario, no solo la de este dispositivo. Es lo
+ * que espera quien pulsa "cerrar sesión" en un móvil que ya no controla.
+ */
+router.post('/logout', requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+        await revocarSesiones(req.usuario!.id);
+        res.json({ status: 'OK', message: 'Sesion cerrada en todos los dispositivos' });
+    } catch (err: any) {
+        console.error('[AUTH] logout error:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });
 
