@@ -75,9 +75,46 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 
-// Health check
+// Liveness — "¿estoy vivo?". NO toca la base de datos, a propósito.
+//
+// El orquestador usa el healthcheck para decidir si MATAR el contenedor.
+// Atarlo a la base de datos significa que un parpadeo de BD —o su
+// mantenimiento— mate un proceso perfectamente sano; y como la base es
+// compartida por todo el ecosistema, los mataría a todos a la vez. El
+// healthcheck dejaría de ser una red de seguridad para ser un amplificador.
 app.get('/health', (_req, res) => {
     res.json({ status: 'ok', service: 'PilotOS Backend', version: '1.0.0' });
+});
+
+/** Cota de la sonda de readiness. Una sonda que no vuelve no informa de nada. */
+const SONDA_READY_MS = 2000;
+
+// Readiness — "¿puedo atender tráfico útil?". Esta SÍ mira la base de datos.
+//
+// La diferencia con /health es lo que hace el orquestador con la respuesta: un
+// `not ready` saca del balanceo, no mata el proceso. Es reversible en cuanto la
+// base vuelve.
+app.get('/ready', async (_req, res) => {
+    let temporizador: NodeJS.Timeout | undefined;
+    try {
+        const cota = new Promise<never>((_, rechazar) => {
+            temporizador = setTimeout(() => rechazar(new Error('la base de datos no respondió a tiempo')), SONDA_READY_MS);
+        });
+        await Promise.race([prisma.$queryRaw`SELECT 1`, cota]);
+        res.json({ status: 'ready', service: 'PilotOS Backend' });
+    } catch (err: any) {
+        res.status(503).json({ status: 'not_ready', motivo: err.message });
+    } finally {
+        // Sin esto, cada sonda deja un temporizador pendiente hasta que vence:
+        // con una sonda cada pocos segundos son cientos de temporizadores vivos,
+        // y al apagar retrasan la salida del proceso.
+        //
+        // `unref()` NO sirve aunque lo parezca: un temporizador sin referencia
+        // no mantiene vivo el bucle de eventos, así que si la consulta se
+        // cuelga, la carrera puede no resolverse nunca. Limpiar es lo correcto;
+        // desreferenciar solo esconde el problema.
+        clearTimeout(temporizador);
+    }
 });
 
 // ============================================

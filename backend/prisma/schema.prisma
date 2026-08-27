@@ -663,3 +663,25 @@ model LegalAcceptances {
   @@index([user_id], map: "idx_legal_acceptances_user")
   @@schema("minos")
 }
+
+/// Candado entre réplicas para las tareas programadas.
+///
+/// Con dos instancias, las dos purgarían y las dos avisarían de los mismos
+/// mantenimientos: avisos duplicados a los patrones y borrados compitiendo.
+///
+/// No se usa `pg_try_advisory_lock` —el patrón de RentOS— porque sobre Prisma
+/// es incorrecto: reparte las consultas por un pool, así que el candado se
+/// pediría en una conexión y se soltaría en otra, quedándose puesto. Eso sería
+/// PEOR que no tener candado: la tarea dejaría de ejecutarse en todas las
+/// réplicas, en silencio.
+///
+/// `held_until` hace de lease: si el proceso muere con el candado cogido,
+/// caduca solo. Nadie tiene que venir a limpiarlo.
+model JobLease {
+  job        String   @id
+  held_until DateTime @db.Timestamptz(6)
+  holder     String
+  updated_at DateTime @updatedAt
+
+  @@schema("pilotos")
+}

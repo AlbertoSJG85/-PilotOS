@@ -16,8 +16,20 @@ import cron from 'node-cron';
 import { prisma } from '../lib/prisma';
 import { procesarMantenimientos } from './mantenimientoAlertas.service';
 import { clienteTieneFeaturePro } from '../middleware/billing-access.middleware';
+import { conCandado } from './job-lease.service';
 
 const TIMEZONE = 'Atlantic/Canary';
+
+/**
+ * Cuánto se sostiene el candado de cada tarea.
+ *
+ * Tiene que ser MAYOR que lo que la tarea puede tardar en el peor caso. Si
+ * fuera menor, el candado caducaría con la tarea aún trabajando, otra réplica
+ * entraría, y tendríamos la duplicación que esto viene a evitar: una
+ * protección que falla como si no estuviera. Ambas son diarias y tardan
+ * segundos; 30 min es holgura de sobra sin dejar nada bloqueado un día entero.
+ */
+const TTL_CANDADO_SEGUNDOS = 30 * 60;
 
 /**
  * Check for maintenance items approaching deadline or overdue, y envia los
@@ -87,38 +99,33 @@ export type SchedulerHandle = { detener: () => void };
  * diarios dentro de una transacción**: que arranque mientras se está cerrando
  * el pool es la forma de dejar un borrado a medias.
  *
- * ── LO QUE ESTO NO ARREGLA, Y CONVIENE NO CONFUNDIR ────────────────────────
+ * ── CANDADO ENTRE RÉPLICAS (2026-08-27) ────────────────────────────────────
  *
- * Estas tareas siguen **sin candado entre réplicas**. Con dos instancias, las
- * dos purgarían y las dos avisarían de los mismos mantenimientos: avisos
- * duplicados a los patrones.
+ * Ya lo hay. Ambas tareas se reclaman con `conCandado`, que usa una lease en
+ * tabla (`pilotos."JobLease"`), no `pg_try_advisory_lock`.
  *
- * No se ha puesto candado aquí a propósito. El patrón obvio —
- * `pg_try_advisory_lock` de sesión, como en RentOS— **no es correcto sobre
- * Prisma**: Prisma reparte las consultas por un pool, así que el candado se
- * pediría en una conexión y se intentaría soltar en otra, quedándose puesto
- * hasta que esa conexión se reciclase. El resultado sería peor que no tener
- * candado: la tarea dejaría de ejecutarse en TODAS las réplicas, en silencio,
- * y solo se notaría al ver que los mantenimientos no se avisan.
+ * El advisory lock es el patrón que usa RentOS y el que cualquiera copiaría
+ * primero, pero sobre Prisma es incorrecto: reparte las consultas por un pool,
+ * así que el candado se pediría en una conexión y se soltaría en otra,
+ * quedándose puesto. Sería PEOR que no tener candado — la tarea dejaría de
+ * ejecutarse en todas las réplicas, en silencio. Ver `job-lease.service.ts`.
  *
- * La alternativa correcta aquí es una lease en tabla con `UNIQUE(job)` y
- * `held_until`, reclamada con un UPDATE condicional. Es trabajo con migración
- * y queda anotado como hallazgo abierto de la Fase 5, no como resuelto.
- *
- * Hoy hay una sola réplica, así que no está roto — está esperando.
+ * Hoy hay una sola réplica, así que esto no cambia nada visible: evita que
+ * añadir la segunda duplique los avisos a los patrones. El momento de
+ * descubrirlo no puede ser el día en que se escale.
  */
 export function iniciarScheduler(): SchedulerHandle {
     console.log('⏰ [Scheduler] Iniciando tareas programadas...');
 
     // Every day at 08:00 (Atlantic/Canary) — check maintenance
     const tareaMantenimientos = cron.schedule('0 8 * * *', () => {
-        verificarMantenimientos();
+        conCandado(prisma, 'mantenimientos', TTL_CANDADO_SEGUNDOS, verificarMantenimientos);
     }, { timezone: TIMEZONE });
     console.log(`  ✅ Verificación de mantenimientos: diario a las 08:00 (${TIMEZONE})`);
 
     // Every day at 03:00 (Atlantic/Canary) — purge stale BORRADOR partes
     const tareaPurga = cron.schedule('0 3 * * *', () => {
-        purgarBorradoresAntiguos();
+        conCandado(prisma, 'purga-borradores', TTL_CANDADO_SEGUNDOS, purgarBorradoresAntiguos);
     }, { timezone: TIMEZONE });
     console.log(`  ✅ Purga de borradores antiguos: diario a las 03:00 (${TIMEZONE})`);
 
