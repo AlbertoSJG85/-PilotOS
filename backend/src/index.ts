@@ -1,4 +1,5 @@
 import express from 'express';
+import { trazabilidad } from './middleware/trazabilidad';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -74,6 +75,11 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
     : true; // Allow all in development
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
+
+// Trazabilidad: identificador de peticion y registro JSON (Fase 6).
+// Mismo contrato que el resto del ecosistema para que el identificador
+// sobreviva al salto entre servicios.
+app.use(trazabilidad({ servicio: 'pilotos' }));
 
 // Liveness — "¿estoy vivo?". NO toca la base de datos, a propósito.
 //
