@@ -17,6 +17,14 @@ import { sincronizarCantidadAsalariados } from '../services/billing-sync.service
 
 const router = Router();
 
+/** Alta imposible por el estado del ecosistema (no un fallo del servidor): se devuelve 409 con motivo. */
+class ConflictoAlta extends Error {
+    constructor(public readonly codigo: string, mensaje: string) {
+        super(mensaje);
+        this.name = 'ConflictoAlta';
+    }
+}
+
 function isGmail(email: string): boolean {
     return email.trim().toLowerCase().endsWith('@gmail.com');
 }
@@ -204,13 +212,31 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
                 const emailDado = typeof asala.email === 'string' ? asala.email.trim().toLowerCase() : '';
                 const asalaEmail = emailDado || `${asala.telefono}@pilotos.app`;
 
-                const asalariadoUser = await tx.minosUser.upsert({
-                    where: { email: asalaEmail },
-                    update: {
-                        nombre: asala.nombre || undefined,
-                        telefono: asala.telefono,
-                    },
-                    create: {
+                // PIL-02: minos.Users es identidad COMPARTIDA del ecosistema. Un
+                // upsert aquí sobrescribía nombre y teléfono de quien ya existiera
+                // con ese email. Solo se crea gente nueva; a quien ya existe se le
+                // engancha sin tocar su fila, y solo si no conduce ya para nadie.
+                const existente = await tx.minosUser.findUnique({ where: { email: asalaEmail } });
+                if (existente) {
+                    const yaEsConductor = await tx.conductor.findFirst({
+                        where: { usuario_id: existente.id, activo: true },
+                    });
+                    if (yaEsConductor) {
+                        throw new ConflictoAlta(
+                            'conductor_ya_asignado',
+                            `El email ${asalaEmail} ya pertenece a un conductor de PilotOS. Usa otro email o revisa los datos con esa persona.`,
+                        );
+                    }
+                    if (existente.telefono && existente.telefono !== asala.telefono) {
+                        throw new ConflictoAlta(
+                            'telefono_no_coincide',
+                            `El email ${asalaEmail} ya pertenece a una cuenta con otro teléfono. Comprueba los datos con la persona antes de darla de alta.`,
+                        );
+                    }
+                }
+
+                const asalariadoUser = existente ?? await tx.minosUser.create({
+                    data: {
                         nombre: asala.nombre || 'Conductor',
                         telefono: asala.telefono,
                         email: asalaEmail,
@@ -369,6 +395,10 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
         });
 
     } catch (err: any) {
+        if (err instanceof ConflictoAlta) {
+            res.status(409).json({ status: 'FAIL', error: err.codigo, message: err.message });
+            return;
+        }
         console.error('[ONBOARDING] Error completando:', err.message);
 
         // C-023: Unique constraint — dar mensaje legible (última línea de defensa)

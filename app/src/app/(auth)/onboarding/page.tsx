@@ -136,7 +136,7 @@ export default function OnboardingPage() {
           if (!a.telefono.trim()) return `El teléfono del asalariado ${i + 1} es obligatorio`;
           // Sin email no puede recuperar su contraseña solo: el código va por correo.
           if (!a.email.trim()) return `El email del asalariado ${i + 1} es obligatorio`;
-          if (!/^[^s@]+@[^s@]+.[^s@]+$/.test(a.email.trim())) return `El email del asalariado ${i + 1} no es válido`;
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.email.trim())) return `El email del asalariado ${i + 1} no es válido`;
         }
         return null;
       default:
