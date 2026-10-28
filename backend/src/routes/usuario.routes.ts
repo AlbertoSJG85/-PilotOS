@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { requireAuth, requireClienteContext, requirePatron, isSameTenant, revocarSesiones, AuthRequest } from '../middleware/auth.middleware';
 import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
+import { enviarBienvenidaAsalariado } from '../services/bienvenida.service';
 import { sincronizarCantidadAsalariados } from '../services/billing-sync.service';
 import { clienteTieneFeaturePro } from '../middleware/billing-access.middleware';
 
@@ -90,6 +91,7 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
         // Ahora se comprueba antes. Solo se crea gente nueva; a alguien que ya
         // existe se le puede incorporar, pero **nunca modificando sus datos**, y
         // solo si no es ya conductor de otro cliente.
+        let usuarioAlta: { nombre: string | null; email: string | null; telefono: string | null } | null = null;
         const conductor = await prisma.$transaction(async (tx) => {
             // 1. MinosUser
             const existente = await tx.minosUser.findUnique({ where: { email: asalaEmail } });
@@ -132,6 +134,8 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
                     estado_pago: 'AL DIA',
                 },
             });
+
+            usuarioAlta = user;
 
             // 2. Conductor
             const cond = await tx.conductor.create({
@@ -176,6 +180,11 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
         });
 
         res.status(201).json({ status: 'OK', data: conductor });
+        // Bienvenida al asalariado, fuera de la transacción: no puede deshacer el alta.
+        if (usuarioAlta) {
+            enviarBienvenidaAsalariado(usuarioAlta, req.usuario?.nombre || '')
+                .catch((error) => console.warn('[BIENVENIDA] fallida (no bloquea):', error?.message));
+        }
         sincronizarCantidadAsalariados(cliente_id, `asalariado-creado-${conductor.id}`)
             .catch((error) => console.warn('[nexos-pay] sync asalariados fallida:', error?.message));
     } catch (err: any) {

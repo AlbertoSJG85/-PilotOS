@@ -36,6 +36,9 @@ vi.mock('../src/services/billing-sync.service', () => ({
     sincronizarCantidadAsalariados: vi.fn().mockResolvedValue(undefined),
 }));
 
+const bienvenidaMock = { enviarBienvenidasOnboarding: vi.fn().mockResolvedValue(undefined) };
+vi.mock('../src/services/bienvenida.service', () => bienvenidaMock);
+
 const { default: onboardingRoutes } = await import('../src/routes/onboarding.routes');
 
 const completar = (() => {
@@ -84,6 +87,29 @@ describe('onboarding completar — asalariados', () => {
             expect.objectContaining({ data: expect.objectContaining({ email: 'sara@gmail.com', telefono: '+34622222222' }) }),
         );
         expect(tx.minosUser.upsert).not.toHaveBeenCalled();
+        // bienvenida: patrón + el asalariado recién creado
+        expect(bienvenidaMock.enviarBienvenidasOnboarding).toHaveBeenCalledTimes(1);
+        const [patron, equipo] = bienvenidaMock.enviarBienvenidasOnboarding.mock.calls[0];
+        expect(patron.email).toBe('tia@gmail.com');
+        expect(equipo.map((u: any) => u.email)).toEqual(['sara@gmail.com']);
+    });
+
+    it('un fallo del correo de bienvenida no rompe el alta', async () => {
+        bienvenidaMock.enviarBienvenidasOnboarding.mockRejectedValueOnce(new Error('SMTP'));
+        prismaMock.onboarding.findUnique.mockResolvedValue(onboardingCon([]));
+        const res = mockRes();
+        await completar(peticion(), res);
+        expect(res.status).not.toHaveBeenCalled();
+        expect(res.json.mock.calls[0][0].status).toBe('OK');
+    });
+
+    it('si el alta se rechaza (409) no se manda ninguna bienvenida', async () => {
+        tx.minosUser.findUnique.mockResolvedValue({ id: 999, email: 'victima@x.com', telefono: '+34611111111' });
+        prismaMock.onboarding.findUnique.mockResolvedValue(
+            onboardingCon([{ nombre: 'Chico', telefono: '+34622222222', email: 'victima@x.com' }]),
+        );
+        await completar(peticion(), mockRes());
+        expect(bienvenidaMock.enviarBienvenidasOnboarding).not.toHaveBeenCalled();
     });
 
     it('vector PIL-02: el email de otro usuario con otro teléfono se rechaza y no se toca', async () => {

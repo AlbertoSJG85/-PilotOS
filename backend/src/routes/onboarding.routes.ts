@@ -14,6 +14,7 @@ import { sumarMeses } from '../lib/fechas';
 import { resolverPreferenciasAvisos } from '../services/mantenimientoAlertas.service';
 import { planPro, provisionarCliente } from '../lib/nexos-pay';
 import { sincronizarCantidadAsalariados } from '../services/billing-sync.service';
+import { enviarBienvenidasOnboarding } from '../services/bienvenida.service';
 
 const router = Router();
 
@@ -205,6 +206,7 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
             // no romperla: se detecta en /recuperar y queda en el log.
             const asalariados = (onboarding.asalariados as any[]) || [];
             const conductoresAsalariados = [];
+            const usuariosAsalariados: typeof existingUser[] = [];
 
             for (const asala of asalariados) {
                 if (!asala.telefono) continue;
@@ -246,6 +248,7 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
                     },
                 });
 
+                usuariosAsalariados.push(asalariadoUser);
                 const cond = await tx.conductor.create({
                     data: {
                         cliente_id: cliente.id,
@@ -363,8 +366,13 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
                 },
             });
 
-            return { patronUser, cliente, conductorPatron, conductoresAsalariados, vehiculo };
+            return { patronUser, cliente, conductorPatron, conductoresAsalariados, usuariosAsalariados, vehiculo };
         });
+
+        // Bienvenida por correo — fuera de la transacción y sin await, igual que
+        // NexOS Pay: un correo que no sale no puede deshacer ni retrasar el alta.
+        enviarBienvenidasOnboarding(result.patronUser, result.usuariosAsalariados as any[])
+            .catch((err) => console.warn('[BIENVENIDA] fallida (no bloquea):', err?.message));
 
         // Alta en NexOS Pay — deliberadamente fuera de la transacción y SIN await.
         // Si NexOS Pay está caído, el patrón termina su alta igual: un problema

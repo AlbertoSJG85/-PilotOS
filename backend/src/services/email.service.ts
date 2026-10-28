@@ -21,12 +21,15 @@
  *  - El transporte se inyecta, así que se prueba sin tocar la red.
  */
 
+import { plantillaCodigoActivacion } from './email-plantillas';
+
 export interface TransporteCorreo {
     sendMail(opciones: {
         from: string;
         to: string;
         subject: string;
         text: string;
+        html?: string;
     }): Promise<{ messageId?: string }>;
 }
 
@@ -43,6 +46,8 @@ export interface OpcionesEmail {
     remitente?: string;
     /** Para pruebas: transporte ya construido, sin red. */
     transporte?: TransporteCorreo;
+    /** Versión HTML con marca. `cuerpo` sigue yendo siempre como texto plano. */
+    html?: string;
 }
 
 let transporteCache: TransporteCorreo | null = null;
@@ -90,7 +95,10 @@ export async function enviarEmail(
     if (!transporte) return { ok: false, error: 'transporte_no_disponible' };
 
     try {
-        const info = await transporte.sendMail({ from: remitente, to: destinatario, subject: asunto, text: cuerpo });
+        const info = await transporte.sendMail({
+            from: remitente, to: destinatario, subject: asunto, text: cuerpo,
+            ...(opciones.html ? { html: opciones.html } : {}),
+        });
         return { ok: true, messageId: info?.messageId };
     } catch (err: any) {
         console.error('[EMAIL] Fallo al enviar:', err?.message);
@@ -107,21 +115,10 @@ export async function enviarEmail(
  * aviso final es distinto — si no ha pedido nada, alguien que conoce su
  * teléfono está intentando quedarse con su cuenta, y eso hay que decirlo.
  */
-export function cuerpoCodigoActivacion(codigo: string, minutos: number): { asunto: string; cuerpo: string } {
-    return {
-        asunto: 'Tu código para activar tu cuenta de PilotOS',
-        cuerpo: [
-            'Estás activando tu cuenta de PilotOS y eligiendo tu primera contraseña.',
-            '',
-            `Tu código es: ${codigo}`,
-            '',
-            `Caduca en ${minutos} minutos y solo se puede usar una vez.`,
-            'Si no has sido tú, NO uses este código y avisa a tu responsable:',
-            'alguien que conoce tu teléfono está intentando activar tu cuenta.',
-            '',
-            '— PilotOS',
-        ].join('\n'),
-    };
+export function cuerpoCodigoActivacion(codigo: string, minutos: number): { asunto: string; cuerpo: string; html?: string } {
+    // La plantilla con marca vive en email-plantillas.ts; aquí solo se expone
+    // con el mismo nombre de siempre para no tocar a quien ya la usa.
+    return plantillaCodigoActivacion(codigo, minutos);
 }
 
 export function cuerpoCodigoRecuperacion(codigo: string, minutos: number): { asunto: string; cuerpo: string } {

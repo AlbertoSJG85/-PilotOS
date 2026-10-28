@@ -436,11 +436,11 @@ async function emitirCodigoPosesion(
         },
     });
 
-    const { asunto, cuerpo } = proposito === 'BOOTSTRAP'
+    const { asunto, cuerpo, html } = proposito === 'BOOTSTRAP'
         ? cuerpoCodigoActivacion(codigo, RESET_VIGENCIA_MIN)
-        : cuerpoCodigoRecuperacion(codigo, RESET_VIGENCIA_MIN);
+        : { ...cuerpoCodigoRecuperacion(codigo, RESET_VIGENCIA_MIN), html: undefined };
 
-    const envio = await enviarEmail(usuario.email, asunto, cuerpo);
+    const envio = await enviarEmail(usuario.email, asunto, cuerpo, { html });
     if (!envio.ok) {
         // No se le cuenta al usuario (revelaría que la cuenta existe), pero
         // tiene que verse en el log: si esto falla, nadie puede entrar.

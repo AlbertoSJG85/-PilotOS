@@ -35,6 +35,9 @@ vi.mock('../src/middleware/billing-access.middleware', () => ({
     clienteTieneFeaturePro: vi.fn().mockResolvedValue(true),
 }));
 
+const bienvenidaMock = { enviarBienvenidaAsalariado: vi.fn().mockResolvedValue(true) };
+vi.mock('../src/services/bienvenida.service', () => bienvenidaMock);
+
 const { default: usuarioRoutes } = await import('../src/routes/usuario.routes');
 
 function manejadorFinalDe(metodo: string, ruta: string) {
@@ -106,6 +109,15 @@ describe('PIL-02 — alta de asalariado', () => {
         expect(res.status).toHaveBeenCalledWith(201);
         expect(tx.minosUser.create).toHaveBeenCalledTimes(1);
         expect(tx.conductor.create).toHaveBeenCalledTimes(1);
+        // y se le da la bienvenida, con el nombre de su responsable
+        expect(bienvenidaMock.enviarBienvenidaAsalariado).toHaveBeenCalledTimes(1);
+        expect(bienvenidaMock.enviarBienvenidaAsalariado.mock.calls[0][1]).toBe('Patrón');
+    });
+
+    it('si el alta se rechaza no se manda bienvenida', async () => {
+        tx.minosUser.findUnique.mockResolvedValue(VICTIMA);
+        await crear(peticion({ nombre: 'X', telefono: '+34600000999', email: VICTIMA.email }), mockRes());
+        expect(bienvenidaMock.enviarBienvenidaAsalariado).not.toHaveBeenCalled();
     });
 
     it('sin email se usa el sintético, y va normalizado', async () => {
