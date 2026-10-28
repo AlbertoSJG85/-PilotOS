@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
+import Link from 'next/link';
 import { Button, Input } from '@/components/ui';
 import { login, establecerPassword, pedirCodigoActivacion, pedirCodigoRecuperacion, restablecerPassword, ApiError } from '@/lib/api';
 import { setSession } from '@/lib/auth';
@@ -371,9 +372,15 @@ export default function LoginPage() {
           )}
         </div>
 
-        <p className="mt-6 text-center text-xs text-zinc-600">
-          Si no tienes cuenta, contacta con tu patron o administrador.
-        </p>
+        <div className="mt-6 space-y-2 text-center text-xs text-zinc-600">
+          <p>
+            Tienes un taxi o una flota?{' '}
+            <Link href="/onboarding" className="font-semibold text-pilotos-yellow hover:underline">
+              Darme de alta
+            </Link>
+          </p>
+          <p>Si eres conductor, tu patron te da de alta y recibiras un correo.</p>
+        </div>
       </div>
     </div>
   );

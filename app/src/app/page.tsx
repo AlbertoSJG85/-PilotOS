@@ -175,12 +175,20 @@ export default function Home() {
             className="h-10 w-auto object-contain sm:h-12"
             priority
           />
-          <Link
-            href="/login"
-            className="rounded-lg border border-white/[0.14] px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:border-pilotos-yellow/40 hover:text-white"
-          >
-            Acceder
-          </Link>
+          <nav className="flex items-center gap-2 sm:gap-3">
+            <Link
+              href="/login"
+              className="rounded-lg border border-white/[0.14] px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:border-pilotos-yellow/40 hover:text-white"
+            >
+              Acceder
+            </Link>
+            <Link
+              href="/onboarding"
+              className="rounded-lg bg-pilotos-yellow px-4 py-2 text-sm font-bold text-pilotos-black transition hover:bg-[#ffc533]"
+            >
+              Darme de alta
+            </Link>
+          </nav>
         </div>
       </header>
 
@@ -258,7 +266,7 @@ export default function Home() {
               gastos, mantenimientos y alertas en una vision de negocio clara.
             </p>
             <div className="hero-entra mt-8 flex flex-col gap-3 sm:flex-row" style={delay(920)}>
-              <CtaLink href="/demo">Solicitar demo</CtaLink>
+              <CtaLink href="/onboarding">Darme de alta</CtaLink>
               <CtaLink href="/demo" variant="secondary">
                 Ver como funciona
               </CtaLink>
@@ -607,7 +615,7 @@ export default function Home() {
             y mas trazabilidad desde el primer dia.
           </p>
           <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-            <CtaLink href="/demo">Solicitar demo</CtaLink>
+            <CtaLink href="/onboarding">Darme de alta</CtaLink>
             <CtaLink href="/login" variant="secondary">
               Acceder a PilotOS
             </CtaLink>
