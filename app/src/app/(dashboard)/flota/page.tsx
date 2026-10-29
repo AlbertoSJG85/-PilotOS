@@ -17,6 +17,13 @@ export default function FlotaPage() {
 
   const [showVehiculoForm, setShowVehiculoForm] = useState(false);
   const [formVehiculo, setFormVehiculo] = useState<Partial<Vehiculo>>({});
+  const [errorVehiculo, setErrorVehiculo] = useState<string | null>(null);
+
+  const abrirFormVehiculo = (v: Partial<Vehiculo>) => {
+    setErrorVehiculo(null);
+    setFormVehiculo(v);
+    setShowVehiculoForm(true);
+  };
 
   // `silencioso`: recarga sin tapar la pantalla con el esqueleto, para no cerrar
   // formularios abiertos (p. ej. el de conductores) cuando algo cambia.
@@ -37,16 +44,30 @@ export default function FlotaPage() {
 
   const handleSaveVehiculo = async () => {
     try {
+      setErrorVehiculo(null);
       if (formVehiculo.id) {
         await updateVehiculo(formVehiculo.id, formVehiculo);
       } else {
-        await createVehiculo(formVehiculo);
+        if (!formVehiculo.matricula?.trim() || !formVehiculo.marca?.trim() || !formVehiculo.modelo?.trim()) {
+          setErrorVehiculo('Faltan la matrícula, la marca o el modelo.');
+          return;
+        }
+        if (!formVehiculo.fecha_matriculacion) {
+          setErrorVehiculo('Indica la fecha de matriculación.');
+          return;
+        }
+        await createVehiculo({
+          tipo_combustible: 'DIESEL',
+          tipo_transmision: 'MANUAL',
+          km_actuales: 0,
+          ...formVehiculo,
+        });
       }
       setShowVehiculoForm(false);
       setFormVehiculo({});
       loadData();
     } catch (e: unknown) {
-      alert('Error: ' + (e instanceof Error ? e.message : String(e)));
+      setErrorVehiculo(e instanceof Error ? e.message : 'No se pudo guardar el vehículo.');
     }
   };
 
@@ -55,8 +76,8 @@ export default function FlotaPage() {
       try {
         await updateVehiculo(v.id, { activo: !v.activo });
         loadData();
-      } catch (e: any) {
-        alert('Error: ' + e.message);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : 'No se pudo cambiar el estado del vehículo.');
       }
     }
   };
@@ -89,7 +110,7 @@ export default function FlotaPage() {
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-zinc-100">Vehículos</h2>
-            <Button size="sm" onClick={() => { setFormVehiculo({}); setShowVehiculoForm(true); }}>
+            <Button size="sm" onClick={() => abrirFormVehiculo({})}>
               Añadir vehículo
             </Button>
           </div>
@@ -102,10 +123,32 @@ export default function FlotaPage() {
               <Input placeholder="Modelo" value={formVehiculo.modelo || ''} onChange={(e) => setFormVehiculo({ ...formVehiculo, modelo: e.target.value })} />
               {!formVehiculo.id && (
                 <>
+                  <select
+                    aria-label="Combustible"
+                    className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100"
+                    value={formVehiculo.tipo_combustible || 'DIESEL'}
+                    onChange={(e) => setFormVehiculo({ ...formVehiculo, tipo_combustible: e.target.value })}
+                  >
+                    <option value="DIESEL">Diesel</option>
+                    <option value="GASOLINA">Gasolina</option>
+                    <option value="HIBRIDO">Híbrido</option>
+                    <option value="ELECTRICO">Eléctrico</option>
+                    <option value="GLP">GLP</option>
+                  </select>
+                  <select
+                    aria-label="Transmisión"
+                    className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100"
+                    value={formVehiculo.tipo_transmision || 'MANUAL'}
+                    onChange={(e) => setFormVehiculo({ ...formVehiculo, tipo_transmision: e.target.value })}
+                  >
+                    <option value="MANUAL">Manual</option>
+                    <option value="AUTOMATICA">Automático</option>
+                  </select>
                   <Input type="number" placeholder="KM Actuales" value={formVehiculo.km_actuales || ''} onChange={(e) => setFormVehiculo({ ...formVehiculo, km_actuales: Number(e.target.value) })} />
                   <Input type="date" placeholder="Fecha Matriculación" value={(formVehiculo.fecha_matriculacion as string) || ''} onChange={(e) => setFormVehiculo({ ...formVehiculo, fecha_matriculacion: e.target.value })} />
                 </>
               )}
+              {errorVehiculo && <p className="text-sm font-medium text-red-400">{errorVehiculo}</p>}
               <div className="flex gap-2">
                 <Button size="sm" onClick={handleSaveVehiculo}>Guardar</Button>
                 <Button size="sm" variant="ghost" onClick={() => setShowVehiculoForm(false)}>Cancelar</Button>
@@ -125,7 +168,7 @@ export default function FlotaPage() {
                       <Badge variant={v.activo ? 'success' : 'danger'}>
                         {v.activo ? 'Activo' : 'Inactivo'}
                       </Badge>
-                      <Button size="sm" variant="ghost" onClick={() => { setFormVehiculo(v); setShowVehiculoForm(true); }}>Edit</Button>
+                      <Button size="sm" variant="ghost" onClick={() => abrirFormVehiculo(v)}>Edit</Button>
                       <Button size="sm" variant="ghost" onClick={() => handleToggleVehiculoActivo(v)}>{v.activo ? 'Desactivar' : 'Activar'}</Button>
                     </div>
                   </div>

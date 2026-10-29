@@ -358,7 +358,7 @@ export function ConductoresFlota({
                 <Button size="sm" variant="ghost" onClick={() => abrirEdicion(c)}>
                   <Pencil className="h-3.5 w-3.5" /> Editar
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => { setErrorAccion(null); setQuitando(c); }}>
+                <Button size="sm" variant="ghost" onClick={() => { setAviso(null); setErrorAccion(null); setQuitando(c); }}>
                   <UserMinus className="h-3.5 w-3.5" /> Quitar
                 </Button>
               </>
