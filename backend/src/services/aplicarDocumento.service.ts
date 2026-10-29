@@ -36,6 +36,22 @@ export interface DatosDocumentoConfirmados {
     /** Nombres del catálogo de mantenimiento que este documento pone al día. */
     mantenimientos?: string[];
     descripcion?: string;
+    /** Tipo del gasto que nace del documento (por defecto MANTENIMIENTO; SEGURO en una póliza). */
+    tipo_gasto?: string;
+    forma_pago?: string;
+}
+
+const TIPOS_GASTO = ['COMBUSTIBLE', 'MANTENIMIENTO', 'SEGURO', 'IMPUESTO', 'AUTONOMO', 'EMISORA', 'OTRO'];
+const FORMAS_PAGO = ['EFECTIVO', 'TARJETA', 'BANCO', 'DOMICILIADO'];
+
+/** Solo valores conocidos: el tipo y la forma de pago los escribe una persona. */
+export function sanearExtrasGasto(extras: unknown): Pick<DatosDocumentoConfirmados, 'tipo_gasto' | 'forma_pago' | 'descripcion'> {
+    const e = (extras ?? {}) as Record<string, unknown>;
+    const out: Pick<DatosDocumentoConfirmados, 'tipo_gasto' | 'forma_pago' | 'descripcion'> = {};
+    if (typeof e.tipo_gasto === 'string' && TIPOS_GASTO.includes(e.tipo_gasto)) out.tipo_gasto = e.tipo_gasto;
+    if (typeof e.forma_pago === 'string' && FORMAS_PAGO.includes(e.forma_pago)) out.forma_pago = e.forma_pago;
+    if (typeof e.descripcion === 'string' && e.descripcion.trim()) out.descripcion = e.descripcion.trim().slice(0, 200);
+    return out;
 }
 
 export interface ResultadoAplicacion {
@@ -188,7 +204,10 @@ export async function aplicarDocumentoConfirmado(
                 data: {
                     cliente_id: clienteId,
                     vehiculo_id: doc.vehiculo_id,
-                    tipo: 'MANTENIMIENTO',
+                    tipo: TIPOS_GASTO.includes(datos.tipo_gasto ?? '')
+                        ? datos.tipo_gasto!
+                        : (doc.tipo === 'POLIZA_SEGURO' ? 'SEGURO' : 'MANTENIMIENTO'),
+                    forma_pago: FORMAS_PAGO.includes(datos.forma_pago ?? '') ? datos.forma_pago! : null,
                     descripcion: datos.descripcion
                         || (actualizados.length > 0 ? actualizados.join(', ') : 'Documento del vehículo'),
                     importe: datos.importe,

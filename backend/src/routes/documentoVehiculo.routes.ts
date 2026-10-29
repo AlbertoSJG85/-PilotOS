@@ -29,7 +29,7 @@ import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { requireAuth, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
 import { TipoDocumentoVehiculo, analizarYRegistrarDocumento, analizarDocumentoRegistrado } from '../services/ocrDocumentoVehiculo.service';
-import { aplicarDocumentoConfirmado, DatosDocumentoConfirmados } from '../services/aplicarDocumento.service';
+import { aplicarDocumentoConfirmado, sanearExtrasGasto, DatosDocumentoConfirmados } from '../services/aplicarDocumento.service';
 
 const router = Router();
 
@@ -160,7 +160,14 @@ router.post('/:id/reprocesar', requireAuth, async (req: AuthRequest, res: Respon
  */
 router.post('/:id/confirmar', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const { datos, acepta_ocr } = req.body as { datos?: DatosDocumentoConfirmados; acepta_ocr?: boolean };
+        const { datos, acepta_ocr, extras, omitir_mantenimiento } = req.body as {
+            datos?: DatosDocumentoConfirmados;
+            acepta_ocr?: boolean;
+            /** Tipo de gasto, forma de pago y descripción: no contradicen al papel. */
+            extras?: unknown;
+            /** "Es un gasto, pero no pongas al día el mantenimiento". */
+            omitir_mantenimiento?: boolean;
+        };
 
         const doc = await prisma.documento.findUnique({
             where: { id: req.params.id },
@@ -183,9 +190,12 @@ router.post('/:id/confirmar', requireAuth, async (req: AuthRequest, res: Respons
                 importe: propuesta.importe as number | undefined,
                 matricula: propuesta.matricula as string | undefined,
                 km_documento: propuesta.km_documento as number | undefined,
-                mantenimientos: (propuesta.mantenimientos_detectados as string[] | undefined) ?? [],
+                mantenimientos: omitir_mantenimiento === true
+                    ? []
+                    : (propuesta.mantenimientos_detectados as string[] | undefined) ?? [],
+                ...sanearExtrasGasto(extras),
             }
-            : (datos ?? {});
+            : { ...(datos ?? {}), ...sanearExtrasGasto({ ...datos, ...(extras as object) }) };
 
         const esPatron = req.usuario?.es_patron === true || req.usuario?.role === 'admin';
         const contradiceAlDocumento = acepta_ocr !== true;

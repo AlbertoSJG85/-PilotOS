@@ -21,7 +21,8 @@ const prismaMock: any = {
 vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }));
 
 const aplicarMock = vi.fn();
-vi.mock('../src/services/aplicarDocumento.service', () => ({
+vi.mock('../src/services/aplicarDocumento.service', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../src/services/aplicarDocumento.service')>()),
     aplicarDocumentoConfirmado: aplicarMock,
 }));
 
@@ -321,6 +322,25 @@ describe('POST /:id/confirmar — quién aplica y quién manda a revisión', () 
         // Se aplica lo que leyó la máquina, tal cual.
         expect(aplicarMock.mock.calls[0][1]).toMatchObject({ importe: 420.5, mantenimientos: ['Neumaticos'] });
         expect(res.json.mock.calls[0][0]).toMatchObject({ status: 'OK', aplicado: true });
+    });
+
+    it('desde Gastos: tipo y forma de pago no cuentan como corregir, y se puede no tocar el mantenimiento', async () => {
+        const res = mockRes();
+        await handler({
+            params: { id: 'doc-1' }, usuario: ASALARIADO,
+            body: {
+                acepta_ocr: true,
+                omitir_mantenimiento: true,
+                extras: { tipo_gasto: 'OTRO', forma_pago: 'TARJETA', descripcion: 'Espejo', importe: 1, tipo_raro: 'x' },
+            },
+        } as any, res);
+
+        expect(aplicarMock).toHaveBeenCalledTimes(1);
+        expect(aplicarMock.mock.calls[0][1]).toMatchObject({
+            importe: 420.5, mantenimientos: [], tipo_gasto: 'OTRO', forma_pago: 'TARJETA', descripcion: 'Espejo',
+        });
+        // Los extras no pueden colar otros campos (el importe sigue siendo el del papel).
+        expect(aplicarMock.mock.calls[0][1].importe).toBe(420.5);
     });
 
     it('CLAVE: el asalariado CORRIGE el documento → no se aplica nada, va a revisión del dueño', async () => {

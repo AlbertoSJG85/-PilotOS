@@ -44,6 +44,8 @@ export interface DatosDocumento {
   km_documento?: number;
   mantenimientos?: string[];
   descripcion?: string;
+  tipo_gasto?: string;
+  forma_pago?: string;
 }
 
 export async function getDocumentosVehiculo(filtros?: { vehiculo_id?: string; estado?: string }): Promise<ApiResponse<DocumentoVehiculo[]>> {
@@ -72,8 +74,14 @@ export async function confirmarDocumento(
   id: string,
   acepta_ocr: boolean,
   datos?: DatosDocumento,
+  /**
+   * Lo que no contradice al papel: tipo de gasto, forma de pago, descripción,
+   * o "no pongas al día el mantenimiento". Con `acepta_ocr: true` se aplica
+   * igual para el dueño y para el asalariado.
+   */
+  opciones?: { extras?: Pick<DatosDocumento, 'tipo_gasto' | 'forma_pago' | 'descripcion'>; omitir_mantenimiento?: boolean },
 ): Promise<{ status: string; aplicado?: boolean; pendiente_revision?: boolean; mantenimientos_actualizados?: string[]; gasto_id?: string | null; avisos?: string[]; message?: string }> {
-  return apiFetch(`/api/documentos-vehiculo/${id}/confirmar`, { method: 'POST', body: { acepta_ocr, datos } });
+  return apiFetch(`/api/documentos-vehiculo/${id}/confirmar`, { method: 'POST', body: { acepta_ocr, datos, ...opciones } });
 }
 
 /**
