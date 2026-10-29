@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { normalizarTelefono, variantesTelefono, esTelefonoValido } from '../lib/telefono';
 import { requireAuth, requireClienteContext, requirePatron, isSameTenant, revocarSesiones, AuthRequest } from '../middleware/auth.middleware';
 import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
 import { enviarBienvenidaAsalariado } from '../services/bienvenida.service';
@@ -103,12 +104,6 @@ function porcentajePatron(modelo: string, valor: number): number {
     return modelo === 'PORCENTAJE' ? 100 - valor : 0;
 }
 
-/** Variantes con y sin "+" del mismo teléfono, como en el resto del ecosistema. */
-function variantesTelefono(tel: string): string[] {
-    const t = tel.trim();
-    return t.startsWith('+') ? [t, t.slice(1)] : [t, '+' + t];
-}
-
 // POST /api/usuarios — Crear conductor (Fase 3 RBAC: solo el patron puede dar de alta conductores)
 router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
@@ -130,6 +125,14 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
             });
             return;
         }
+        if (!esTelefonoValido(telefono)) {
+            res.status(400).json({
+                status: 'FAIL', error: 'invalid_telefono',
+                message: 'El teléfono no es válido. Escríbelo con el 34 delante y sin espacios, por ejemplo 34600123456.',
+            });
+            return;
+        }
+        const telefonoNorm = normalizarTelefono(telefono);
         const modeloElegido = modelo_reparto || 'PORCENTAJE';
         const valorElegido = porcentaje_conductor ?? 50;
         const errReparto = validarReparto(modeloElegido, valorElegido);
@@ -202,7 +205,7 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
                 // Existe en el ecosistema pero no conduce para nadie: se le
                 // engancha tal cual. Ni nombre ni teléfono se tocan — son suyos,
                 // no del patrón que le da de alta.
-                if (existente.telefono && existente.telefono !== telefono) {
+                if (existente.telefono && normalizarTelefono(existente.telefono) !== telefonoNorm) {
                     throw new ConflictoAlta(
                         'telefono_no_coincide',
                         'Ese email ya pertenece a una cuenta con otro teléfono. Comprueba los datos con la persona antes de darla de alta.',
@@ -214,7 +217,7 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
             // pisarían al entrar. Si ya lo usa OTRA cuenta, no se crea.
             if (!existente) {
                 const telefonoUsado = await tx.minosUser.findFirst({
-                    where: { telefono: { in: variantesTelefono(telefono) } },
+                    where: { telefono: { in: variantesTelefono(telefonoNorm) } },
                     select: { id: true },
                 });
                 if (telefonoUsado) {
@@ -228,7 +231,7 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
             const user = existente ?? await tx.minosUser.create({
                 data: {
                     nombre: nombre || 'Conductor',
-                    telefono,
+                    telefono: telefonoNorm,
                     email: asalaEmail,
                     password_hash: PLACEHOLDER_PASSWORD_HASHES[0], // 'CONDUCTOR_NUEVO'
                     role: 'user',
@@ -340,7 +343,15 @@ router.patch('/:id', requireAuth, requirePatron, async (req: AuthRequest, res: R
         // corregir mientras la cuenta no se ha activado — un error al teclear
         // el alta — y nunca a un número que ya usa otra cuenta.
         const cambiaNombre = typeof nombre === 'string' && nombre.trim() !== '' && nombre.trim() !== existing.usuario.nombre;
-        const cambiaTelefono = typeof telefono === 'string' && telefono.trim() !== '' && telefono.trim() !== existing.usuario.telefono;
+        const cambiaTelefono = typeof telefono === 'string' && telefono.trim() !== ''
+            && normalizarTelefono(telefono) !== normalizarTelefono(existing.usuario.telefono);
+        if (cambiaTelefono && !esTelefonoValido(telefono)) {
+            res.status(400).json({
+                status: 'FAIL', error: 'invalid_telefono',
+                message: 'El teléfono no es válido. Escríbelo con el 34 delante y sin espacios, por ejemplo 34600123456.',
+            });
+            return;
+        }
         if (cambiaNombre || cambiaTelefono) {
             const cuentaActivada = !(PLACEHOLDER_PASSWORD_HASHES as readonly string[]).includes(existing.usuario.password_hash);
             if (cuentaActivada) {
@@ -451,7 +462,7 @@ router.patch('/:id', requireAuth, requirePatron, async (req: AuthRequest, res: R
                 where: { id: conductor.usuario_id },
                 data: {
                     ...(cambiaNombre && { nombre: nombre.trim() }),
-                    ...(cambiaTelefono && { telefono: telefono.trim() })
+                    ...(cambiaTelefono && { telefono: normalizarTelefono(telefono) })
                 }
             });
         }

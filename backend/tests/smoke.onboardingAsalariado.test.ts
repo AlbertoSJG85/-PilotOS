@@ -20,7 +20,7 @@ const tx: any = {
 };
 
 const prismaMock: any = {
-    onboarding: { findUnique: vi.fn() },
+    onboarding: { findFirst: vi.fn() },
     minosUser: { findUnique: vi.fn() },
     cliente: { findFirst: vi.fn() },
     conductor: { findFirst: vi.fn() },
@@ -77,14 +77,14 @@ beforeEach(() => {
 
 describe('onboarding completar — asalariados', () => {
     it('control positivo: un asalariado nuevo se crea con normalidad', async () => {
-        prismaMock.onboarding.findUnique.mockResolvedValue(
+        prismaMock.onboarding.findFirst.mockResolvedValue(
             onboardingCon([{ nombre: 'Chico', telefono: '+34622222222', email: 'Sara@Gmail.com' }]),
         );
         const res = mockRes();
         await completar(peticion(), res);
         expect(res.status).not.toHaveBeenCalled();
         expect(tx.minosUser.create).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ email: 'sara@gmail.com', telefono: '+34622222222' }) }),
+            expect.objectContaining({ data: expect.objectContaining({ email: 'sara@gmail.com', telefono: '34622222222' }) }),
         );
         expect(tx.minosUser.upsert).not.toHaveBeenCalled();
         // bienvenida: patrón + el asalariado recién creado
@@ -96,7 +96,7 @@ describe('onboarding completar — asalariados', () => {
 
     it('un fallo del correo de bienvenida no rompe el alta', async () => {
         bienvenidaMock.enviarBienvenidasOnboarding.mockRejectedValueOnce(new Error('SMTP'));
-        prismaMock.onboarding.findUnique.mockResolvedValue(onboardingCon([]));
+        prismaMock.onboarding.findFirst.mockResolvedValue(onboardingCon([]));
         const res = mockRes();
         await completar(peticion(), res);
         expect(res.status).not.toHaveBeenCalled();
@@ -105,7 +105,7 @@ describe('onboarding completar — asalariados', () => {
 
     it('si el alta se rechaza (409) no se manda ninguna bienvenida', async () => {
         tx.minosUser.findUnique.mockResolvedValue({ id: 999, email: 'victima@x.com', telefono: '+34611111111' });
-        prismaMock.onboarding.findUnique.mockResolvedValue(
+        prismaMock.onboarding.findFirst.mockResolvedValue(
             onboardingCon([{ nombre: 'Chico', telefono: '+34622222222', email: 'victima@x.com' }]),
         );
         await completar(peticion(), mockRes());
@@ -114,7 +114,7 @@ describe('onboarding completar — asalariados', () => {
 
     it('vector PIL-02: el email de otro usuario con otro teléfono se rechaza y no se toca', async () => {
         tx.minosUser.findUnique.mockResolvedValue({ id: 999, email: 'victima@x.com', telefono: '+34611111111' });
-        prismaMock.onboarding.findUnique.mockResolvedValue(
+        prismaMock.onboarding.findFirst.mockResolvedValue(
             onboardingCon([{ nombre: 'Chico', telefono: '+34622222222', email: 'victima@x.com' }]),
         );
         const res = mockRes();
@@ -127,7 +127,7 @@ describe('onboarding completar — asalariados', () => {
     it('si el email ya es de un conductor activo, 409 conductor_ya_asignado', async () => {
         tx.minosUser.findUnique.mockResolvedValue({ id: 999, email: 'v@x.com', telefono: '+34622222222' });
         tx.conductor.findFirst.mockResolvedValue({ id: 'otro' });
-        prismaMock.onboarding.findUnique.mockResolvedValue(
+        prismaMock.onboarding.findFirst.mockResolvedValue(
             onboardingCon([{ nombre: 'Chico', telefono: '+34622222222', email: 'v@x.com' }]),
         );
         const res = mockRes();
@@ -138,7 +138,7 @@ describe('onboarding completar — asalariados', () => {
 
     it('control positivo: alguien del ecosistema con el mismo teléfono se engancha sin modificar su fila', async () => {
         tx.minosUser.findUnique.mockResolvedValue({ id: 999, email: 'e@x.com', telefono: '+34622222222', nombre: 'Suyo' });
-        prismaMock.onboarding.findUnique.mockResolvedValue(
+        prismaMock.onboarding.findFirst.mockResolvedValue(
             onboardingCon([{ nombre: 'Otro nombre', telefono: '+34622222222', email: 'e@x.com' }]),
         );
         const res = mockRes();

@@ -100,7 +100,8 @@ describe('nombre y teléfono — son de la persona', () => {
 
         expect(res.json.mock.calls[0][0].status).toBe('OK');
         expect(prismaMock.minosUser.update).toHaveBeenCalledWith({
-            where: { id: 7 }, data: { nombre: 'Pepe García', telefono: '+34600000099' },
+            // Se guarda en forma canónica (sin "+").
+            where: { id: 7 }, data: { nombre: 'Pepe García', telefono: '34600000099' },
         });
     });
 

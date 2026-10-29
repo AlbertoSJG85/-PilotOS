@@ -194,9 +194,10 @@ describe('POST /internal/documentos-vehiculo — resolución por teléfono', () 
             mockReq({ subido_por_telefono: '34600111222', imagen_base64: 'aGVsbG8=' }), res,
         );
 
-        expect(prismaMock.minosUser.findFirst).toHaveBeenCalledWith({
-            where: { telefono: { in: ['34600111222', '+34600111222'] } },
-        });
+        // Incluye las dos formas con/sin "+" y también el número sin el 34
+        // (cuentas antiguas guardadas con 9 cifras).
+        const buscado = prismaMock.minosUser.findFirst.mock.calls[0][0].where.telefono.in;
+        expect(buscado).toEqual(expect.arrayContaining(['34600111222', '+34600111222', '600111222']));
     });
 
     it('CRITICO: varios vehículos → 409 y NO adivina cuál (adjudicar mal es peor que no adjudicar)', async () => {

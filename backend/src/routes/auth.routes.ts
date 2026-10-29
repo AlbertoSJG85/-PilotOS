@@ -5,6 +5,7 @@
 import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../lib/prisma';
+import { variantesTelefono } from '../lib/telefono';
 import { generarToken, requireAuth, revocarSesiones, AuthRequest } from '../middleware/auth.middleware';
 import crypto from 'crypto';
 import { esPlaceholder, hashPassword, validarFortalezaPassword, verificarPassword } from '../lib/password';
@@ -30,9 +31,7 @@ const authLimiter = rateLimit({
  * hacia el login original. Puede haber varios usuarios NexOS con el mismo numero.
  */
 async function resolverCandidatoPilotOS(telefono: string) {
-    const phoneVariants = [telefono];
-    if (telefono.startsWith('+')) phoneVariants.push(telefono.substring(1));
-    else phoneVariants.push('+' + telefono);
+    const phoneVariants = variantesTelefono(telefono);
 
     const candidatos = await prisma.minosUser.findMany({
         where: { telefono: { in: phoneVariants } },

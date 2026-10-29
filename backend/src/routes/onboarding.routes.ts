@@ -8,6 +8,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { normalizarTelefono, variantesTelefono, esTelefonoValido } from '../lib/telefono';
 import { PLACEHOLDER_PASSWORD_HASHES } from '../lib/password';
 import { requireAuth, requireRol, AuthRequest } from '../middleware/auth.middleware';
 import { sumarMeses } from '../lib/fechas';
@@ -49,8 +50,18 @@ router.post('/', async (req: Request, res: Response) => {
             return;
         }
 
+        // Se guarda en forma canónica (34600123456): es la que luego reconocen el
+        // login y GlorIA. Si lo escribió con espacios o sin el 34, se arregla aquí.
+        if (!esTelefonoValido(rawData.telefono)) {
+            res.status(400).json({
+                status: 'FAIL', error: 'invalid_telefono',
+                message: 'El teléfono no es válido. Escríbelo con el 34 delante y sin espacios, por ejemplo 34600123456.',
+            });
+            return;
+        }
+
         const data = {
-            telefono: rawData.telefono,
+            telefono: normalizarTelefono(rawData.telefono),
             nombre_patron: rawData.nombre_patron || null,
             email_patron: rawData.email_patron,
             nif_cif: rawData.nif_cif || null,
@@ -86,8 +97,8 @@ router.post('/', async (req: Request, res: Response) => {
 // POST /api/onboarding/:telefono/completar — Crear todas las entidades
 router.post('/:telefono/completar', async (req: Request, res: Response) => {
     try {
-        const onboarding = await prisma.onboarding.findUnique({
-            where: { telefono: req.params.telefono },
+        const onboarding = await prisma.onboarding.findFirst({
+            where: { telefono: { in: variantesTelefono(req.params.telefono) } },
         });
         if (!onboarding) {
             res.status(404).json({ status: 'FAIL', error: 'onboarding_not_found' });
@@ -209,10 +220,11 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
             const usuariosAsalariados: typeof existingUser[] = [];
 
             for (const asala of asalariados) {
-                if (!asala.telefono) continue;
+                const telefonoAsalariado = normalizarTelefono(asala.telefono);
+                if (!telefonoAsalariado) continue;
 
                 const emailDado = typeof asala.email === 'string' ? asala.email.trim().toLowerCase() : '';
-                const asalaEmail = emailDado || `${asala.telefono}@pilotos.app`;
+                const asalaEmail = emailDado || `${telefonoAsalariado}@pilotos.app`;
 
                 // PIL-02: minos.Users es identidad COMPARTIDA del ecosistema. Un
                 // upsert aquí sobrescribía nombre y teléfono de quien ya existiera
@@ -229,7 +241,7 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
                             `El email ${asalaEmail} ya pertenece a un conductor de PilotOS. Usa otro email o revisa los datos con esa persona.`,
                         );
                     }
-                    if (existente.telefono && existente.telefono !== asala.telefono) {
+                    if (existente.telefono && normalizarTelefono(existente.telefono) !== telefonoAsalariado) {
                         throw new ConflictoAlta(
                             'telefono_no_coincide',
                             `El email ${asalaEmail} ya pertenece a una cuenta con otro teléfono. Comprueba los datos con la persona antes de darla de alta.`,
@@ -240,7 +252,7 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
                 const asalariadoUser = existente ?? await tx.minosUser.create({
                     data: {
                         nombre: asala.nombre || 'Conductor',
-                        telefono: asala.telefono,
+                        telefono: telefonoAsalariado,
                         email: asalaEmail,
                         password_hash: PLACEHOLDER_PASSWORD_HASHES[2], // 'ONBOARDING_ASALARIADO_INITIAL'
                         role: 'user',
@@ -352,7 +364,7 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
 
             // 10. Marcar onboarding completado
             await tx.onboarding.update({
-                where: { telefono: req.params.telefono },
+                where: { telefono: onboarding.telefono },
                 data: { completado: true },
             });
 

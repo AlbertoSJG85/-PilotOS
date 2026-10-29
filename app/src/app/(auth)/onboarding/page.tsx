@@ -120,10 +120,11 @@ export default function OnboardingPage() {
   function validateStep(): string | null {
     switch (step) {
       case 0:
-        if (!data.telefono.trim()) return 'El teléfono es obligatorio';
+        if (!data.telefono.trim()) return 'Escribe tu número de móvil';
+        if (!/^\d{9,15}$/.test(limpiarTelefono(data.telefono))) return 'El teléfono no parece correcto. Escríbelo con el 34 delante y sin espacios, por ejemplo 34600123456.';
         if (!data.nombre_patron.trim()) return 'El nombre del Propietario es obligatorio';
         if (!data.email_patron.trim()) return 'El Gmail es obligatorio (se usará para Google Drive)';
-        if (!data.email_patron.trim().toLowerCase().endsWith('@gmail.com')) return 'Debe ser una cuenta Gmail válida (@gmail.com)';
+        if (!data.email_patron.trim().toLowerCase().endsWith('@gmail.com')) return 'Tiene que ser una cuenta de Gmail (acaba en @gmail.com). Si no tienes, puedes crear una gratis en gmail.com y volver aquí.';
         return null;
       case 1:
         if (!data.matricula.trim()) return 'La matrícula es obligatoria';
@@ -181,7 +182,7 @@ export default function OnboardingPage() {
 
     try {
       await completarOnboarding(data.telefono);
-      router.replace('/login');
+      router.replace('/login?alta=ok');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al completar el onboarding';
       setError(msg);
@@ -232,14 +233,18 @@ export default function OnboardingPage() {
               <div className="space-y-4">
                 <CardTitle>Datos del Propietario</CardTitle>
                 <CardDescription>Información del titular de la licencia y empresa.</CardDescription>
-                <Input
-                  label="Teléfono Móvil *"
-                  type="tel"
-                  placeholder="34600000001"
-                  value={data.telefono}
-                  onChange={(e) => set('telefono', e.target.value)}
-                  required
-                />
+                <div>
+                  <Input
+                    label="Teléfono Móvil *"
+                    type="tel"
+                    placeholder="34600123456"
+                    value={data.telefono}
+                    onChange={(e) => set('telefono', e.target.value)}
+                    onBlur={() => set('telefono', limpiarTelefono(data.telefono))}
+                    required
+                  />
+                  <p className="mt-1 text-xs text-zinc-500">Tu móvil, con el 34 delante y sin espacios. Por ejemplo: 34600123456. Con este número entrarás siempre en PilotOS.</p>
+                </div>
                 <Input
                   label="Nombre completo del Propietario *"
                   placeholder="Juan García López"
@@ -256,7 +261,10 @@ export default function OnboardingPage() {
                     onChange={(e) => set('email_patron', e.target.value)}
                     required
                   />
-                  <p className="mt-1 text-xs text-zinc-500">Se usará para Google Drive (facturas y documentos)</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Tiene que ser de Gmail (acaba en @gmail.com). Aquí te llegará el código para entrar la primera vez y se
+                    usará para guardar tus facturas y documentos en Google Drive. Si no tienes, puedes crear una gratis en gmail.com.
+                  </p>
                 </div>
                 <Input
                   label="NIF / CIF (opcional)"
@@ -264,12 +272,14 @@ export default function OnboardingPage() {
                   value={data.nif_cif}
                   onChange={(e) => set('nif_cif', e.target.value)}
                 />
+                <p className="mt-1 text-xs text-zinc-500">Tu DNI con la letra, o el CIF si tienes empresa. Puedes dejarlo vacío.</p>
                 <Input
                   label="Nombre comercial (Opcional)"
                   placeholder="Taxi García"
                   value={data.nombre_comercial}
                   onChange={(e) => set('nombre_comercial', e.target.value)}
                 />
+                <p className="mt-1 text-xs text-zinc-500">Solo si tu taxi tiene un nombre de empresa. Si no, déjalo vacío.</p>
                 <div className="space-y-1.5">
                   <label className="block text-sm font-medium text-zinc-300">Tipo de actividad</label>
                   <select
@@ -307,6 +317,7 @@ export default function OnboardingPage() {
                     min={0}
                   />
                 </div>
+                <p className="mt-1 text-xs text-zinc-500">Matrícula: la que va en el coche. Km actuales: los kilómetros que marca ahora el cuentakilómetros.</p>
                 <Input
                   label="Marca y modelo del coche *"
                   placeholder="Toyota Corolla"
@@ -428,6 +439,10 @@ export default function OnboardingPage() {
                             />
                           </div>
                         </div>
+                        <p className="text-[10px] text-zinc-500">
+                          Reparto (%): el conductor se queda con ese porcentaje de lo que recauda (por ejemplo 40).
+                          Fijo diario (€): cobra esa cantidad cada día que trabaja (por ejemplo 60).
+                        </p>
                       </div>
                     ))
                   )}
@@ -442,6 +457,7 @@ export default function OnboardingPage() {
                   <div>
                     <CardTitle>Gastos Fijos</CardTitle>
                     <CardDescription>Gastos mensuales (Autónomo, Seguro, Gestoría...)</CardDescription>
+                    <p className="mt-1 text-xs text-zinc-500">Son los que pagas aunque no trabajes. Es opcional: puedes pulsar Siguiente sin añadir nada.</p>
                   </div>
                   <Button type="button" size="sm" variant="outline" onClick={addGasto} className="gap-1 border-zinc-700 text-zinc-400 hover:bg-zinc-800">
                     <Plus className="h-4 w-4" /> Añadir
@@ -510,6 +526,9 @@ export default function OnboardingPage() {
               <div className="space-y-4">
                 <CardTitle>Confirmación Final</CardTitle>
                 <CardDescription>Revisa el resumen de tu PilotOS.</CardDescription>
+                <p className="text-xs text-zinc-500">
+                  Al pulsar Finalizar tu cuenta queda creada. Después, entra con tu teléfono: te enviaremos un código a tu Gmail para que elijas tu contraseña.
+                </p>
                 <div className="space-y-4 text-xs max-h-[450px] overflow-y-auto pr-1">
 
                   <div className="p-4 rounded-xl bg-zinc-800/60 border border-zinc-700 space-y-3">
@@ -600,6 +619,18 @@ export default function OnboardingPage() {
       </div>
     </div>
   );
+}
+
+/**
+ * Deja el teléfono como lo reconocen el login y GlorIA: solo cifras, con el 34
+ * delante. Quien escribe «600 12 34 56» o «+34 600…» queda igual que quien
+ * escribe 34600123456 (la misma regla que aplica el servidor).
+ */
+function limpiarTelefono(raw: string): string {
+  let t = raw.trim().replace(/[^\d+]/g, '');
+  t = t.replace(/^\+/, '').replace(/^00/, '').replace(/\D/g, '');
+  if (/^[6-9]\d{8}$/.test(t)) t = '34' + t;
+  return t;
 }
 
 function SummaryRow({ label, value }: { label: string; value: string }) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -32,7 +32,12 @@ export default function LoginPage() {
   const [password2, setPassword2] = useState('');
   // 'login': formulario normal. 'set-password': cuenta sin contrasena todavia
   // (creada antes de la Fase 1 de seguridad), hay que fijarla antes de entrar.
-  const [modo, setModo] = useState<'login' | 'set-password' | 'pedir-codigo' | 'restablecer'>('login');
+  const [modo, setModo] = useState<'login' | 'set-password' | 'pedir-codigo' | 'restablecer' | 'activar'>('login');
+  // Viene de terminar el alta: se le explica qué hacer ahora (el siguiente paso, sin esto, no es obvio).
+  const [recienAlta, setRecienAlta] = useState(false);
+  useEffect(() => {
+    setRecienAlta(new URLSearchParams(window.location.search).get('alta') === 'ok');
+  }, []);
   const [codigo, setCodigo] = useState('');
   const [aviso, setAviso] = useState('');
   const [error, setError] = useState('');
@@ -84,6 +89,25 @@ export default function LoginPage() {
       setModo('restablecer');
     } catch (err: unknown) {
       setError(err instanceof ApiError ? err.message : 'No se pudo enviar el codigo');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Primera vez: la cuenta existe pero aún no tiene contraseña. Se pide el
+  // código directamente; antes había que escribir una contraseña cualquiera
+  // en el login para que la app se diera cuenta y lo mandara.
+  async function handleActivar(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      await pedirCodigoActivacion(telefono.trim());
+      // Respuesta neutra a propósito: no se dice si el teléfono existe.
+      setAviso('Si ese teléfono tiene una cuenta por activar, te hemos enviado un código a su correo. Si en unos minutos no llega nada, probablemente ya la activaste: vuelve atrás y entra con tu contraseña.');
+      setModo('set-password');
+    } catch (err: unknown) {
+      setError(err instanceof ApiError ? err.message : 'No se pudo enviar el código');
     } finally {
       setLoading(false);
     }
@@ -181,6 +205,22 @@ export default function LoginPage() {
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-8 shadow-xl">
           {modo === 'login' ? (
             <>
+              {recienAlta && (
+                <div className="mb-6 rounded-lg border border-emerald-500/30 bg-emerald-950/20 px-3 py-3 text-sm text-emerald-300">
+                  <p className="font-semibold">¡Listo, ya tienes tu cuenta!</p>
+                  <p className="mt-1 text-emerald-200/80">
+                    Ahora tienes que activarla: te enviaremos un código a tu correo y con él eliges tu contraseña.
+                  </p>
+                  <Button
+                    type="button"
+                    size="lg"
+                    className="mt-3 w-full"
+                    onClick={() => { setModo('activar'); setError(''); }}
+                  >
+                    Activar mi cuenta
+                  </Button>
+                </div>
+              )}
               <p className="mb-6 text-sm text-zinc-400 text-center">
                 Introduce tu telefono y contrasena para acceder
               </p>
@@ -220,6 +260,50 @@ export default function LoginPage() {
                   onClick={() => { setModo('pedir-codigo'); setError(''); setPassword(''); }}
                 >
                   He olvidado mi contrasena
+                </button>
+
+                <button
+                  type="button"
+                  className="w-full text-center text-xs text-zinc-400 hover:text-zinc-200"
+                  onClick={() => { setModo('activar'); setError(''); setPassword(''); }}
+                >
+                  Es mi primera vez: activar mi cuenta
+                </button>
+              </form>
+            </>
+          ) : modo === 'activar' ? (
+            <>
+              <p className="mb-6 text-sm text-zinc-400 text-center">
+                Escribe tu teléfono y te enviaremos un código al correo con el que te diste de alta.
+              </p>
+
+              <form onSubmit={handleActivar} className="space-y-5">
+                <Input
+                  label="Telefono"
+                  type="tel"
+                  placeholder="34600123456"
+                  value={telefono}
+                  onChange={(e) => setTelefono(e.target.value)}
+                  required
+                  autoComplete="tel"
+                />
+
+                {error && (
+                  <p className="rounded-lg bg-red-900/30 border border-red-800/50 px-3 py-2 text-sm text-red-400">
+                    {error}
+                  </p>
+                )}
+
+                <Button type="submit" className="w-full" size="lg" disabled={loading}>
+                  {loading ? 'Enviando...' : 'Enviarme el codigo'}
+                </Button>
+
+                <button
+                  type="button"
+                  className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300"
+                  onClick={volverALogin}
+                >
+                  Volver
                 </button>
               </form>
             </>

@@ -10,6 +10,7 @@ import { Router, Request, Response } from 'express';
 import express from 'express';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
+import { variantesTelefono } from '../lib/telefono';
 import { clienteTieneFeaturePro } from '../middleware/billing-access.middleware';
 import { procesarYGuardarImagen } from '../services/storage.service';
 import { registrarDocumentoPendiente, analizarDocumentoRegistrado, hashDeBuffer } from '../services/ocrDocumentoVehiculo.service';
@@ -29,13 +30,9 @@ router.get('/usuario-por-telefono', async (req: Request, res: Response) => {
             return;
         }
 
-        // Dual-format normalization (same as RentOS)
-        const phoneVariants = [phone];
-        if (phone.startsWith('+')) {
-            phoneVariants.push(phone.substring(1)); // +34600... → 34600...
-        } else {
-            phoneVariants.push('+' + phone); // 34600... → +34600...
-        }
+        // Todas las formas equivalentes del número (con/sin "+", con/sin 34):
+        // WhatsApp lo manda como 34600123456 y la cuenta puede estar guardada de otra forma.
+        const phoneVariants = variantesTelefono(phone);
 
         const user = await prisma.minosUser.findFirst({
             where: {
@@ -477,7 +474,7 @@ router.post('/documentos-vehiculo', express.json({ limit: '15mb' }), async (req:
             }
         } else {
             const tel = subido_por_telefono!.trim();
-            const variantes = tel.startsWith('+') ? [tel, tel.slice(1)] : [tel, '+' + tel];
+            const variantes = variantesTelefono(tel);
             const user = await prisma.minosUser.findFirst({ where: { telefono: { in: variantes } } });
             if (!user) {
                 res.status(404).json({ status: 'FAIL', error: 'usuario_no_encontrado' });
