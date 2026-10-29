@@ -12,20 +12,20 @@ export async function getVehiculo(id: string): Promise<ApiResponse<Vehiculo>> {
 export async function createVehiculo(data: Partial<Vehiculo>): Promise<ApiResponse<Vehiculo>> {
   return apiFetch('/api/vehiculos', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: data,
   });
 }
 
 export async function updateVehiculo(id: string, data: Partial<Vehiculo>): Promise<ApiResponse<Vehiculo>> {
   return apiFetch(`/api/vehiculos/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify(data),
+    body: data,
   });
 }
 
 export async function assignVehiculoConductor(vehiculo_id: string, conductor_ids: string[]): Promise<ApiResponse<void>> {
   return apiFetch(`/api/vehiculos/${vehiculo_id}/conductores`, {
     method: 'POST',
-    body: JSON.stringify({ conductor_ids }),
+    body: { conductor_ids },
   });
 }

@@ -11,17 +11,34 @@ const router = Router();
 // GET /api/usuarios — Listar conductores del cliente
 router.get('/', requireAuth, requireClienteContext, async (req: AuthRequest, res: Response) => {
     try {
-        const where: any = { activo: true };
+        // Los quitados no se borran (conservan su historial de partes), pero
+        // tampoco molestan: solo salen si se piden, para poder reactivarlos.
+        const incluirInactivos = req.query.incluir_inactivos === '1';
+        const where: any = incluirInactivos ? {} : { activo: true };
         if (req.usuario?.role !== 'admin') where.cliente_id = req.usuario!.cliente_id;
 
+        const verDetalle = req.usuario?.es_patron === true || req.usuario?.role === 'admin';
         const conductores = await prisma.conductor.findMany({
             where,
             include: {
-                usuario: { select: { id: true, nombre: true, telefono: true, role: true } },
+                usuario: { select: { id: true, nombre: true, telefono: true, role: true, email: true, password_hash: true } },
                 vehiculosAsignados: { where: { activo: true }, include: { vehiculo: { select: { id: true, matricula: true } } } },
+                configuraciones: { where: { activo: true, fecha_fin: null }, orderBy: { fecha_inicio: 'desc' }, take: 1 },
             },
         });
-        res.json({ status: 'OK', data: conductores });
+
+        // El hash nunca sale; solo se dice si la cuenta ya se activó. El email
+        // y el reparto son cosas del patrón: un compañero no las ve.
+        const data = conductores.map(({ usuario, configuraciones, ...c }) => {
+            const { password_hash, email, ...usuarioPublico } = usuario;
+            return {
+                ...c,
+                usuario: verDetalle ? { ...usuarioPublico, email } : usuarioPublico,
+                cuenta_activada: !(PLACEHOLDER_PASSWORD_HASHES as readonly string[]).includes(password_hash),
+                ...(verDetalle ? { configuracion: configuraciones[0] ?? null } : {}),
+            };
+        });
+        res.json({ status: 'OK', data });
     } catch (err: any) {
         console.error('[USUARIOS] Error:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });
@@ -60,6 +77,38 @@ class ConflictoAlta extends Error {
         this.name = 'ConflictoAlta';
     }
 }
+const EMAIL_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MODELOS_REPARTO = ['PORCENTAJE', 'FIJO_DIARIO'];
+
+/**
+ * El reparto de un asalariado: porcentaje (0-100) o euros al día. La columna
+ * es Decimal(5,2): por encima de 999,99 la base de datos revienta con un 500,
+ * así que se corta aquí con un mensaje que el patrón entienda.
+ */
+export function validarReparto(modelo: unknown, valor: unknown): string | null {
+    if (typeof modelo !== 'string' || !MODELOS_REPARTO.includes(modelo)) {
+        return 'La condición económica debe ser reparto (%) o fijo diario (€).';
+    }
+    const n = Number(valor);
+    if (valor === null || valor === '' || !Number.isFinite(n) || n < 0) {
+        return 'Indica cuánto cobra el conductor (un número positivo).';
+    }
+    if (modelo === 'PORCENTAJE' && n > 100) return 'El porcentaje del conductor no puede pasar de 100.';
+    if (modelo === 'FIJO_DIARIO' && n > 999.99) return 'El fijo diario no puede pasar de 999,99 €.';
+    return null;
+}
+
+/** Parte del patrón según el modelo: en fijo diario no interviene (ver calculo.service). */
+function porcentajePatron(modelo: string, valor: number): number {
+    return modelo === 'PORCENTAJE' ? 100 - valor : 0;
+}
+
+/** Variantes con y sin "+" del mismo teléfono, como en el resto del ecosistema. */
+function variantesTelefono(tel: string): string[] {
+    const t = tel.trim();
+    return t.startsWith('+') ? [t, t.slice(1)] : [t, '+' + t];
+}
+
 // POST /api/usuarios — Crear conductor (Fase 3 RBAC: solo el patron puede dar de alta conductores)
 router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Response) => {
     try {
@@ -67,6 +116,27 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
         
         const { nombre, telefono, email, vehiculo_id, porcentaje_conductor, modelo_reparto } = req.body;
         if (!telefono) { res.status(400).json({ status: 'FAIL', error: 'missing_telefono' }); return; }
+
+        // Mismo listón que el onboarding. Sin email de verdad el conductor no
+        // podría activar su cuenta nunca: el código de activación va a su correo.
+        if (typeof nombre !== 'string' || !nombre.trim()) {
+            res.status(400).json({ status: 'FAIL', error: 'missing_nombre', message: 'El nombre del conductor es obligatorio.' });
+            return;
+        }
+        if (typeof email !== 'string' || !EMAIL_VALIDO.test(email.trim())) {
+            res.status(400).json({
+                status: 'FAIL', error: 'email_invalido',
+                message: 'Necesitamos el email del conductor: ahí recibirá el código para activar su cuenta.',
+            });
+            return;
+        }
+        const modeloElegido = modelo_reparto || 'PORCENTAJE';
+        const valorElegido = porcentaje_conductor ?? 50;
+        const errReparto = validarReparto(modeloElegido, valorElegido);
+        if (errReparto) {
+            res.status(400).json({ status: 'FAIL', error: 'reparto_invalido', message: errReparto });
+            return;
+        }
 
         const cliente_id = req.usuario.cliente_id;
         if (req.usuario.role !== 'admin'
@@ -91,6 +161,22 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
         // Ahora se comprueba antes. Solo se crea gente nueva; a alguien que ya
         // existe se le puede incorporar, pero **nunca modificando sus datos**, y
         // solo si no es ya conductor de otro cliente.
+        // Vehículo: el que se pida (de ESTE cliente) o, si el cliente solo tiene
+        // uno, ese — igual que hace el onboarding. Sin esta comprobación se
+        // podía enganchar al conductor al coche de otro cliente por su id.
+        let vehiculoAsignar: string | null = null;
+        if (vehiculo_id) {
+            const v = await prisma.vehiculo.findUnique({ where: { id: vehiculo_id }, select: { cliente_id: true } });
+            if (!v || !isSameTenant(req, v.cliente_id)) {
+                res.status(404).json({ status: 'FAIL', error: 'vehiculo_not_found' });
+                return;
+            }
+            vehiculoAsignar = vehiculo_id;
+        } else {
+            const vehiculos = await prisma.vehiculo.findMany({ where: { cliente_id, activo: true }, select: { id: true } });
+            if (vehiculos.length === 1) vehiculoAsignar = vehiculos[0].id;
+        }
+
         let usuarioAlta: { nombre: string | null; email: string | null; telefono: string | null } | null = null;
         const conductor = await prisma.$transaction(async (tx) => {
             // 1. MinosUser
@@ -124,6 +210,21 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
                 }
             }
 
+            // El login es por teléfono: dos cuentas con el mismo número se
+            // pisarían al entrar. Si ya lo usa OTRA cuenta, no se crea.
+            if (!existente) {
+                const telefonoUsado = await tx.minosUser.findFirst({
+                    where: { telefono: { in: variantesTelefono(telefono) } },
+                    select: { id: true },
+                });
+                if (telefonoUsado) {
+                    throw new ConflictoAlta(
+                        'telefono_en_uso',
+                        'Ese teléfono ya pertenece a otra cuenta. Comprueba el número con la persona.',
+                    );
+                }
+            }
+
             const user = existente ?? await tx.minosUser.create({
                 data: {
                     nombre: nombre || 'Conductor',
@@ -152,18 +253,18 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
                 data: {
                     cliente_id,
                     conductor_id: cond.id,
-                    modelo_reparto: modelo_reparto || 'PORCENTAJE',
-                    porcentaje_conductor: porcentaje_conductor ?? 50,
-                    porcentaje_patron: 100 - (porcentaje_conductor ?? 50),
+                    modelo_reparto: modeloElegido,
+                    porcentaje_conductor: Number(valorElegido),
+                    porcentaje_patron: porcentajePatron(modeloElegido, Number(valorElegido)),
                     cuota_pilotos: 0,
                     incluye_combustible_en_reparto: true,
                 },
             });
 
             // 4. Asignar vehículo si viene
-            if (vehiculo_id) {
+            if (vehiculoAsignar) {
                 await tx.vehiculoConductor.create({
-                    data: { vehiculo_id, conductor_id: cond.id, activo: true }
+                    data: { vehiculo_id: vehiculoAsignar, conductor_id: cond.id, activo: true }
                 });
             }
 
@@ -224,12 +325,66 @@ router.patch('/:id', requireAuth, requirePatron, async (req: AuthRequest, res: R
     try {
         const existing = await prisma.conductor.findUnique({
             where: { id: req.params.id },
-            select: { cliente_id: true, activo: true, es_patron: true },
+            select: {
+                cliente_id: true, activo: true, es_patron: true, usuario_id: true,
+                usuario: { select: { nombre: true, telefono: true, password_hash: true } },
+            },
         });
         if (!existing || !isSameTenant(req, existing.cliente_id)) {
             res.status(404).json({ status: 'FAIL', error: 'not_found' }); return;
         }
-        const { nombre, telefono, activo, cuota_ss_mensual } = req.body;
+        const { nombre, telefono, activo, cuota_ss_mensual, modelo_reparto, porcentaje_conductor } = req.body;
+
+        // Nombre y teléfono son de la persona, no del patrón (PIL-02: la fila de
+        // identidad es compartida y el login es por teléfono). Solo se pueden
+        // corregir mientras la cuenta no se ha activado — un error al teclear
+        // el alta — y nunca a un número que ya usa otra cuenta.
+        const cambiaNombre = typeof nombre === 'string' && nombre.trim() !== '' && nombre.trim() !== existing.usuario.nombre;
+        const cambiaTelefono = typeof telefono === 'string' && telefono.trim() !== '' && telefono.trim() !== existing.usuario.telefono;
+        if (cambiaNombre || cambiaTelefono) {
+            const cuentaActivada = !(PLACEHOLDER_PASSWORD_HASHES as readonly string[]).includes(existing.usuario.password_hash);
+            if (cuentaActivada) {
+                res.status(409).json({
+                    status: 'FAIL', error: 'cuenta_activada',
+                    message: 'Esta persona ya activó su cuenta: su nombre y su teléfono son suyos y no se pueden cambiar desde aquí.',
+                });
+                return;
+            }
+            if (cambiaTelefono) {
+                const enUso = await prisma.minosUser.findFirst({
+                    where: { telefono: { in: variantesTelefono(telefono) }, NOT: { id: existing.usuario_id } },
+                    select: { id: true },
+                });
+                if (enUso) {
+                    res.status(409).json({ status: 'FAIL', error: 'telefono_en_uso', message: 'Ese teléfono ya pertenece a otra cuenta.' });
+                    return;
+                }
+            }
+        }
+
+        // Condición económica. Se VERSIONA: la fila vigente se cierra y se abre
+        // otra, así los partes ya calculados conservan el reparto con el que se
+        // hicieron y los nuevos usan el actual.
+        let repartoNuevo: { modelo: string; valor: number; previa: any } | null = null;
+        if (modelo_reparto !== undefined || porcentaje_conductor !== undefined) {
+            if (existing.es_patron) {
+                res.status(400).json({ status: 'FAIL', error: 'reparto_solo_asalariados' });
+                return;
+            }
+            const previa = await prisma.configuracionEconomica.findFirst({
+                where: { cliente_id: existing.cliente_id, conductor_id: req.params.id, activo: true, fecha_fin: null },
+                orderBy: { fecha_inicio: 'desc' },
+            });
+            const modelo = modelo_reparto ?? previa?.modelo_reparto ?? 'PORCENTAJE';
+            const valor = porcentaje_conductor ?? (previa ? Number(previa.porcentaje_conductor) : 50);
+            const errReparto = validarReparto(modelo, valor);
+            if (errReparto) {
+                res.status(400).json({ status: 'FAIL', error: 'reparto_invalido', message: errReparto });
+                return;
+            }
+            const igual = previa && previa.modelo_reparto === modelo && Number(previa.porcentaje_conductor) === Number(valor);
+            if (!igual) repartoNuevo = { modelo, valor: Number(valor), previa };
+        }
 
         // Cuota de Seguridad Social del asalariado (F4, 2026-08-11). null o
         // vacio = no se le aplica descuento. Se valida el numero aqui porque
@@ -264,17 +419,39 @@ router.patch('/:id', requireAuth, requirePatron, async (req: AuthRequest, res: R
         const conductor = await prisma.conductor.update({
             where: { id: req.params.id },
             data: {
-                ...(activo !== undefined && { activo })
+                ...(activo !== undefined && { activo }),
+                ...(cuotaSS !== undefined && { cuota_ss_mensual: cuotaSS }),
             },
             include: { usuario: true }
         });
 
-        if (nombre || telefono) {
+        if (repartoNuevo) {
+            const { modelo, valor, previa } = repartoNuevo;
+            await prisma.$transaction(async (tx) => {
+                if (previa) {
+                    await tx.configuracionEconomica.update({ where: { id: previa.id }, data: { fecha_fin: new Date() } });
+                }
+                await tx.configuracionEconomica.create({
+                    data: {
+                        cliente_id: existing.cliente_id,
+                        conductor_id: conductor.id,
+                        modelo_reparto: modelo,
+                        porcentaje_conductor: valor,
+                        porcentaje_patron: porcentajePatron(modelo, valor),
+                        cuota_pilotos: previa?.cuota_pilotos ?? 0,
+                        incluye_combustible_en_reparto: previa?.incluye_combustible_en_reparto ?? true,
+                        notas: previa?.notas ?? null,
+                    },
+                });
+            });
+        }
+
+        if (cambiaNombre || cambiaTelefono) {
             await prisma.minosUser.update({
                 where: { id: conductor.usuario_id },
                 data: {
-                    ...(nombre && { nombre }),
-                    ...(telefono && { telefono })
+                    ...(cambiaNombre && { nombre: nombre.trim() }),
+                    ...(cambiaTelefono && { telefono: telefono.trim() })
                 }
             });
         }

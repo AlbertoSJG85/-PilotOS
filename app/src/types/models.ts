@@ -24,8 +24,13 @@ export interface Conductor {
   cliente_id: string;
   es_patron: boolean;
   activo: boolean;
-  usuario: Pick<Usuario, 'nombre' | 'telefono'> & { id?: number; role?: string };
+  usuario: Pick<Usuario, 'nombre' | 'telefono'> & { id?: number; role?: string; email?: string };
   vehiculosAsignados?: { vehiculo: Pick<Vehiculo, 'id' | 'matricula'> }[];
+  /** false = todavía no ha puesto contraseña (su nombre y teléfono aún se pueden corregir). */
+  cuenta_activada?: boolean;
+  /** Condición económica vigente. Solo la ve el propietario. Los decimales llegan como texto. */
+  configuracion?: { modelo_reparto: string; porcentaje_conductor: number | string } | null;
+  cuota_ss_mensual?: number | string | null;
 }
 
 export interface Vehiculo {

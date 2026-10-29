@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/layout';
 import { Card, Badge, Skeleton, Button, Input } from '@/components/ui';
-import { getVehiculos, createVehiculo, updateVehiculo, assignVehiculoConductor, getUsuarios, createConductor, updateConductor } from '@/lib/api';
+import { getVehiculos, createVehiculo, updateVehiculo, getUsuarios } from '@/lib/api';
+import { ConductoresFlota } from '@/components/features/conductores-flota';
 import { formatKm } from '@/lib/utils';
 import type { Vehiculo, Conductor } from '@/types';
 
@@ -15,21 +16,12 @@ export default function FlotaPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [showVehiculoForm, setShowVehiculoForm] = useState(false);
-  const [showConductorForm, setShowConductorForm] = useState(false);
   const [formVehiculo, setFormVehiculo] = useState<Partial<Vehiculo>>({});
-  const [formConductor, setFormConductor] = useState<{
-    id?: string;
-    nombre?: string;
-    telefono?: string;
-    email?: string;
-    vehiculo_id?: string;
-    porcentaje_conductor?: number;
-    modelo_reparto?: string;
-    activo?: boolean;
-  }>({});
 
-  const loadData = () => {
-    setLoading(true);
+  // `silencioso`: recarga sin tapar la pantalla con el esqueleto, para no cerrar
+  // formularios abiertos (p. ej. el de conductores) cuando algo cambia.
+  const loadData = (silencioso = false) => {
+    if (!silencioso) setLoading(true);
     Promise.all([
       getVehiculos().then((r) => { if (r.data) setVehiculos(r.data); }),
       getUsuarios().then((r) => { if (r.data) setConductores(r.data); }),
@@ -69,41 +61,6 @@ export default function FlotaPage() {
     }
   };
 
-  const handleSaveConductor = async () => {
-    try {
-      if (formConductor.id) {
-        await updateConductor(formConductor.id, formConductor);
-      } else {
-        await createConductor(formConductor);
-      }
-      setShowConductorForm(false);
-      setFormConductor({});
-      loadData();
-    } catch (e: unknown) {
-      alert('Error: ' + (e instanceof Error ? e.message : String(e)));
-    }
-  };
-
-  const handleToggleConductorActivo = async (c: Conductor) => {
-    if (confirm(`¿Estás seguro de ${c.activo ? 'desactivar' : 'activar'} este conductor?`)) {
-      try {
-        await updateConductor(c.id, { activo: !c.activo });
-        loadData();
-      } catch (e: any) {
-        alert('Error: ' + e.message);
-      }
-    }
-  };
-
-  const handleAssignVehiculo = async (vehiculo_id: string, conductor_ids: string[]) => {
-    try {
-      await assignVehiculoConductor(vehiculo_id, conductor_ids);
-      loadData();
-    } catch(e: any) {
-      alert('Error: ' + e.message);
-    }
-  };
-
   if (loading && vehiculos.length === 0) {
     return (
       <>
@@ -123,7 +80,7 @@ export default function FlotaPage() {
       {error && (
         <Card className="mb-6 py-6 text-center border-red-500/20 bg-red-500/5">
           <p className="text-red-400 font-medium">{error}</p>
-          <Button variant="outline" className="mt-4" onClick={loadData}>Reintentar</Button>
+          <Button variant="outline" className="mt-4" onClick={() => loadData()}>Reintentar</Button>
         </Card>
       )}
 
@@ -180,20 +137,15 @@ export default function FlotaPage() {
                   </div>
                   <div className="pt-2 border-t border-white/10 mt-2">
                     <p className="text-xs font-medium text-zinc-400 mb-1">Conductores asignados:</p>
-                    <div className="flex gap-2 items-center">
-                      <select 
-                        className="bg-zinc-800 text-sm p-1 rounded border border-zinc-700 flex-1 text-white"
-                        onChange={(e) => handleAssignVehiculo(v.id, Array.from(e.target.selectedOptions, option => option.value))}
-                        multiple
-                        size={2}
-                        defaultValue={v.conductores?.map((c: any) => c.conductor_id) || []}
-                      >
-                        {conductores.filter(c => c.activo).map(c => (
-                          <option key={c.id} value={c.id}>{c.usuario.nombre}</option>
-                        ))}
-                      </select>
-                      <span className="text-xs text-zinc-500">Ctrl+Click multi</span>
-                    </div>
+                    <p className="text-sm text-zinc-300">
+                      {(() => {
+                        const nombres = conductores
+                          .filter((c) => c.activo && (c.vehiculosAsignados ?? []).some((va) => va.vehiculo.id === v.id))
+                          .map((c) => c.usuario.nombre);
+                        return nombres.length > 0 ? nombres.join(', ') : 'Ninguno todavía';
+                      })()}
+                    </p>
+                    <p className="mt-1 text-[11px] text-zinc-600">Se cambian al editar cada conductor.</p>
                   </div>
                 </Card>
               ))}
@@ -202,66 +154,7 @@ export default function FlotaPage() {
         </div>
 
         {/* === SECCIÓN CONDUCTORES === */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-zinc-100">Conductores</h2>
-            <Button size="sm" onClick={() => { setFormConductor({}); setShowConductorForm(true); }}>
-              Añadir conductor
-            </Button>
-          </div>
-
-          {showConductorForm && (
-            <Card className="mb-4 space-y-4 p-4 border border-blue-500/30">
-              <h3 className="font-medium text-white">{formConductor.id ? 'Editar' : 'Añadir'} Conductor</h3>
-              <Input placeholder="Nombre" value={formConductor.nombre || ''} onChange={(e) => setFormConductor({ ...formConductor, nombre: e.target.value })} />
-              <Input placeholder="Teléfono" value={formConductor.telefono || ''} onChange={(e) => setFormConductor({ ...formConductor, telefono: e.target.value })} />
-              {!formConductor.id && (
-                <>
-                  <Input type="email" placeholder="Email (Opcional)" value={formConductor.email || ''} onChange={(e) => setFormConductor({ ...formConductor, email: e.target.value })} />
-                  <Input type="number" placeholder="Porcentaje conductor (%)" value={formConductor.porcentaje_conductor || 50} onChange={(e) => setFormConductor({ ...formConductor, porcentaje_conductor: Number(e.target.value) })} />
-                </>
-              )}
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleSaveConductor}>Guardar</Button>
-                <Button size="sm" variant="ghost" onClick={() => setShowConductorForm(false)}>Cancelar</Button>
-              </div>
-            </Card>
-          )}
-
-          {conductores.length === 0 ? (
-            <Card className="py-8 text-center text-zinc-500">Sin conductores registrados</Card>
-          ) : (
-            <div className="space-y-3">
-              {conductores.map((c) => (
-                <Card key={c.id} className={`flex flex-col gap-2 ${!c.activo ? 'opacity-50' : ''}`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-zinc-100">{c.usuario?.nombre}</p>
-                      <p className="text-sm text-zinc-500">{c.usuario?.telefono}</p>
-                    </div>
-                    <div className="flex gap-2 items-center">
-                      <Badge variant={c.es_patron ? 'warning' : 'info'}>
-                        {c.es_patron ? 'Propietario' : 'Asalariado'}
-                      </Badge>
-                      <Badge variant={c.activo ? 'success' : 'danger'}>
-                        {c.activo ? 'Activo' : 'Inactivo'}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="flex justify-end gap-2 mt-1 border-t border-white/5 pt-2">
-                     <Button size="sm" variant="ghost" onClick={() => { setFormConductor({ id: c.id, nombre: c.usuario.nombre, telefono: c.usuario.telefono }); setShowConductorForm(true); }}>Edit</Button>
-                     <Button size="sm" variant="ghost" onClick={() => handleToggleConductorActivo(c)}>{c.activo ? 'Desactivar' : 'Activar'}</Button>
-                  </div>
-                  {(c.vehiculosAsignados?.length ?? 0) > 0 && (
-                     <div className="text-xs text-zinc-500">
-                       Vehículos asignados: {c.vehiculosAsignados?.map(va => va.vehiculo.matricula).join(', ')}
-                     </div>
-                  )}
-                </Card>
-              ))}
-            </div>
-          )}
-        </div>
+        <ConductoresFlota vehiculos={vehiculos} onCambio={() => loadData(true)} />
       </div>
     </>
   );
