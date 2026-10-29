@@ -43,6 +43,10 @@ export interface PropuestaDocumento {
     matricula?: string;
     /** Nombres del catálogo de mantenimiento que el documento parece resolver. */
     mantenimientos_detectados: string[];
+    /** Qué es, en una frase para la persona (p. ej. "Verificación del taxímetro"). */
+    concepto?: string;
+    /** Meses de vigencia según los parámetros del mantenimiento (catálogo o del vehículo). */
+    vigencia_meses?: number;
     /** Km que aparecen en el documento. NO tocan el kilometraje oficial (ver más abajo). */
     km_documento?: number;
     /** Campos que el OCR no ha podido leer y la persona tendrá que rellenar. */
@@ -52,6 +56,33 @@ export interface PropuestaDocumento {
 // ─────────────────────────────────────────────────────────
 // Clasificación
 // ─────────────────────────────────────────────────────────
+
+function esEstacionItv(t: string): boolean {
+    return /inspecci[oó]n\s+t[eé]cnica|\bi\.?t\.?v\.?\b|estaci[oó]n\s+itv|ficha\s+t[eé]cnica/.test(t.toLowerCase());
+}
+
+/** Tiene pinta de factura de verdad: la palabra y alguna marca fiscal. */
+function esFacturaFiscal(t: string): boolean {
+    const l = t.toLowerCase();
+    return /\bfactura\b/.test(l) && /base\s+imponible|total\s+factura|i\.?g\.?i\.?c\b|\biva\b/.test(l);
+}
+
+/**
+ * Qué inspección cobra una factura de estación ITV. El tipo viene impreso
+ * ("210 TAXIMETRO", "001 PERIODICA") y es lo que decide qué vigencia corre:
+ * la ITV del coche y la verificación del taxímetro son mantenimientos
+ * distintos con parámetros distintos.
+ */
+export function inspeccionDeFactura(texto: string): string | undefined {
+    if (/tax[ií]metro/i.test(texto)) return 'ITV / verificacion del taximetro';
+    if (/per[ií]odica/i.test(texto)) return 'ITV del vehiculo';
+    return undefined;
+}
+
+const NOMBRE_LEGIBLE: Record<string, string> = {
+    'ITV / verificacion del taximetro': 'Verificación del taxímetro',
+    'ITV del vehiculo': 'ITV del vehículo',
+};
 
 /**
  * Decide qué es el documento por las palabras que aparecen. Si no lo tiene
@@ -69,8 +100,12 @@ export function clasificarDocumento(texto: string): TipoDocumentoVehiculo {
     const esTarjetaTransporte = /tarjeta\s+de\s+transporte|autorizaci[oó]n\s+de\s+transporte/.test(t);
     if (esTarjetaTransporte) return 'TARJETA_TRANSPORTE';
 
-    const esItv = /inspecci[oó]n\s+t[eé]cnica|\bi\.?t\.?v\.?\b|estaci[oó]n\s+itv|ficha\s+t[eé]cnica/.test(t);
-    if (esItv) return 'CERTIFICADO_ITV';
+    // Una FACTURA de una estación ITV nombra la inspección ("Inspección
+    // Técnica de Vehículos para la Seguridad S.A." es el emisor) pero no es el
+    // certificado: es una factura, con su total. Leída como certificado
+    // nunca se buscaba el importe y la persona tenía que escribirlo todo.
+    if (esEstacionItv(t) && esFacturaFiscal(t)) return 'FACTURA_TALLER';
+    if (esEstacionItv(t)) return 'CERTIFICADO_ITV';
 
     const esSeguro = /p[oó]liza|compa[ñn][ií]a\s+de\s+seguros|seguro\s+del?\s+veh[ií]culo|cobertura/.test(t);
     if (esSeguro) return 'POLIZA_SEGURO';
@@ -146,6 +181,9 @@ export function extraerImporteFactura(texto: string): number | undefined {
         // cualquier factura española. Se permite algo de ruido de OCR entre
         // la palabra y la cifra, pero no otra palabra con dígitos.
         new RegExp(String.raw`(?:^|\n)[^\n\d]{0,15}\btotal\b[^\n\d]{0,10}${CIFRA}`, 'i'),
+        // "... Descuento -4,00 TOTAL 49,26 Euros": el total en medio de la
+        // línea, pero solo si lo cierra la moneda. Sin ella no se arriesga.
+        new RegExp(String.raw`\btotal\s*[:.]?\s*€?\s*${CIFRA}\s*(?:€|euros?\b)`, 'i'),
     ];
 
     for (const patron of patrones) {
@@ -403,6 +441,18 @@ export function analizarDocumentoVehiculo(
     // extraerImporteFactura y por qué ya no se usa el lector de gasolinera.
     propuesta.fecha = extraerFechaFactura(texto) ?? fechas[0];
 
+    // Factura de una estación ITV: el mantenimiento lo dice el tipo de
+    // inspección impreso, no el barrido de palabras (el emisor se llama
+    // "Inspección Técnica..." y el pie legal cita "ITV" y "seguridad").
+    if (tipo === 'FACTURA_TALLER' && esEstacionItv(texto)) {
+        const insp = inspeccionDeFactura(texto);
+        propuesta.mantenimientos_detectados = insp ? [insp] : [];
+    }
+    if (propuesta.mantenimientos_detectados.length > 0) {
+        propuesta.concepto = propuesta.mantenimientos_detectados
+            .map((m) => NOMBRE_LEGIBLE[m] ?? m).join(', ');
+    }
+
     const total = extraerImporteFactura(texto);
     const base = extraerBaseImponible(texto);
     // Un total por debajo de la base imponible es imposible: si eso pasa, lo
@@ -417,7 +467,7 @@ export function analizarDocumentoVehiculo(
         propuesta.valida_hasta = extraerValidaHasta(texto);
         if (!propuesta.valida_hasta) propuesta.faltantes.push('valida_hasta');
     }
-    if (mantenimientos_detectados.length === 0) {
+    if (propuesta.mantenimientos_detectados.length === 0) {
         propuesta.faltantes.push('mantenimientos');
     }
 
@@ -457,6 +507,47 @@ async function matriculaDe(vehiculoId: string): Promise<string | undefined> {
     return v?.matricula ?? undefined;
 }
 
+/** DD/MM/YYYY + meses → DD/MM/YYYY. */
+export function fechaMasMeses(fecha: string, meses: number): string | undefined {
+    const d = aDate(fecha);
+    if (!d) return undefined;
+    d.setUTCMonth(d.getUTCMonth() + meses);
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    return `${dd}/${mm}/${d.getUTCFullYear()}`;
+}
+
+/**
+ * La vigencia sale de los PARÁMETROS del mantenimiento, no de leerla del
+ * papel: periodicidad propia del vehículo si la tiene, la del catálogo si no.
+ * Es la misma cuenta que hace `aplicarDocumentoConfirmado` al confirmar, así
+ * que lo que se enseña antes es lo que luego queda guardado. Si el papel ya
+ * trae una fecha de validez leída (ITV, tarjeta, póliza) se respeta.
+ * Nunca lanza: sin vigencia, la persona simplemente no la ve.
+ */
+async function completarVigencia(propuesta: PropuestaDocumento, vehiculoId: string): Promise<void> {
+    try {
+        for (const nombre of propuesta.mantenimientos_detectados) {
+            const mv = await prisma.mantenimientoVehiculo.findFirst({
+                where: { vehiculo_id: vehiculoId, activo: true, catalogo: { nombre } },
+                include: { catalogo: true },
+            });
+            const catalogo = mv?.catalogo
+                ?? await prisma.mantenimientoCatalogo.findFirst({ where: { nombre, activo: true } });
+            const meses = mv?.frecuencia_meses_personalizada ?? catalogo?.frecuencia_meses ?? null;
+            if (!meses) continue;
+            propuesta.vigencia_meses = meses;
+            if (propuesta.fecha && !propuesta.valida_hasta) {
+                propuesta.valida_hasta = fechaMasMeses(propuesta.fecha, meses);
+                propuesta.faltantes = propuesta.faltantes.filter((f) => f !== 'valida_hasta');
+            }
+            return;
+        }
+    } catch (err: any) {
+        console.warn('[DOC-VEHICULO] No se pudo calcular la vigencia:', err?.message);
+    }
+}
+
 export interface ResultadoRegistro {
     documento: { id: string; tipo: string; estado: string };
     propuesta: PropuestaDocumento;
@@ -477,6 +568,7 @@ export async function analizarYRegistrarDocumento(datos: {
 
     const matriculaVehiculo = await matriculaDe(datos.vehiculoId);
     const propuesta = analizarDocumentoVehiculo(ocr.texto, datos.tipoForzado, matriculaVehiculo);
+    await completarVigencia(propuesta, datos.vehiculoId);
 
     const documento = await prisma.documento.create({
         data: {
@@ -554,9 +646,10 @@ export async function analizarDocumentoRegistrado(
 
         const doc = await prisma.documento.findUnique({
             where: { id: documentoId },
-            select: { vehiculo: { select: { matricula: true } } },
+            select: { vehiculo_id: true, vehiculo: { select: { matricula: true } } },
         });
         const propuesta = analizarDocumentoVehiculo(ocr.texto, tipoForzado, doc?.vehiculo?.matricula);
+        if (doc?.vehiculo_id) await completarVigencia(propuesta, doc.vehiculo_id);
 
         await prisma.documento.update({
             where: { id: documentoId },

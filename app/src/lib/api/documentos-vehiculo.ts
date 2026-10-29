@@ -14,6 +14,10 @@ export interface PropuestaDocumento {
   matricula?: string;
   km_documento?: number;
   mantenimientos_detectados: string[];
+  /** Qué es, en una frase (p. ej. «Verificación del taxímetro»). */
+  concepto?: string;
+  /** Meses de vigencia según los parámetros del mantenimiento. */
+  vigencia_meses?: number;
   faltantes: string[];
 }
 

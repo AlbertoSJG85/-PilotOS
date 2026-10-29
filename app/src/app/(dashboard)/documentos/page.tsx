@@ -64,7 +64,8 @@ function Confirmacion({
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const esItv = ['CERTIFICADO_ITV', 'POLIZA_SEGURO', 'TARJETA_TRANSPORTE'].includes(propuesta.tipo);
+  const esItv = ['CERTIFICADO_ITV', 'POLIZA_SEGURO', 'TARJETA_TRANSPORTE'].includes(propuesta.tipo)
+    || propuesta.vigencia_meses !== undefined;
 
   async function enviar(aceptaOcr: boolean) {
     setError(null);
@@ -106,8 +107,14 @@ function Confirmacion({
       {!corrigiendo ? (
         <>
           <dl className="space-y-1 text-sm">
+            {propuesta.concepto && <Fila etiqueta="Qué es" valor={propuesta.concepto} />}
             {propuesta.fecha && <Fila etiqueta="Fecha" valor={propuesta.fecha} />}
-            {propuesta.valida_hasta && <Fila etiqueta={esItv ? 'Válida hasta' : 'Vence'} valor={propuesta.valida_hasta} />}
+            {propuesta.valida_hasta && (
+              <Fila
+                etiqueta={esItv ? 'Vigente hasta' : 'Vence'}
+                valor={propuesta.vigencia_meses ? `${propuesta.valida_hasta} (${propuesta.vigencia_meses} meses)` : propuesta.valida_hasta}
+              />
+            )}
             {propuesta.importe !== undefined && <Fila etiqueta="Importe" valor={formatCurrency(propuesta.importe)} />}
             {propuesta.km_documento !== undefined && (
               <Fila etiqueta="Km del documento" valor={`${propuesta.km_documento.toLocaleString('es-ES')} km`} />
@@ -353,7 +360,9 @@ export default function DocumentosPage() {
                 <Card key={doc.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-zinc-100">{ETIQUETA_TIPO[doc.tipo] ?? doc.tipo}</span>
+                      <span className="font-medium text-zinc-100">
+                        {doc.ocr_datos_extraidos?.concepto ?? ETIQUETA_TIPO[doc.tipo] ?? doc.tipo}
+                      </span>
                       {doc.corregido && (
                         <Badge variant="default" className="text-[10px] uppercase">Corregido a mano</Badge>
                       )}
