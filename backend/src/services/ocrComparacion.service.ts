@@ -296,7 +296,11 @@ export async function compararDocumentosConParte(parte_diario_id: string): Promi
 
         // 1. Total — con la coherencia interna del ticket comprobada (C-056).
         const importeTurno = importeTurnoTicket(datos);
-        if (importeTurno !== null && ingresoDeclarado > 0) {
+        // Declarar 0 € NO exime de la comparación (2026-11-10): antes se saltaba
+        // con `ingresoDeclarado > 0`, y un parte con 0 € frente a un ticket de
+        // 200 € —el caso de hurto más claro— no avisaba. Si el ticket no trae
+        // importe del turno (turno vacío), `importeTurno` es null y no se compara.
+        if (importeTurno !== null) {
             const pTotal = importeTurno.valor;
             const diff = Math.abs(pTotal - ingresoDeclarado);
             if (diff > TOLERANCIA_TAXIMETRO_EUR) {

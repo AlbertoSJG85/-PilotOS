@@ -276,3 +276,33 @@ describe('compararAcumulados (vía compararDocumentosConParte)', () => {
         expect(r.discrepancias_por_doc['doc2'].find((d) => d.campo === 'borrados')).toBeDefined();
     });
 });
+
+describe('importe del turno: declarar 0 € no exime de la comparación (2026-11-10)', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.anomalia.deleteMany.mockResolvedValue({});
+        prismaMock.documento.update.mockResolvedValue({});
+        prismaMock.anomalia.create.mockImplementation(async ({ data }: any) => ({ id: 'anom-1', ...data }));
+        prismaMock.parteDiario.findFirst.mockResolvedValue(null); // sin ticket anterior: solo cuenta el total
+        prismaMock.parteDiario.findMany.mockResolvedValue([]);
+    });
+
+    it('parte con 0 € frente a un ticket de 200 € → discrepancia de total', async () => {
+        prismaMock.parteDiario.findUnique.mockResolvedValue(
+            parteActual({ parc_total: 200 }, 1000, 1064.9, 0),
+        );
+        const r = await compararDocumentosConParte('p2');
+        const disc = r.discrepancias_por_doc['doc2'] ?? [];
+        expect(disc.find((d) => d.campo === 'total')).toMatchObject({ declarado: 0, detectado: 200 });
+        expect(prismaMock.anomalia.create).toHaveBeenCalled();
+    });
+
+    it('parte con 0 € y ticket sin importe de turno (turno vacío) → no se compara nada', async () => {
+        prismaMock.parteDiario.findUnique.mockResolvedValue(
+            parteActual({ parc_total: undefined, importe: undefined }, 1000, 1064.9, 0),
+        );
+        const r = await compararDocumentosConParte('p2');
+        const disc = r.discrepancias_por_doc['doc2'] ?? [];
+        expect(disc.find((d) => d.campo === 'total')).toBeUndefined();
+    });
+});

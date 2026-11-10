@@ -178,8 +178,15 @@ export async function analizarImagen(imagenPath: string): Promise<ImagenAnalisis
  * comprueba esta tubería entera. Si alguien cambia estos parámetros y ese
  * test se pone rojo, ha roto la lectura de tickets reales.
  */
+function sufijoTemporal(): string {
+    return `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 async function prepararImagenParaOcr(imagenPath: string): Promise<string> {
-    const salida = imagenPath.replace(/\.(jpe?g|png|webp)$/i, '') + '.ocr.png';
+    // Nombre único: con uno fijo, dos lecturas de la misma foto a la vez se
+    // pisaban el temporal (una lo borraba mientras la otra lo leía). Lo
+    // destapaban los tests de la foto real al correr en paralelo.
+    const salida = `${imagenPath.replace(/\.(jpe?g|png|webp)$/i, '')}.${sufijoTemporal()}.ocr.png`;
     const meta = await sharp(imagenPath).metadata();
     // Tope de 5000 px para que una foto enorme no dispare la memoria del
     // servidor: por encima de eso Tesseract tampoco mejora.
@@ -233,7 +240,7 @@ async function prepararImagenParaOcr(imagenPath: string): Promise<string> {
  * se probó, y deja los dos tickets reales en 0 de 4 datos correctos.
  */
 async function prepararDocumentoParaOcr(imagenPath: string): Promise<string> {
-    const salida = imagenPath.replace(/\.(jpe?g|png|webp)$/i, '') + '.doc.png';
+    const salida = `${imagenPath.replace(/\.(jpe?g|png|webp)$/i, '')}.${sufijoTemporal()}.doc.png`;
     const gris = sharp(imagenPath).grayscale();
     const { data, info } = await gris.clone().raw().toBuffer({ resolveWithObject: true });
     const fondo = await gris.clone().blur(25).raw().toBuffer();
@@ -332,13 +339,28 @@ async function intentarConVision(imagenPath: string, contexto: string): Promise<
     }
 
     return {
-        texto: t.texto,
+        texto: limpiarTextoOcr(t.texto),
         confianza: t.legible && t.dudas.length === 0 ? CONFIANZA_VISION_SEGURA : CONFIANZA_VISION_CON_DUDAS,
         legible: t.legible,
         tuberia: 'vision',
-        dudas: t.dudas,
+        dudas: t.dudas.map(limpiarTextoOcr),
         modelo: t.modelo,
     };
+}
+
+/**
+ * Quita los caracteres de control del texto leído (2026-11-10).
+ *
+ * Con el ticket de "LISTADO DE TURNO" OpenAI devolvió dos veces un carácter de
+ * control donde el papel lleva el "€": `\u0002` en una lectura y `\u0000`
+ * (NUL) en otra. PostgreSQL no admite NUL en un texto, así que guardar el
+ * documento fallaba con "invalid byte sequence for encoding UTF8: 0x00" y la
+ * subida del ticket daba error 500: el parte no se podía enviar. Se sustituyen
+ * por un espacio (no por nada, para no pegar dos palabras o cifras) y se
+ * conservan el salto de línea y el tabulador.
+ */
+export function limpiarTextoOcr(texto: string): string {
+    return texto.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ');
 }
 
 export async function extraerTextoImagen(
@@ -403,7 +425,7 @@ async function reconocer(ruta: string): Promise<OCRResult> {
             }
         },
     });
-    return { texto: data.text, confianza: data.confidence, legible: data.confidence >= UMBRAL_CONFIANZA };
+    return { texto: limpiarTextoOcr(data.text), confianza: data.confidence, legible: data.confidence >= UMBRAL_CONFIANZA };
 }
 
 // ─────────────────────────────────────────────────────────
@@ -546,6 +568,13 @@ export interface DatosTaximetro {
     // Legacy (backward compat con ocrComparacion.service.ts anterior)
     importe?: number;
 
+    /**
+     * Qué modelo de ticket se reconoció. `taxitronic`: acumulado + campos del
+     * turno con "P " + Borrados. `listado_turno_taxi`: "LISTADO DE TURNO" /
+     * "LISTADO DE TAXI" con campos numerados (1.KM TOTALES, E12.TOTAL RECAUD...).
+     */
+    formato?: 'taxitronic' | 'listado_turno_taxi';
+
     valido: boolean;
     errores: string[];
 }
@@ -642,6 +671,297 @@ function extractarSeccionTaximetro(t: string) {
     return { parcText: t, acumText: '' };
 }
 
+// ─────────────────────────────────────────────────────────
+// Modelo "LISTADO DE TURNO / LISTADO DE TAXI" (2026-11-10)
+// ─────────────────────────────────────────────────────────
+//
+// El taxímetro de la tía de Alberto no es un Taxitronic. Imprime los mismos
+// datos clave con otros nombres y en otro orden:
+//
+//     LISTADO DE TURNO              354   <- nº de listado = "Borrados"
+//     DNI / LM: 633-S.CRUZ / MAT / 12:40   09.11.26
+//     LISTADO DE TURNO                    <- bloque del turno (parcial)
+//       1.KM. TOTALES    14967,8
+//       2.KM. OCUPADOS    6826,1
+//       3.VIAJES            1575
+//       4.SUPLEMENTOS   € 695,10
+//      12.TOTAL SERV.   € 12621,00        <- = "Carreras" del Taxitronic
+//     E12.TOTAL RECAUD  € 13316,10        <- = "Total"
+//     LISTADO DE TAXI                     <- bloque del acumulado
+//       (los mismos campos)
+//     INI. FIN. KM.L. KM.O. IMP.          <- lista de viajes (no se usa)
+//
+// Lo que obliga a un lector propio, y no a añadir patrones al del Taxitronic:
+//   - Los mismos nombres salen en los dos bloques; solo la cabecera dice si
+//     es turno o acumulado. Sin ella, el primer "TOTAL RECAUD" que se
+//     encuentre puede ser el del taxi entero.
+//   - No imprime las líneas a cero. Un turno vacío (ticket 355 de prueba)
+//     trae la cabecera y nada más; el lector viejo habría cogido entonces los
+//     47.139 € del taxi como importe del turno sin avisar.
+//   - No tiene "Borrados". El equivalente es el número correlativo junto al
+//     título: cada listado de turno impreso lo sube en uno (confirmado por
+//     Alberto con los tickets 354/355/356).
+//
+// Coherencia que se comprueba igual que en el Taxitronic:
+//   TOTAL SERV. + SUPLEMENTOS = TOTAL RECAUD (verificado en los tres tickets).
+
+// "tax[i1l]" : la I final es la letra que el OCR confunde más (1, l).
+const CABECERA_LISTADO = /listado\s+de\s+(turno|tax[i1l])\b/i;
+const INICIO_LISTA_VIAJES = /\bini\.?\s+fin\b/i;
+
+type CampoListado =
+    | 'km_totales' | 'km_ocupados' | 'viajes' | 'suplementos'
+    | 'salto' | 'incr_tiempo' | 'total_serv' | 'total_recaud';
+
+// Se reconoce cada dato por su NOMBRE, no por su posición ni por el número que
+// lleva delante: si un día sale en otro orden, o el OCR se come el "12.", el
+// dato sigue siendo el mismo. TOTAL RECAUD va antes que TOTAL SERV para que
+// ninguno de los dos se lleve la línea del otro.
+const CAMPOS_LISTADO: Array<{ campo: CampoListado; etiqueta: RegExp; euros?: boolean }> = [
+    { campo: 'total_recaud', etiqueta: /total\.?\s*recau\w*\.?/i, euros: true },
+    { campo: 'total_serv', etiqueta: /total\.?\s*serv\w*\.?/i, euros: true },
+    { campo: 'km_totales', etiqueta: /\bkm\.?\s*total\w*\.?/i },
+    { campo: 'km_ocupados', etiqueta: /\bkm\.?\s*ocup\w*\.?/i },
+    { campo: 'viajes', etiqueta: /\bviajes?\b\.?/i },
+    { campo: 'suplementos', etiqueta: /su.{0,2}lement\w*\.?/i, euros: true },
+    { campo: 'salto', etiqueta: /\bsalto\b\.?/i, euros: true },
+    { campo: 'incr_tiempo', etiqueta: /incr\w*\.?\s*tiempo\.?/i, euros: true },
+];
+
+/**
+ * Un IMPORTE en euros: cifra con exactamente dos decimales ("3,85",
+ * "41205,41", "5.937,45"). El ticket los imprime siempre así, y eso es lo que
+ * permite distinguirlos del "€" cuando el lector lo transcribe mal.
+ *
+ * El símbolo "€" no llega siempre igual (visto en el ticket de la tía con
+ * OpenAI, 2026-11-10): "€", "0", "03" ("12.TOTAL SERV.  03 3,85" — y se leyó
+ * 3,00 € en vez de 3,85 € sin ningún aviso), pegado a la cifra ("03,85") o
+ * como un carácter de control. Por eso, en un importe se toma la ÚLTIMA cifra
+ * con dos decimales de la línea y se ignora lo que haya delante.
+ */
+const IMPORTE_EUROS = /\d[\d.,]*[.,]\d{2}(?!\d)/g;
+
+/** Línea que, aparte de cifras y símbolos sueltos, no trae palabras (valor bajado de renglón). */
+const LINEA_SIN_PALABRAS = /^[^A-Za-z]*(?:eur[^A-Za-z]*)?$/i;
+
+function ultimoImporte(texto: string): string | undefined {
+    const m = texto.match(IMPORTE_EUROS);
+    if (!m) return undefined;
+    // "03,85" es "€" + "3,85" pegados: un cero delante de otra cifra no existe
+    // en un importe real ("0,85" lleva coma justo detrás del cero).
+    return m[m.length - 1].replace(/^0+(?=\d)/, '');
+}
+
+export function esListadoTurnoTaxi(t: string): boolean {
+    return /listado\s+de\s+tax[i1l]\b/i.test(t) || /total\.?\s*recau/i.test(t);
+}
+
+/**
+ * "88.490,1" -> 88490.1, "13316,10" -> 13316.1, "1575" -> 1575.
+ * El último separador es el decimal salvo que lleve detrás exactamente tres
+ * cifras (entonces es de miles). En este ticket los km llevan un decimal, los
+ * euros dos y los contadores ninguno, así que no hay ambigüedad.
+ */
+function numeroListado(s: string): number | undefined {
+    const x = s.replace(/[.,]+$/, '');
+    const ult = Math.max(x.lastIndexOf(','), x.lastIndexOf('.'));
+    let v: number;
+    if (ult === -1) {
+        v = Number(x);
+    } else {
+        const entero = x.slice(0, ult).replace(/[.,]/g, '');
+        const decimales = x.slice(ult + 1);
+        v = decimales.length === 3 ? Number(entero + decimales) : Number(`${entero}.${decimales}`);
+    }
+    return Number.isFinite(v) ? v : undefined;
+}
+
+function esEtiquetaOCabecera(linea: string): boolean {
+    return CABECERA_LISTADO.test(linea) || CAMPOS_LISTADO.some((c) => c.etiqueta.test(linea));
+}
+
+/**
+ * Parte el ticket por sus cabeceras y lee los campos de cada bloque.
+ * Lo que va antes de la primera cabecera (restos del ticket anterior, como
+ * "FIN: 12:41 0,0") y la lista de viajes del final no cuentan.
+ */
+function leerBloquesListado(lineas: string[]) {
+    const bloques: Record<'turno' | 'taxi', Partial<Record<CampoListado, number>>> = { turno: {}, taxi: {} };
+    const vistos = { turno: false, taxi: false };
+    let actual: 'turno' | 'taxi' | null = null;
+
+    for (let i = 0; i < lineas.length; i++) {
+        const linea = lineas[i];
+        const cab = linea.match(CABECERA_LISTADO);
+        if (cab) {
+            actual = cab[1].toLowerCase().startsWith('tur') ? 'turno' : 'taxi';
+            vistos[actual] = true;
+            continue;
+        }
+        if (INICIO_LISTA_VIAJES.test(linea)) { actual = null; continue; }
+        if (!actual) continue;
+
+        for (const { campo, etiqueta, euros } of CAMPOS_LISTADO) {
+            const m = linea.match(etiqueta);
+            if (!m) continue;
+            // El valor va DESPUÉS de la etiqueta: lo de delante es el código
+            // ("12.", "E12.") y no hay que confundirlo con la cifra.
+            const resto = linea.slice((m.index ?? 0) + m[0].length);
+            let crudo = euros ? ultimoImporte(resto) : resto.match(/(\d[\d.,]*)/)?.[1];
+            if (!crudo) {
+                // El valor bajado de renglón, saltando líneas en blanco: OpenAI
+                // las mete a veces entre la etiqueta y su valor (ticket 356).
+                let k = i + 1;
+                while (k < lineas.length && k <= i + 3 && lineas[k].trim() === '') k++;
+                const siguiente = lineas[k] ?? '';
+                if (!esEtiquetaOCabecera(siguiente) && LINEA_SIN_PALABRAS.test(siguiente)) {
+                    crudo = euros ? ultimoImporte(siguiente) : siguiente.match(/(\d[\d.,]*)/)?.[1];
+                }
+            }
+            const v = crudo ? numeroListado(crudo) : undefined;
+            // El primero que aparece en el bloque manda: no se pisa.
+            if (v !== undefined && bloques[actual][campo] === undefined) bloques[actual][campo] = v;
+            break;
+        }
+    }
+    return { bloques, vistos };
+}
+
+/** El número correlativo del listado ("LISTADO DE TURNO   354"): hace de Borrados. */
+function numeroDeListado(lineas: string[]): number | undefined {
+    const i = lineas.findIndex((l) => /listado\s+de\s+turno/i.test(l));
+    if (i < 0) return undefined;
+    const enLaLinea = lineas[i].match(/listado\s+de\s+turno\s*[:.]?\s*(?:n[oº°.]*\s*)?(\d{1,7})\s*$/i);
+    if (enLaLinea) return Number(enLaLinea[1]);
+    // El transcriptor puede bajarlo (o subirlo) a su propia línea.
+    for (const j of [i + 1, i - 1]) {
+        const m = lineas[j]?.match(/^\s*(?:n[oº°.]*\s*)?(\d{1,7})\s*$/i);
+        if (m) return Number(m[1]);
+    }
+    return undefined;
+}
+
+function redondear(v: number, decimales: number): number {
+    const f = 10 ** decimales;
+    return Math.round(v * f) / f;
+}
+
+export function validarListadoTurnoTaxi(t: string): DatosTaximetro {
+    const errores: string[] = [];
+    const lineasCrudas = t.split('\n');
+
+    // Fecha y hora, de la cabecera del ticket (desde el primer "LISTADO DE
+    // TURNO" hasta el bloque siguiente) y del texto SIN normalizar. Así no se
+    // cuela la hora de un viaje del ticket anterior que haya quedado encima.
+    const iTitulo = lineasCrudas.findIndex((l) => CABECERA_LISTADO.test(l));
+    const iSiguiente = iTitulo >= 0
+        ? lineasCrudas.findIndex((l, k) => k > iTitulo && CABECERA_LISTADO.test(l))
+        : -1;
+    const cabecera = iTitulo >= 0
+        ? lineasCrudas.slice(iTitulo, iSiguiente > 0 ? iSiguiente : undefined).join('\n')
+        : t;
+    const fecha = extractDate(cabecera) ?? extractDate(t) ?? undefined;
+    const hora = extractTime(cabecera) ?? undefined;
+    // "LM: 633-S.CRUZ" es la licencia municipal. "LICENCIA No 1" es un número
+    // interno del aparato y no sirve.
+    const licencia = cabecera.match(/\bL\.?\s?M\.?\s*[:.]?\s*(\d+)/i)?.[1];
+
+    // Sin normalizarNumerosOcr: esa limpieza está hecha para el ruido de
+    // Tesseract (separadores que se leen como » ; "), y aquí estorba. Con el
+    // "€" leído como "03" (`03 12,10`) la regla de "decimal perdido" pegaba el
+    // "03" y el "12" en "03.12,10" y se perdía el importe. Las cifras de este
+    // ticket se leen por su forma (ver IMPORTE_EUROS).
+    const lineas = lineasCrudas;
+    const { bloques, vistos } = leerBloquesListado(lineas);
+    const turno = bloques.turno;
+    const taxi = bloques.taxi;
+    const acum_borrados = numeroDeListado(lineas);
+
+    const libre = (b: Partial<Record<CampoListado, number>>) =>
+        b.km_totales !== undefined && b.km_ocupados !== undefined && b.km_totales >= b.km_ocupados
+            ? redondear(b.km_totales - b.km_ocupados, 1)
+            : undefined;
+
+    // Coherencia del turno: TOTAL SERV. + SUPLEMENTOS = TOTAL RECAUD. Misma
+    // regla que en el Taxitronic: si no cuadra, mandan las dos que suman.
+    // Si SUPLEMENTOS no viene es porque es cero y no se imprime: entonces no
+    // se reconstruye nada, se queda el TOTAL RECAUD tal y como se leyó.
+    const totalCoherente = (b: Partial<Record<CampoListado, number>>) => {
+        if (b.total_serv !== undefined && b.suplementos !== undefined) {
+            const suma = redondear(b.total_serv + b.suplementos, 2);
+            if (b.total_recaud === undefined || Math.abs(suma - b.total_recaud) > 1) {
+                return { valor: suma, reconstruido: true };
+            }
+        }
+        return { valor: b.total_recaud, reconstruido: false };
+    };
+    const totTurno = totalCoherente(turno);
+    let parc_total = totTurno.valor;
+    const parc_total_reconstruido = totTurno.reconstruido;
+    // También en el acumulado, a diferencia del Taxitronic: con el ticket 355,
+    // roto justo por esa cifra, OpenAI transcribió "E12.TOTAL RECAUD 4713"
+    // (el papel pone 47139,01) sin declarar ninguna duda. Contra 4713 la
+    // comparación entre tickets daba un desplome imposible del acumulado.
+    const acum_total = totalCoherente(taxi).valor;
+
+    // ── Validación ──
+    const turnoVacio = Object.keys(turno).length === 0;
+    if (!vistos.turno) {
+        errores.push('No se encontró el bloque LISTADO DE TURNO en el ticket');
+    } else if (turnoVacio) {
+        // Punto muerto detectado con el ticket 355: el turno sale en blanco y
+        // lo único con cifras es el acumulado. Nunca se toma el acumulado por
+        // el turno; el ticket se queda para revisar a mano.
+        errores.push('El LISTADO DE TURNO viene vacío: el ticket no trae los datos del turno');
+    } else if (!parc_total) {
+        errores.push('No se pudo detectar el importe del turno (E12. TOTAL RECAUD)');
+    }
+    if (!fecha) errores.push('No se detectó fecha en el ticket');
+
+    // El turno es una parte del acumulado: no puede ser mayor. Si lo es, una
+    // de las dos cifras está mal leída (o el taxímetro se reinició), y
+    // comparar contra ella daría avisos falsos.
+    const parejas: Array<[string, number | undefined, number | undefined]> = [
+        ['TOTAL RECAUD', parc_total, acum_total],
+        ['TOTAL SERV.', turno.total_serv, taxi.total_serv],
+        ['VIAJES', turno.viajes, taxi.viajes],
+        ['KM. TOTALES', turno.km_totales, taxi.km_totales],
+    ];
+    for (const [nombre, p, a] of parejas) {
+        if (p !== undefined && a !== undefined && p > a + 0.01) {
+            errores.push(`El turno marca más ${nombre} (${p}) que el acumulado del taxi (${a}): una de las dos cifras está mal leída`);
+        }
+    }
+
+    return {
+        fecha,
+        hora,
+        licencia,
+        acum_num_servicios: taxi.viajes,
+        acum_carreras: taxi.total_serv,
+        acum_suplementos: taxi.suplementos,
+        acum_total,
+        acum_dist_total: taxi.km_totales,
+        acum_dist_ocupado: taxi.km_ocupados,
+        acum_dist_libre: libre(taxi),
+        acum_borrados,
+        parc_num_servicios: turno.viajes,
+        parc_carreras: turno.total_serv,
+        parc_suplementos: turno.suplementos,
+        parc_total,
+        parc_total_reconstruido,
+        // Los km de este ticket vienen siempre en km con un decimal: no se
+        // aplica la conversión metros→km del Taxitronic.
+        parc_dist_total: turno.km_totales,
+        parc_dist_ocupado: turno.km_ocupados,
+        parc_dist_libre: libre(turno),
+        importe: parc_total,
+        formato: 'listado_turno_taxi',
+        valido: errores.length === 0,
+        errores,
+    };
+}
+
 /**
  * Valida y extrae datos estructurados de un ticket de taxímetro español.
  * Extrae acumulados (incluyendo Borrados) y parciales del turno (Total, Dist.Total).
@@ -655,6 +975,10 @@ export function validarTicketTaximetro(texto: string): DatosTaximetro {
         .replace(/[̀-ͯ]/g, '')
         .replace(/\r\n/g, '\n')
         .replace(/[ \t]+/g, ' ');
+
+    // Otro modelo de taxímetro, otro papel: se lee con su propio lector y el
+    // del Taxitronic no se toca (ver validarListadoTurnoTaxi).
+    if (esListadoTurnoTaxi(t)) return validarListadoTurnoTaxi(t);
 
     // La fecha y la hora se leen del texto SIN normalizar: la normalización
     // toca los símbolos entre dígitos y estropearía "21:50" o "08/08/26".
@@ -842,6 +1166,7 @@ export function validarTicketTaximetro(texto: string): DatosTaximetro {
         parc_tiempo_ocupado,
         parc_tiempo_on,
         importe: parc_total_corregido, // backward compat
+        formato: 'taxitronic',
         valido: errores.length === 0,
         errores,
     };

@@ -1,0 +1,27 @@
+{
+  "t354": {
+    "modelo": "gpt-4.1-mini",
+    "legible": true,
+    "dudas": [],
+    "texto": "LISTADO DE TURNO 354\nDNI: 00000000-X\nLM: 633-S. CRUZ\nMAT: 0000-XXX       09.11.26\n12:40\nLICENCIA No 1\nCONDUCTOR No 1\nTAXI No 1\nLISTADO DE TURNO\n1.KM. TOTALES          14967,8\n2.KM. OCUPADOS        6826,1\n3.VIAJES                1575\n4.SUPLEMENTOS      € 695,10\n5.SALTO                  € 6408,85\n11. INCR.TIEMPO       € 624,00\n12.TOTAL SERV.\n                              € 12621,00\nE12.TOTAL RECAUD\n                             € 13316,10\n\nREL. OCUPADO/LIBRE:       46 %\nRENDIMIENTO/km:             € 0,18\n\nLISTADO DE TAXI\n1.KM. TOTALES         88490,1\n2.KM. OCUPADOS      73058,3\n3.VIAJES                76509\n4.SUPLEMENTOS      € 5937,45\n5.SALTO                  € 4314,87\n11. INCR.TIEMPO       € 2558,46\n12.TOTAL SERV.\n                             € 41201,56\nE12.TOTAL RECAUD\n                             € 47139,01"
+  },
+  "t355": {
+    "modelo": "gpt-4.1-mini",
+    "legible": true,
+    "dudas": [],
+    "texto": "LISTADO DE TURNO  355\nDNI: 00000000-X\nLM: 633-S.CRUZ\nMAT: 0000-XXX           09.11.26\n12:41\nLICENCIA No             1\nCONDUCTOR No           1\nTAXI No                     1\n\nLISTADO DE TURNO\n\nLISTADO DE TAXI\n\n1.KM. TOTALES             88490,1\n2.KM. OCUPADOS           73058,3\n3.VIAJES                       76509\n4.SUPLEMENTOS          \u001e 5937,45\n5.SALTO                       \u001e 4314,87\n11.INCR.TIEMPO          \u001e 2558,46\n12.TOTAL SERV.               \u001e 41201,56\n\nE12.TOTAL RECAUD       \u001e 4713"
+  },
+  "t356": {
+    "modelo": "gpt-4.1-mini",
+    "legible": true,
+    "dudas": [],
+    "texto": "FIN: 12:41 0,0\n\nLISTADO DE TURNO 356\n\nDNI: 00000000-X\nLM: 633-S.CRUZ\nMAT: 0000-XXX\n12:42 09.11.26\n\nLICENCIA No 1\nCONDUCTOR No 1\nTAXI No 1\n\nLISTADO DE TURNO\n\n3.VIAJES 1\n12.TOTAL SERV. \u000203,85\nE12.TOTAL RECAUD \u000203,85\n\nLISTADO DE TAXI\n\n1.KM. TOTALES 88490,1\n2.KM. OCUPADOS 73058,3\n3.VIAJES 76510\n4.SUPLEMENTOS \u00025937,45\n5.SALTO \u00024314,87\n11.INCR.TIEMPO \u00022558,46\n12.TOTAL SERV.\n\n\u000241205,41\nE12.TOTAL RECAUD\n\n\u000247142,86\n\nINI. FIN. KM.L. KM.O. IMP"
+  },
+  "t356_euro_como_03": {
+    "modelo": "gpt-4.1-mini",
+    "legible": true,
+    "dudas": [],
+    "nota": "El € leído como 03: 12.TOTAL SERV.  03 3,85 (se guardó 3,00 en vez de 3,85 sin avisar)",
+    "texto": "FIN: 12:41 0,0\n\nLISTADO DE TURNO 356\n\nDNI: 00000000-X\nLM: 633-S.CRUZ\nMAT: 0000-XXX\n12:42 09.11.26\n\nLICENCIA No 1\nCONDUCTOR No 1\nTAXI No 1\n\nLISTADO DE TURNO\n\n3.VIAJES 1\n12.TOTAL SERV.  03 3,85\nE12.TOTAL RECAUD  03 3,85\n\nLISTADO DE TAXI\n\n1.KM. TOTALES 88490,1\n2.KM. OCUPADOS 73058,3\n3.VIAJES 76510\n4.SUPLEMENTOS  03 5937,45\n5.SALTO  03 4314,87\n11.INCR.TIEMPO  03 2558,46\n12.TOTAL SERV.\n 03 41205,41\nE12.TOTAL RECAUD\n 03 47142,86\n\nINI. FIN. KM.L. KM.O. IMP\n"
+  }
+}

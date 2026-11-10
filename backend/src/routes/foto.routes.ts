@@ -76,7 +76,10 @@ const router = Router();
  * "Borrados" lleva detrás un contador que sube de uno en uno, y no lo lee
  * como si fuera un importe.
  */
-const CONTEXTO_TICKET = 'ticket de taxímetro o de gasolinera, impreso en papel térmico';
+// La coletilla del euro: con el listado de turno de otro taxímetro, OpenAI
+// transcribió el "€" como "0", "03" o un carácter de control (2026-11-10). El
+// lector ya lo tolera (ocr.service, IMPORTE_EUROS), pero es mejor que no llegue así.
+const CONTEXTO_TICKET = 'ticket de taxímetro o de gasolinera, impreso en papel térmico. Transcribe el símbolo € tal cual (€), nunca como un número ni como otro carácter';
 const MAX_INTENTOS_REEMPLAZO = 2; // R-FT-003
 
 // ─────────────────────────────────────────────────────────
