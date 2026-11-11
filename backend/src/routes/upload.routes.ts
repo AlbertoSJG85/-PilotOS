@@ -62,7 +62,7 @@ router.post('/', upload.single('foto'), async (req: Request, res: Response) => {
 
 // Error handler — DEBE ir DESPUÉS del route para capturar errores de multer.
 // Convierte LIMIT_FILE_SIZE y MIME inválidos en respuestas HTTP claras (no 500).
-router.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+router.use((err: any, req: Request, res: Response, next: NextFunction) => {
     if (!err) return next();
     if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
         return res.status(413).json({ status: 'FAIL', error: 'file_too_large', message: 'El archivo supera 20 MB' });
@@ -70,7 +70,13 @@ router.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     if (err.message === 'No es una imagen') {
         return res.status(415).json({ status: 'FAIL', error: 'invalid_mime', message: 'Formato no soportado, usa JPG, PNG o HEIC' });
     }
-    console.error('[UPLOAD] Error no controlado:', err.message);
+    // Con esto se distingue sin preguntar al conductor si el móvil mandó la
+    // foto vacía o cortada (content-length pequeño) y desde qué navegador.
+    console.error('[UPLOAD] Error no controlado:', err.message, JSON.stringify({
+        content_length: req.get('content-length') ?? null,
+        content_type: req.get('content-type') ?? null,
+        user_agent: req.get('user-agent') ?? null,
+    }));
     return res.status(500).json({ status: 'FAIL', error: 'server_error', message: 'Error en upload' });
 });
 

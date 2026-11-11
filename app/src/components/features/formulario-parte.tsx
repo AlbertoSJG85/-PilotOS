@@ -12,6 +12,7 @@ import {
   vincularFoto,
 } from '@/lib/api';
 import { ApiError } from '@/lib/api/fetcher';
+import { prepararFoto, FotoIlegibleError } from '@/lib/utils';
 import type { VincularFotoResponse } from '@/lib/api/fotos';
 import { getSessionUser } from '@/lib/auth';
 import { Camera, ChevronLeft, ChevronRight, Check, AlertTriangle, Loader2 } from 'lucide-react';
@@ -161,8 +162,19 @@ export function FormularioParte({ vehiculos, returnPath = '/partes' }: Props) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
-  function handleFileChange(type: 'taxi' | 'gasoil', file: File | null) {
-    if (!file) return;
+  // La foto se copia y se reduce al elegirla, no al enviar: el envío llega
+  // pasos después y para entonces el móvil puede haber dejado de dar acceso
+  // al archivo (ver lib/utils/preparar-foto.ts).
+  async function handleFileChange(type: 'taxi' | 'gasoil', original: File | null) {
+    if (!original) return;
+    let file: File;
+    try {
+      file = await prepararFoto(original);
+    } catch (e) {
+      setError(e instanceof FotoIlegibleError ? e.message : 'No se pudo preparar la foto. Inténtalo de nuevo.');
+      return;
+    }
+    setError('');
     const url = URL.createObjectURL(file);
     if (type === 'taxi') { setTicketTaxi(file); setPreviewTaxi(url); setTaxiUploaded(false); }
     else {

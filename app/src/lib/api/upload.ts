@@ -1,4 +1,5 @@
 import { ApiError } from './fetcher';
+import { prepararFoto, FotoIlegibleError } from '../utils/preparar-foto';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -15,8 +16,16 @@ export interface UploadResult {
  * Convierte códigos HTTP comunes en mensajes específicos para el usuario.
  */
 export async function uploadFoto(file: File): Promise<UploadResult> {
+  let foto: File;
+  try {
+    foto = await prepararFoto(file);
+  } catch (e) {
+    if (e instanceof FotoIlegibleError) throw new ApiError(0, 'foto_ilegible', e.message);
+    throw e;
+  }
+
   const formData = new FormData();
-  formData.append('foto', file);
+  formData.append('foto', foto);
 
   let res: Response;
   try {
@@ -31,7 +40,7 @@ export async function uploadFoto(file: File): Promise<UploadResult> {
   }
 
   if (res.status === 413) {
-    throw new ApiError(413, 'file_too_large', 'El archivo supera 5 MB. Reduce la imagen e inténtalo de nuevo.');
+    throw new ApiError(413, 'file_too_large', 'El archivo supera 20 MB. Reduce la imagen e inténtalo de nuevo.');
   }
   if (res.status === 415) {
     throw new ApiError(415, 'invalid_mime', 'Formato no soportado. Usa JPG o PNG.');
