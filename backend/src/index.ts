@@ -30,6 +30,7 @@ import driveRoutes from './routes/drive.routes';
 import incidenciaRoutes from './routes/incidencia.routes';
 import cierreRoutes from './routes/cierre.routes';
 import dashboardRoutes from './routes/dashboard.routes';
+import revisionRoutes from './routes/revision.routes';
 
 // Routes — Internal API (GlorIA integration)
 import internalRoutes from './routes/internal.routes';
@@ -212,6 +213,7 @@ app.use('/api/fotos', fotoRoutes);
 // /api/fotos, que son los tickets del parte diario.
 app.use('/api/documentos-vehiculo', documentoVehiculoRoutes);
 app.use('/api/notificaciones', notificacionRoutes);
+app.use('/api/revisiones', revisionRoutes);
 // (Drive va montado más arriba, antes del guardia global. Ver el porqué allí.)
 app.use('/api/incidencias', incidenciaRoutes);
 app.use('/api/cierres', cierreRoutes);

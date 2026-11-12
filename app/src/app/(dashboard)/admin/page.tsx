@@ -14,6 +14,7 @@ import type { ResumenDashboard } from '@/lib/api/dashboard';
 import { PeriodFilter } from '@/components/features/period-filter';
 import { PartesRetenidos } from '@/components/features/partes-retenidos';
 import { ViasPanel } from '@/components/features/vias-panel';
+import { RevisionesPendientes } from '@/components/features/revisiones-pendientes';
 
 function AdminDashboardContent() {
   const searchParams = useSearchParams();
@@ -215,6 +216,8 @@ function AdminDashboardContent() {
 
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-6">
+
+          <RevisionesPendientes />
 
           <PartesRetenidos partes={partes} anomalias={anomalias} onResuelto={cargarDatos} />
 
