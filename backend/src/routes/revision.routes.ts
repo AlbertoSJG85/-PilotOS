@@ -3,8 +3,8 @@
  *
  * Hasta hoy una foto en PENDIENTE_REVISION no generaba aviso, ni tarea, ni
  * nada en el panel: solo se veía si el dueño abría ese parte y se fijaba en
- * la etiqueta amarilla. Caso real: el ticket de gasoil de Ruyman (8145KJJ,
- * 10-nov) estuvo dos días sin que la dueña se enterase.
+ * la etiqueta amarilla. Caso real (2026-11-10): un ticket de gasoil estuvo
+ * dos días en revisión sin que el dueño se enterase.
  *
  * Regla: todo lo que espera una decisión del patrón aparece en el Dashboard y
  * se puede VERIFICAR o NO VERIFICAR. Nada se cierra solo ni desaparece sin

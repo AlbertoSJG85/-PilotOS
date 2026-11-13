@@ -48,3 +48,6 @@ Thumbs.db
 
 # Local tsc output / scratchpads
 tsc_out.txt
+
+# Configuracion local de Claude: nunca se versiona
+.claude/
