@@ -116,8 +116,13 @@ export function clasificarDocumento(texto: string): TipoDocumentoVehiculo {
     // de palabra casa con "facturado". Sin \b, cualquier papel que mencione
     // de pasada una obligación de facturar (que no es poco frecuente en letra
     // pequeña administrativa) se cuela aquí.
-    const esFactura = /\bfactura(s)?\b|\btaller\b|mano\s+de\s+obra|base\s+imponible|neum[aá]tic|reparaci[oó]n/.test(t);
-    if (esFactura) return 'FACTURA_TALLER';
+    // 2026-11-19: una factura solo es "de taller" si habla del VEHÍCULO. Antes bastaba la palabra "factura" o "base imponible", y una
+    // factura de IKEA mandada por WhatsApp quedó como FACTURA_TALLER del taxi (y al confirmarla habría sido un gasto de MANTENIMIENTO).
+    // Una factura sin rastro del vehículo queda SIN_CLASIFICAR: la persona decide en la app si es del coche o un gasto general.
+    const esTaller = /\btaller\b|mano\s+de\s+obra|neum[aá]tic|reparaci[oó]n|recambio|\baceite\b|\bfiltro|pastillas\s+de\s+freno|carrocer[ií]a|chapa\s+y\s+pintura|\bembrague\b|\bbater[ií]a\b|alineaci[oó]n|\bkm\b|kil[oó]metr|veh[ií]culo|matr[ií]cula|\b\d{4}[\s-]?[bcdfghjklmnprstvwxyz]{3}\b/;
+    const esFactura = /\bfactura(s)?\b|base\s+imponible/.test(t);
+    if (esTaller.test(t)) return 'FACTURA_TALLER';
+    if (esFactura) return 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR';
 
     return 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR';
 }

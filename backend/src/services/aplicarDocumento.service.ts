@@ -206,7 +206,8 @@ export async function aplicarDocumentoConfirmado(
                     vehiculo_id: doc.vehiculo_id,
                     tipo: TIPOS_GASTO.includes(datos.tipo_gasto ?? '')
                         ? datos.tipo_gasto!
-                        : (doc.tipo === 'POLIZA_SEGURO' ? 'SEGURO' : 'MANTENIMIENTO'),
+                        // 2026-11-19: un documento SIN clasificar (p. ej. una factura que no es del coche) no es mantenimiento por defecto.
+                        : (doc.tipo === 'POLIZA_SEGURO' ? 'SEGURO' : doc.tipo === 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR' ? 'OTRO' : 'MANTENIMIENTO'),
                     forma_pago: FORMAS_PAGO.includes(datos.forma_pago ?? '') ? datos.forma_pago! : null,
                     descripcion: datos.descripcion
                         || (actualizados.length > 0 ? actualizados.join(', ') : 'Documento del vehículo'),

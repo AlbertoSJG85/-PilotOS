@@ -156,8 +156,21 @@ describe('CLAVE: la Tarjeta de Transporte no es una factura de taller', () => {
         );
     });
 
-    it('"factura" sigue reconociéndose como palabra suelta', () => {
-        expect(clasificarDocumento('FACTURA A-2026/145')).toBe('FACTURA_TALLER');
+    it('"factura" sigue reconociéndose como palabra suelta cuando habla del vehículo', () => {
+        expect(clasificarDocumento('FACTURA A-2026/145\nMatrícula 8053-KKX')).toBe('FACTURA_TALLER');
+    });
+
+    // 2026-11-19 (caso real por WhatsApp): una factura de IKEA quedó como FACTURA_TALLER del taxi.
+    it('una factura que no habla del vehículo queda SIN_CLASIFICAR (decide la persona)', () => {
+        const IKEA = ['IKEA IBERICA S.A.', 'FACTURA SIMPLIFICADA FS-2026/88123', 'ESTANTERIA KALLAX 2 UDS', 'BASE IMPONIBLE 82,64', 'IGIC 7% 5,78', 'TOTAL 88,42 EUR'].join('\n');
+        expect(clasificarDocumento(IKEA)).toBe('DOCUMENTO_VEHICULO_SIN_CLASIFICAR');
+        expect(clasificarDocumento('Factura nº 33 Mercadona total 12,30')).toBe('DOCUMENTO_VEHICULO_SIN_CLASIFICAR');
+    });
+
+    it('una factura de taller, neumáticos o recambios sigue siendo FACTURA_TALLER', () => {
+        expect(clasificarDocumento('FACTURA 77 Neumáticos Canarias 2 neumáticos 205/55')).toBe('FACTURA_TALLER');
+        expect(clasificarDocumento('Factura cambio de aceite y filtro 120.000 km')).toBe('FACTURA_TALLER');
+        expect(clasificarDocumento('FACTURA Recambios del Sur pastillas de freno')).toBe('FACTURA_TALLER');
     });
 
     it('lee la fecha de validez y resuelve el mantenimiento "Tarjeta de transporte"', () => {
