@@ -1,14 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type ComponentType } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
   AlertTriangle,
   ArrowRight,
-  BarChart3,
-  CheckCircle2,
-  Clock3,
+  Bell,
+  CalendarCheck,
+  Check,
   Gauge,
   MessageCircle,
   Pause,
@@ -17,358 +17,289 @@ import {
   RefreshCcw,
   ShieldCheck,
   Wrench,
+  type LucideIcon,
 } from 'lucide-react';
+import {
+  FINAL,
+  PantallaAviso,
+  PantallaDashboard,
+  PantallaParte,
+  Telefono,
+  entra,
+} from './demo-pantallas';
+import { PantallaCierre, PantallaRevision } from './demo-pantallas-extra';
+import {
+  PantallaGloriaAsalariado,
+  PantallaGloriaPropietario,
+  PantallaMantenimientos,
+} from './demo-pantallas-gloria';
 
-type DemoMessage = {
-  author: 'GlorIA' | 'Conductor' | 'Sistema';
-  text: string;
+/**
+ * Demo de PilotOS (/demo): un móvil que se anima y, al lado, lo que PilotOS
+ * hace en cada momento.
+ *
+ * Ocho escenas: el parte (app), su revisión, los avisos, los mantenimientos,
+ * GlorIA con el asalariado y con el propietario (WhatsApp), el dashboard y
+ * el cierre del mes. Todo es fiel al producto: el parte entra por la app;
+ * por WhatsApp se suben facturas y documentos y se consulta.
+ *
+ * Con prefers-reduced-motion no hay secuencia: se ven todas las escenas
+ * ya terminadas, una debajo de otra.
+ */
+
+type Tono = 'ok' | 'warn' | 'info';
+type Evento = { t: number; tono: Tono; texto: string };
+
+type Escena = {
+  paso: string;
+  resumen: string;
+  titulo: string;
+  acento: string;
+  icono: LucideIcon;
+  duracion: number;
+  Pantalla: ComponentType<{ t: number }>;
+  eventos: Evento[];
 };
 
-type DemoScene = {
-  chip: string;
-  eyebrow: string;
-  title: string;
-  accent: string;
-  description: string;
-  duration: number;
-  focus: 'phone' | 'dashboard' | 'split';
-  messages: DemoMessage[];
-  stats: Array<{ label: string; value: string; tone?: 'yellow' | 'green' | 'red' }>;
-  checklist: string[];
-};
-
-const scenes: DemoScene[] = [
+const escenas: Escena[] = [
   {
-    chip: 'Demo operativa',
-    eyebrow: 'PilotOS by NexOS',
-    title: 'Gestion inteligente',
-    accent: 'para flotas',
-    description:
-      'Una demo guiada para ver como PilotOS transforma mensajes, partes, tickets y alertas en control operativo diario.',
-    duration: 5600,
-    focus: 'split',
-    messages: [
-      { author: 'Sistema', text: 'Turno iniciado. Flota sincronizada.' },
-      { author: 'GlorIA', text: 'Hoy tienes 6 vehiculos activos y 2 revisiones pendientes.' },
+    paso: 'Parte diario',
+    resumen: 'Desde la app, con foto del ticket',
+    titulo: 'El asalariado',
+    acento: 'rellena el parte',
+    icono: CalendarCheck,
+    duracion: 8600,
+    Pantalla: PantallaParte,
+    eventos: [
+      { t: 700, tono: 'info', texto: 'Rellena el parte desde la app: km, ingresos y combustible' },
+      { t: 3700, tono: 'info', texto: 'Sube la foto del ticket del taxímetro (obligatoria)' },
+      { t: 5200, tono: 'ok', texto: 'PilotOS lee el ticket: 218,40 €' },
+      { t: 6500, tono: 'ok', texto: 'Parte enviado. Ya no se puede modificar' },
     ],
-    stats: [
-      { label: 'Vehiculos activos', value: '6' },
-      { label: 'Control diario', value: '87%' },
-      { label: 'Alertas', value: '2', tone: 'red' },
-    ],
-    checklist: ['Operacion diaria', 'Ingresos y gastos', 'Mantenimientos', 'Reportes'],
   },
   {
-    chip: 'Parte diario',
-    eyebrow: '01. Entrada natural',
-    title: 'El conductor envia',
-    accent: 'su parte por WhatsApp',
-    description:
-      'GlorIA recoge los datos del turno y PilotOS prepara el registro sin perseguir mensajes sueltos.',
-    duration: 7800,
-    focus: 'phone',
-    messages: [
-      {
-        author: 'Conductor',
-        text: 'Turno terminado. Km 43.210 a 43.386. Bruto 218,40 euros. Combustible 42 euros. Datafono 86 euros.',
-      },
-      {
-        author: 'GlorIA',
-        text: 'Recibido. Falta adjuntar ticket de taximetro y combustible para dejar el parte listo.',
-      },
-      { author: 'Conductor', text: 'Te mando las fotos ahora.' },
-      { author: 'Sistema', text: 'Parte preparado. Pendiente de validacion.' },
+    paso: 'Revisión',
+    resumen: 'PilotOS compara, tú decides',
+    titulo: 'PilotOS compara',
+    acento: 'y tú decides',
+    icono: ShieldCheck,
+    duracion: 7400,
+    Pantalla: PantallaRevision,
+    eventos: [
+      { t: 500, tono: 'info', texto: 'Compara el ticket con lo que declaró el asalariado' },
+      { t: 1000, tono: 'ok', texto: 'Kilómetros y fecha coherentes con el parte anterior' },
+      { t: 1500, tono: 'ok', texto: 'El combustible coincide con su ticket' },
+      { t: 2100, tono: 'warn', texto: 'Importe distinto: 218,40 € en el ticket, 198,40 € declarado' },
+      { t: 2700, tono: 'warn', texto: 'Parte retenido: no suma en tus cuentas hasta que decidas' },
+      { t: 4700, tono: 'ok', texto: 'Lo aceptas, o pides que lo rehagan' },
+      { t: 5900, tono: 'ok', texto: 'El asalariado recibe la notificación' },
     ],
-    stats: [
-      { label: 'Km declarados', value: '176' },
-      { label: 'Bruto turno', value: '218,40' },
-      { label: 'Tickets', value: '2/2', tone: 'green' },
-    ],
-    checklist: ['Datos capturados', 'Tickets vinculados', 'Parte preparado'],
   },
   {
-    chip: 'Validacion',
-    eyebrow: '02. Menos errores manuales',
-    title: 'PilotOS revisa',
-    accent: 'lo importante',
-    description:
-      'El sistema comprueba kilometraje, importes, adjuntos obligatorios y estados antes de cerrar el registro.',
-    duration: 7200,
-    focus: 'dashboard',
-    messages: [
-      { author: 'Sistema', text: 'Km fin mayor que km inicio.' },
-      { author: 'Sistema', text: 'Combustible informado con ticket adjunto.' },
-      { author: 'GlorIA', text: 'Parte listo para que el patron lo confirme.' },
+    paso: 'Avisos',
+    resumen: 'WhatsApp y correo',
+    titulo: 'GlorIA',
+    acento: 'te avisa',
+    icono: Bell,
+    duracion: 6400,
+    Pantalla: PantallaAviso,
+    eventos: [
+      { t: 900, tono: 'warn', texto: 'Aviso al propietario: hay un parte que revisar' },
+      { t: 2900, tono: 'info', texto: 'Aviso al propietario: un mantenimiento está por vencer' },
+      { t: 3700, tono: 'ok', texto: 'Llegan por WhatsApp y también por correo' },
+      { t: 4700, tono: 'ok', texto: 'Solo avisos que importan, sin ruido' },
     ],
-    stats: [
-      { label: 'Validaciones OK', value: '4' },
-      { label: 'Incidencias', value: '0', tone: 'green' },
-      { label: 'Estado', value: 'Listo' },
-    ],
-    checklist: ['Km coherentes', 'Tickets presentes', 'Calculo preparado'],
   },
   {
-    chip: 'Gastos',
-    eyebrow: '03. Economia ordenada',
-    title: 'Ingresos, gastos',
-    accent: 'y combustible conectados',
-    description:
-      'Cada movimiento queda asociado al conductor, vehiculo y periodo para evitar hojas dispersas y descuadres.',
-    duration: 7200,
-    focus: 'dashboard',
-    messages: [
-      { author: 'Sistema', text: 'Combustible: 42,00 euros asociado al vehiculo T-04.' },
-      { author: 'Sistema', text: 'Datafono: 86,00 euros registrado en el turno.' },
-      { author: 'GlorIA', text: 'El resumen del dia ya refleja bruto, neto y ajustes.' },
+    paso: 'Mantenimientos',
+    resumen: 'ITV, seguro, revisiones',
+    titulo: 'Cada coche',
+    acento: 'al día',
+    icono: Wrench,
+    duracion: 6200,
+    Pantalla: PantallaMantenimientos,
+    eventos: [
+      { t: 500, tono: 'info', texto: 'Los km de cada coche se actualizan con cada parte' },
+      { t: 1300, tono: 'ok', texto: 'Vigila revisiones, ITV y seguros, por km y por fecha' },
+      { t: 3200, tono: 'ok', texto: 'Avisa con margen: 1.000, 500 y 250 km antes' },
+      { t: 4700, tono: 'warn', texto: 'Si se pasa, sigue recordándotelo' },
     ],
-    stats: [
-      { label: 'Bruto diario', value: '1.284' },
-      { label: 'Gastos dia', value: '312' },
-      { label: 'Neto estimado', value: '972', tone: 'green' },
-    ],
-    checklist: ['Gastos diarios', 'Importes conciliados', 'Resumen operativo'],
   },
   {
-    chip: 'Alertas',
-    eyebrow: '04. Mantenimiento y avisos',
-    title: 'Lo repetitivo',
-    accent: 'se convierte en aviso',
-    description:
-      'ITV, revisiones, seguros, averias y documentos pendientes aparecen antes de que el problema llegue tarde.',
-    duration: 7200,
-    focus: 'split',
-    messages: [
-      { author: 'GlorIA', text: 'T-02 tiene ITV en 12 dias y revision de aceite pendiente.' },
-      { author: 'Sistema', text: 'Alerta creada. Prioridad media.' },
-      { author: 'GlorIA', text: 'Puedo preparar el recordatorio para el patron y el conductor.' },
+    paso: 'GlorIA · asalariado',
+    resumen: 'Sube facturas por WhatsApp',
+    titulo: 'El asalariado',
+    acento: 'sube una factura',
+    icono: ReceiptText,
+    duracion: 7000,
+    Pantalla: PantallaGloriaAsalariado,
+    eventos: [
+      { t: 700, tono: 'info', texto: 'Manda por WhatsApp la foto de una factura o recibo' },
+      { t: 2000, tono: 'ok', texto: 'GlorIA la lee y la clasifica: taller, 86,50 €' },
+      { t: 2700, tono: 'info', texto: 'Pregunta solo lo que falta: la forma de pago' },
+      { t: 5000, tono: 'ok', texto: 'Gasto registrado en su vehículo y su periodo' },
+      { t: 5700, tono: 'info', texto: 'El parte, siempre desde la app' },
     ],
-    stats: [
-      { label: 'Alertas activas', value: '4', tone: 'red' },
-      { label: 'Mantenimientos', value: '3' },
-      { label: 'Pendientes criticos', value: '0', tone: 'green' },
-    ],
-    checklist: ['ITV y seguros', 'Averias', 'Recordatorios', 'Trazabilidad'],
   },
   {
-    chip: 'Control final',
-    eyebrow: '05. De un vistazo',
-    title: 'El patron ve',
-    accent: 'el negocio claro',
-    description:
-      'El dashboard resume estado general, alertas, metricas principales y actividad reciente para decidir rapido.',
-    duration: 8200,
-    focus: 'dashboard',
-    messages: [
-      { author: 'Sistema', text: '6 partes recibidos. 5 validados. 1 pendiente de confirmacion.' },
-      { author: 'GlorIA', text: 'Resumen listo: actividad, gastos, mantenimiento y alertas.' },
-      { author: 'Sistema', text: 'Reporte mensual preparado para revision.' },
+    paso: 'GlorIA · propietario',
+    resumen: 'Documentos y consultas',
+    titulo: 'El propietario',
+    acento: 'sube y pregunta',
+    icono: MessageCircle,
+    duracion: 7600,
+    Pantalla: PantallaGloriaPropietario,
+    eventos: [
+      { t: 700, tono: 'info', texto: 'Manda la foto del seguro, la ITV o una factura de taller' },
+      { t: 2000, tono: 'ok', texto: 'GlorIA la guarda en el coche y propone los datos' },
+      { t: 2900, tono: 'info', texto: 'Tú la confirmas en la app' },
+      { t: 3700, tono: 'info', texto: 'También le puedes preguntar por tu negocio' },
+      { t: 4900, tono: 'ok', texto: 'Responde con tus datos reales: mantenimientos y estado' },
     ],
-    stats: [
-      { label: 'Partes recibidos', value: '6/6', tone: 'green' },
-      { label: 'Ingresos mes', value: '24,8k' },
-      { label: 'Reporte', value: 'Listo', tone: 'green' },
+  },
+  {
+    paso: 'Dashboard',
+    resumen: 'Todo de un vistazo',
+    titulo: 'Tú lo ves',
+    acento: 'en tu móvil',
+    icono: Gauge,
+    duracion: 7800,
+    Pantalla: PantallaDashboard,
+    eventos: [
+      { t: 700, tono: 'info', texto: 'Abres PilotOS desde el móvil, sin instalar nada raro' },
+      { t: 2200, tono: 'ok', texto: 'Cómo va el día: partes, ingresos y neto' },
+      { t: 3500, tono: 'warn', texto: 'Lo que requiere tu atención, arriba' },
+      { t: 4700, tono: 'ok', texto: 'Mantenimientos con su estado, sin buscar nada' },
     ],
-    checklist: ['Estado general', 'Metricas clave', 'Actividad reciente', 'Reporte mensual'],
+  },
+  {
+    paso: 'Cierre del mes',
+    resumen: 'Reparto y Seguridad Social',
+    titulo: 'Fin de mes',
+    acento: 'cuentas claras',
+    icono: Check,
+    duracion: 7200,
+    Pantalla: PantallaCierre,
+    eventos: [
+      { t: 400, tono: 'ok', texto: 'Suma solo los partes aceptados' },
+      { t: 1400, tono: 'ok', texto: 'Calcula ingresos, combustible, neto y gastos del periodo' },
+      { t: 2600, tono: 'ok', texto: 'Reparte entre propietario y asalariado según tu configuración' },
+      { t: 3800, tono: 'ok', texto: 'Descuenta la Seguridad Social del asalariado' },
+      { t: 5000, tono: 'ok', texto: 'Cierre guardado para consultarlo cuando quieras' },
+    ],
   },
 ];
 
-const sceneIcons = [Gauge, MessageCircle, CheckCircle2, ReceiptText, Wrench, BarChart3];
+const DURACION_TOTAL = escenas.reduce((suma, e) => suma + e.duracion, 0);
 
-function toneClass(tone?: 'yellow' | 'green' | 'red') {
-  if (tone === 'green') return 'text-emerald-300';
-  if (tone === 'red') return 'text-red-300';
-  return 'text-pilotos-yellow';
+/* ── Panel «Qué hace PilotOS» ────────────────────────────────────────── */
+
+function IconoTono({ tono }: { tono: Tono }) {
+  if (tono === 'ok') {
+    return (
+      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300">
+        <Check className="h-3 w-3" strokeWidth={3} />
+      </span>
+    );
+  }
+  if (tono === 'warn') {
+    return (
+      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400/15 text-amber-300">
+        <AlertTriangle className="h-3 w-3" />
+      </span>
+    );
+  }
+  return (
+    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-pilotos-yellow/15">
+      <span className="h-1.5 w-1.5 rounded-full bg-pilotos-yellow" />
+    </span>
+  );
 }
 
-function PhoneDemo({ scene, sceneIndex }: { scene: DemoScene; sceneIndex: number }) {
+function PanelQueHace({ eventos, t }: { eventos: Evento[]; t: number }) {
   return (
-    <div className="relative mx-auto w-full max-w-[360px]">
-      <div className="absolute -inset-8 rounded-full bg-pilotos-yellow/10 blur-3xl" />
-      <div
-        className={`relative rounded-[2rem] border border-white/12 bg-[#020304] p-2 shadow-2xl shadow-black/70 transition ${
-          scene.focus === 'dashboard' ? 'opacity-55 blur-[1px]' : 'opacity-100'
-        }`}
-      >
-        <div className="overflow-hidden rounded-[1.55rem] border border-white/10 bg-[#0B141A]">
-          <div className="flex items-center gap-3 border-b border-white/10 bg-[#18242C] px-4 pb-3 pt-7">
-            <div className="grid h-10 w-10 place-items-center rounded-full bg-pilotos-yellow text-sm font-black text-pilotos-black">
-              G
-            </div>
-            <div>
-              <p className="text-sm font-bold text-white">GlorIA - PilotOS</p>
-              <p className="text-xs font-semibold text-emerald-300">en linea</p>
-            </div>
-          </div>
-
-          <div className="flex min-h-[360px] flex-col justify-end gap-3 bg-[linear-gradient(180deg,#0B141A,#081016)] p-4">
-            {scene.messages.map((message, index) => (
-              <div
-                key={`${sceneIndex}-${message.text}`}
-                className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-5 opacity-0 shadow-lg animate-[demoMessage_520ms_cubic-bezier(.16,1,.3,1)_forwards] ${
-                  message.author === 'Conductor'
-                    ? 'self-end rounded-br-md bg-[#075E54] text-white'
-                    : message.author === 'Sistema'
-                      ? 'self-center rounded-lg border border-pilotos-yellow/20 bg-pilotos-yellow/10 text-pilotos-yellow'
-                      : 'self-start rounded-bl-md bg-[#202C33] text-zinc-100'
-                }`}
-                style={{ animationDelay: `${360 + index * 780}ms` }}
-              >
-                <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.16em] opacity-60">
-                  {message.author}
-                </span>
-                {message.text}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+    <div className="w-full rounded-2xl border border-white/10 bg-[#0B0D12]/80 p-5 backdrop-blur">
+      <p className="text-xs font-bold uppercase tracking-[0.18em] text-pilotos-yellow">
+        Qué hace PilotOS
+      </p>
+      <ul className="mt-4 space-y-3">
+        {eventos.map((e) => (
+          <li key={e.texto} className={`flex gap-3 text-sm leading-5 text-zinc-200 ${entra(t >= e.t)}`}>
+            <IconoTono tono={e.tono} />
+            <span>{e.texto}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 
-function DashboardDemo({ scene, sceneIndex }: { scene: DemoScene; sceneIndex: number }) {
-  const Icon = sceneIcons[sceneIndex] ?? Gauge;
+/* ── Demo ────────────────────────────────────────────────────────────── */
 
-  return (
-    <div
-      className={`relative rounded-lg border border-pilotos-yellow/20 bg-[#090B10] p-4 shadow-2xl shadow-black/60 transition ${
-        scene.focus === 'phone' ? 'opacity-55 blur-[1px]' : 'opacity-100'
-      }`}
-    >
-      <div className="mb-4 flex items-center justify-between border-b border-white/10 pb-4">
-        <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-lg bg-pilotos-yellow text-pilotos-black">
-            <Icon className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-pilotos-yellow">
-              Panel operativo
-            </p>
-            <h3 className="text-lg font-black text-white">Flota - Hoy</h3>
-          </div>
-        </div>
-        <span className="hidden items-center gap-2 rounded-lg border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-300 sm:inline-flex">
-          <ShieldCheck className="h-4 w-4" />
-          Monitorizando
-        </span>
-      </div>
+const CONSULTA_MOVIMIENTO = '(prefers-reduced-motion: reduce)';
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        {scene.stats.map((stat, index) => (
-          <div
-            key={`${sceneIndex}-${stat.label}`}
-            className="translate-y-3 rounded-lg border border-white/10 bg-white/[0.035] p-4 opacity-0 animate-[demoRise_620ms_cubic-bezier(.16,1,.3,1)_forwards]"
-            style={{ animationDelay: `${220 + index * 160}ms` }}
-          >
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500">{stat.label}</p>
-            <p className={`mt-3 text-2xl font-black ${toneClass(stat.tone)}`}>{stat.value}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-        <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-          <div className="mb-4 flex items-center justify-between">
-            <h4 className="text-sm font-bold text-white">Checklist del flujo</h4>
-            <Clock3 className="h-4 w-4 text-pilotos-yellow" />
-          </div>
-          <div className="space-y-3">
-            {scene.checklist.map((item, index) => (
-              <div
-                key={`${sceneIndex}-${item}`}
-                className="flex items-center gap-3 opacity-0 animate-[demoRise_520ms_cubic-bezier(.16,1,.3,1)_forwards]"
-                style={{ animationDelay: `${520 + index * 180}ms` }}
-              >
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-pilotos-yellow" />
-                <span className="text-sm text-zinc-300">{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-          <div className="mb-4 flex items-center justify-between">
-            <h4 className="text-sm font-bold text-white">Estado operativo</h4>
-            <AlertTriangle className="h-4 w-4 text-pilotos-yellow" />
-          </div>
-          {['Partes', 'Gastos', 'Mantenimientos', 'Reportes'].map((item, index) => (
-            <div key={item} className="py-2">
-              <div className="mb-2 flex justify-between text-sm">
-                <span className="text-zinc-300">{item}</span>
-                <span className="font-bold text-white">{88 - index * 8}%</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-white/10">
-                <div
-                  className="h-full rounded-full bg-pilotos-yellow transition-all duration-700"
-                  style={{ width: `${88 - index * 8}%` }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+/** true si la persona pide menos movimiento (en el servidor, false). */
+function useMenosMovimiento() {
+  return useSyncExternalStore(
+    (avisar) => {
+      const consulta = window.matchMedia(CONSULTA_MOVIMIENTO);
+      consulta.addEventListener('change', avisar);
+      return () => consulta.removeEventListener('change', avisar);
+    },
+    () => window.matchMedia(CONSULTA_MOVIMIENTO).matches,
+    () => false,
   );
 }
 
 export function PilotOSDemo() {
-  const [current, setCurrent] = useState(0);
+  const [estado, setEstado] = useState({ escena: 0, t: 0 });
   const [playing, setPlaying] = useState(true);
-  const [tick, setTick] = useState(0);
-  const scene = scenes[current];
+  const reducido = useMenosMovimiento();
+  const { escena, t } = estado;
 
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || reducido) return;
+    const id = window.setInterval(() => {
+      setEstado((s) => {
+        const siguiente = s.t + 100;
+        return siguiente >= escenas[s.escena].duracion
+          ? { escena: (s.escena + 1) % escenas.length, t: 0 }
+          : { escena: s.escena, t: siguiente };
+      });
+    }, 100);
+    return () => window.clearInterval(id);
+  }, [playing, reducido]);
 
-    const start = Date.now();
-    const interval = window.setInterval(() => {
-      const progress = Math.min(100, ((Date.now() - start) / scene.duration) * 100);
-      setTick(progress);
-    }, 80);
+  const progresoTotal = useMemo(() => {
+    if (reducido) return 100;
+    const previo = escenas.slice(0, escena).reduce((suma, e) => suma + e.duracion, 0);
+    return ((previo + t) / DURACION_TOTAL) * 100;
+  }, [escena, t, reducido]);
 
-    const timer = window.setTimeout(() => {
-      setCurrent((value) => (value + 1) % scenes.length);
-      setTick(0);
-    }, scene.duration);
-
-    return () => {
-      window.clearInterval(interval);
-      window.clearTimeout(timer);
-    };
-  }, [current, playing, scene.duration]);
-
-  const totalProgress = useMemo(
-    () => ((current + tick / 100) / scenes.length) * 100,
-    [current, tick],
-  );
-
-  function goTo(index: number) {
-    setCurrent(index);
-    setTick(0);
+  function ir(indice: number) {
+    setEstado({ escena: indice, t: 0 });
     setPlaying(true);
   }
 
-  function replay() {
-    setCurrent(0);
-    setTick(0);
-    setPlaying(true);
-  }
+  const actual = escenas[escena];
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-pilotos-black text-white">
       <style>{`
-        @keyframes demoMessage {
-          from { opacity: 0; transform: translateY(14px) scale(.98); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
-        }
         @keyframes demoRise {
           from { opacity: 0; transform: translateY(14px); }
           to { opacity: 1; transform: translateY(0); }
         }
+        @media (prefers-reduced-motion: reduce) {
+          .demo-titulo { animation: none !important; opacity: 1 !important; }
+        }
       `}</style>
 
       <div className="fixed inset-x-0 top-0 z-50 h-1 bg-white/10">
-        <div className="h-full bg-pilotos-yellow transition-[width] duration-100" style={{ width: `${totalProgress}%` }} />
+        <div
+          className="h-full bg-pilotos-yellow transition-[width] duration-100"
+          style={{ width: `${progresoTotal}%` }}
+        />
       </div>
 
       <div className="absolute inset-0">
@@ -396,25 +327,29 @@ export function PilotOSDemo() {
             />
           </Link>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setPlaying((value) => !value)}
-              className="grid h-10 w-10 place-items-center rounded-lg border border-white/12 bg-white/[0.04] text-white transition hover:border-pilotos-yellow/40"
-              aria-label={playing ? 'Pausar demo' : 'Reproducir demo'}
-            >
-              {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-            </button>
-            <button
-              type="button"
-              onClick={replay}
-              className="grid h-10 w-10 place-items-center rounded-lg border border-white/12 bg-white/[0.04] text-white transition hover:border-pilotos-yellow/40"
-              aria-label="Repetir demo"
-            >
-              <RefreshCcw className="h-4 w-4" />
-            </button>
+            {!reducido && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setPlaying((value) => !value)}
+                  className="grid h-11 w-11 place-items-center rounded-lg border border-white/12 bg-white/[0.04] text-white transition hover:border-pilotos-yellow/40"
+                  aria-label={playing ? 'Pausar demo' : 'Reproducir demo'}
+                >
+                  {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => ir(0)}
+                  className="grid h-11 w-11 place-items-center rounded-lg border border-white/12 bg-white/[0.04] text-white transition hover:border-pilotos-yellow/40"
+                  aria-label="Repetir demo"
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                </button>
+              </>
+            )}
             <Link
               href="/onboarding"
-              className="hidden min-h-10 items-center justify-center gap-2 rounded-lg bg-pilotos-yellow px-4 text-sm font-black text-pilotos-black transition hover:bg-[#ffc533] sm:inline-flex"
+              className="hidden min-h-11 items-center justify-center gap-2 rounded-lg bg-pilotos-yellow px-4 text-sm font-black text-pilotos-black transition hover:bg-[#ffc533] sm:inline-flex"
             >
               Solicitar demo
               <ArrowRight className="h-4 w-4" />
@@ -422,45 +357,127 @@ export function PilotOSDemo() {
           </div>
         </header>
 
-        <div className="grid flex-1 items-center gap-8 py-8 lg:grid-cols-[0.82fr_1.18fr] lg:gap-10">
-          <div className="max-w-xl">
-            <p className="mb-4 inline-flex items-center rounded-full border border-pilotos-yellow/30 bg-pilotos-yellow/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-pilotos-yellow">
-              {scene.chip}
-            </p>
-            <p className="text-sm font-bold uppercase tracking-[0.22em] text-zinc-500">{scene.eyebrow}</p>
-            <h1 key={`title-${current}`} className="mt-4 text-5xl font-black leading-[0.95] tracking-normal text-white opacity-0 animate-[demoRise_620ms_cubic-bezier(.16,1,.3,1)_forwards] sm:text-6xl">
-              {scene.title}
-              <span className="block text-pilotos-yellow">{scene.accent}</span>
-            </h1>
-            <p key={`desc-${current}`} className="mt-6 max-w-lg text-base leading-7 text-zinc-300 opacity-0 animate-[demoRise_620ms_cubic-bezier(.16,1,.3,1)_forwards] [animation-delay:180ms]">
-              {scene.description}
-            </p>
+        <p className="sr-only">
+          El asalariado rellena el parte en la app con la foto del ticket. PilotOS lo compara y
+          retiene lo que no cuadra para que el propietario decida. GlorIA avisa por WhatsApp y por
+          correo, vigila los mantenimientos y permite subir facturas y documentos por WhatsApp, tanto
+          al asalariado como al propietario. El propietario lo ve todo en su móvil y cierra el mes
+          con el reparto y la Seguridad Social.
+        </p>
 
-            <div className="mt-8 flex flex-wrap gap-2">
-              {scenes.map((item, index) => (
+        {!reducido ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-8 py-8">
+            <div className="text-center">
+              <p className="mb-3 inline-flex items-center rounded-full border border-pilotos-yellow/30 bg-pilotos-yellow/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-pilotos-yellow">
+                {escena + 1} / {escenas.length} · {actual.paso}
+              </p>
+              <h1
+                key={`titulo-${escena}`}
+                className="demo-titulo text-4xl font-black leading-none text-white opacity-0 animate-[demoRise_500ms_cubic-bezier(.16,1,.3,1)_forwards] sm:text-5xl"
+              >
+                {actual.titulo} <span className="text-pilotos-yellow">{actual.acento}</span>
+              </h1>
+            </div>
+
+            <div className="grid w-full max-w-6xl items-center gap-8 lg:grid-cols-[250px_272px_1fr] lg:gap-10">
+              {/* Pasos (escritorio) */}
+              <nav aria-label="Pasos de la demo" className="hidden lg:block">
+                <ol className="space-y-1">
+                  {escenas.map((e, i) => {
+                    const Icono = e.icono;
+                    const activa = i === escena;
+                    return (
+                      <li key={e.paso}>
+                        <button
+                          type="button"
+                          onClick={() => ir(i)}
+                          aria-current={activa ? 'step' : undefined}
+                          className={`group w-full rounded-xl px-3 py-2.5 text-left transition duration-300 ${
+                            activa ? 'bg-white/[0.06]' : 'opacity-50 hover:opacity-90'
+                          }`}
+                        >
+                          <span className="flex items-center gap-3">
+                            <span
+                              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition duration-300 ${
+                                activa ? 'bg-pilotos-yellow text-pilotos-black' : 'bg-white/10 text-zinc-300'
+                              }`}
+                            >
+                              <Icono className="h-4 w-4" />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-bold text-white">{e.paso}</span>
+                              <span className="block truncate text-xs text-zinc-400">{e.resumen}</span>
+                            </span>
+                          </span>
+                          <span className="mt-2 block h-0.5 overflow-hidden rounded-full bg-white/10">
+                            <span
+                              className="block h-full origin-left bg-pilotos-yellow transition-transform duration-100 ease-linear"
+                              style={{ transform: `scaleX(${activa ? t / e.duracion : i < escena ? 1 : 0})` }}
+                            />
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </nav>
+
+              {/* Móvil */}
+              <div aria-hidden className="mx-auto">
+                <Telefono>
+                  <actual.Pantalla key={`pantalla-${escena}`} t={t} />
+                </Telefono>
+              </div>
+
+              {/* Qué hace PilotOS */}
+              <div key={`panel-${escena}`} className="mx-auto w-full max-w-md lg:max-w-none">
+                <PanelQueHace eventos={actual.eventos} t={t} />
+              </div>
+            </div>
+
+            {/* Selector (móvil) */}
+            <div className="flex flex-wrap justify-center gap-1 lg:hidden">
+              {escenas.map((e, i) => (
                 <button
-                  key={item.eyebrow}
+                  key={e.paso}
                   type="button"
-                  onClick={() => goTo(index)}
-                  className={`h-2.5 rounded-full transition-all ${
-                    index === current ? 'w-12 bg-pilotos-yellow' : 'w-2.5 bg-white/25 hover:bg-white/45'
-                  }`}
-                  aria-label={`Ir a escena ${index + 1}`}
-                />
+                  onClick={() => ir(i)}
+                  aria-label={`Ver paso ${i + 1}: ${e.paso}`}
+                  aria-current={escena === i ? 'step' : undefined}
+                  className="flex h-11 w-9 items-center justify-center"
+                >
+                  <span
+                    className={`h-2.5 rounded-full transition-all duration-300 ${
+                      escena === i ? 'w-8 bg-pilotos-yellow' : 'w-2.5 bg-white/25'
+                    }`}
+                  />
+                </button>
               ))}
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={() => goTo((current + 1) % scenes.length)}
-            className="grid cursor-pointer gap-5 text-left lg:grid-cols-[0.82fr_1.18fr] lg:items-center"
-            aria-label="Avanzar demo"
-          >
-            <PhoneDemo key={`phone-${current}`} scene={scene} sceneIndex={current} />
-            <DashboardDemo key={`dashboard-${current}`} scene={scene} sceneIndex={current} />
-          </button>
-        </div>
+        ) : (
+          /* Sin movimiento: todas las escenas ya terminadas. */
+          <div className="mx-auto w-full max-w-5xl flex-1 space-y-16 py-10">
+            <h1 className="text-center text-4xl font-black leading-none text-white sm:text-5xl">
+              Así funciona <span className="text-pilotos-yellow">PilotOS</span>
+            </h1>
+            {escenas.map((e) => (
+              <div key={e.paso} className="grid items-center gap-8 lg:grid-cols-[272px_1fr] lg:gap-12">
+                <div aria-hidden className="mx-auto">
+                  <Telefono>
+                    <e.Pantalla t={FINAL} />
+                  </Telefono>
+                </div>
+                <div>
+                  <h2 className="mb-4 text-2xl font-black text-white">
+                    {e.titulo} <span className="text-pilotos-yellow">{e.acento}</span>
+                  </h2>
+                  <PanelQueHace eventos={e.eventos} t={FINAL} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         <footer className="flex flex-col gap-3 border-t border-white/10 pt-5 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm leading-6 text-zinc-500">
