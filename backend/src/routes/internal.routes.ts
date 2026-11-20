@@ -14,6 +14,10 @@ import { variantesTelefono } from '../lib/telefono';
 import { clienteTieneFeaturePro } from '../middleware/billing-access.middleware';
 import { procesarYGuardarImagen } from '../services/storage.service';
 import { registrarDocumentoPendiente, analizarDocumentoRegistrado, hashDeBuffer } from '../services/ocrDocumentoVehiculo.service';
+import {
+    resolverRemitente, crearBorrador, leerBorrador, verBorrador, corregirBorrador,
+    confirmarBorrador, descartarBorrador, borradorALaApp,
+} from '../services/borradorWhatsapp.service';
 
 const router = Router();
 
@@ -571,6 +575,124 @@ router.post('/documentos-vehiculo', express.json({ limit: '15mb' }), async (req:
         void analizarDocumentoRegistrado(documento.id, procesado.path);
     } catch (err: any) {
         console.error('[INTERNAL] Error en /documentos-vehiculo:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fotos por WhatsApp con verificación (2026-11-20). Ver borradorWhatsapp.service.ts.
+// Leer → enseñar lo leído → corregir hablando → archivar solo con el "sí". El borrador
+// no se ve en Documentos y se borra a los 7 días. Todas reciben el teléfono de quien
+// escribe y solo operan sobre SUS borradores.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const HTTP_FALLO: Record<string, number> = {
+    usuario_no_encontrado: 404, sin_cliente_pilotos: 404, sin_vehiculos: 404,
+    borrador_no_encontrado: 404, ya_cerrado: 409, cambio_invalido: 422, no_listo: 409, error_aplicando: 500,
+};
+
+function responderFallo(res: Response, fallo: string, extra: Record<string, unknown> = {}): void {
+    res.status(HTTP_FALLO[fallo] ?? 500).json({ status: 'FAIL', error: fallo, ...extra });
+}
+
+function telefonoDe(req: Request): string {
+    return String((req.body?.telefono ?? req.query.telefono ?? '') as string).trim();
+}
+
+/** POST /internal/documentos-vehiculo/borrador  { telefono, imagen_base64 } → 201 { borrador_id } y lectura en segundo plano. */
+router.post('/documentos-vehiculo/borrador', express.json({ limit: '15mb' }), async (req: Request, res: Response) => {
+    try {
+        const telefono = telefonoDe(req);
+        const { imagen_base64 } = req.body as { imagen_base64?: string };
+        if (!telefono || !imagen_base64) {
+            res.status(400).json({ status: 'FAIL', error: 'missing_fields', required: ['telefono', 'imagen_base64'] });
+            return;
+        }
+        const quien = await resolverRemitente(telefono);
+        if (typeof quien === 'string') { responderFallo(res, quien); return; }
+
+        const buffer = Buffer.from(imagen_base64, 'base64');
+        if (buffer.length === 0) { res.status(400).json({ status: 'FAIL', error: 'imagen_invalida' }); return; }
+        let procesado;
+        try {
+            procesado = await procesarYGuardarImagen(buffer);
+        } catch (err: any) {
+            console.error('[INTERNAL] Imagen no procesable (borrador):', err.message);
+            res.status(415).json({ status: 'FAIL', error: 'invalid_image' });
+            return;
+        }
+        const publicBase = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+        const url = publicBase ? `${publicBase}/uploads/${procesado.filename}` : `${req.protocol}://${req.get('host')}/uploads/${procesado.filename}`;
+
+        const borrador = await crearBorrador({ quien, url, hashSha256: hashDeBuffer(buffer) });
+        console.log(`[INTERNAL] Borrador WhatsApp ${borrador.id} (usuario ${quien.usuarioId}) — leyendo en segundo plano`);
+        res.status(201).json({ status: 'OK', data: { borrador_id: borrador.id, estado: 'LEYENDO', flota: quien.flota.map((v) => v.matricula) } });
+        void leerBorrador(borrador.id, procesado.path);
+    } catch (err: any) {
+        console.error('[INTERNAL] Error creando borrador:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
+/** GET /internal/documentos-vehiculo/borrador/:id?telefono= → { lectura } */
+router.get('/documentos-vehiculo/borrador/:id', async (req: Request, res: Response) => {
+    try {
+        const r = await verBorrador(req.params.id, telefonoDe(req));
+        if (typeof r === 'string') { responderFallo(res, r); return; }
+        res.json({ status: 'OK', data: r });
+    } catch (err: any) {
+        console.error('[INTERNAL] Error leyendo borrador:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
+/** POST /internal/documentos-vehiculo/borrador/:id/corregir  { telefono, cambios: { fecha?, importe?, concepto?, matricula?, es_del_taxi? } } */
+router.post('/documentos-vehiculo/borrador/:id/corregir', express.json(), async (req: Request, res: Response) => {
+    try {
+        const cambios = (req.body?.cambios ?? {}) as Record<string, unknown>;
+        const r = await corregirBorrador(req.params.id, telefonoDe(req), cambios);
+        if (typeof r === 'string') { responderFallo(res, r); return; }
+        res.json({ status: 'OK', data: r });
+    } catch (err: any) {
+        console.error('[INTERNAL] Error corrigiendo borrador:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
+/** POST /internal/documentos-vehiculo/borrador/:id/confirmar  { telefono } — el "sí". */
+router.post('/documentos-vehiculo/borrador/:id/confirmar', express.json(), async (req: Request, res: Response) => {
+    try {
+        const r = await confirmarBorrador(req.params.id, telefonoDe(req));
+        if (typeof r === 'string') { responderFallo(res, r); return; }
+        if ('fallo' in r) { responderFallo(res, r.fallo, { data: r.lectura }); return; }
+        res.json({ status: 'OK', data: r });
+    } catch (err: any) {
+        console.error('[INTERNAL] Error confirmando borrador:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
+/** POST /internal/documentos-vehiculo/borrador/:id/descartar  { telefono } — "no era para nada". */
+router.post('/documentos-vehiculo/borrador/:id/descartar', express.json(), async (req: Request, res: Response) => {
+    try {
+        const r = await descartarBorrador(req.params.id, telefonoDe(req));
+        if (typeof r === 'string') { responderFallo(res, r); return; }
+        res.json({ status: 'OK' });
+    } catch (err: any) {
+        console.error('[INTERNAL] Error descartando borrador:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error' });
+    }
+});
+
+/** POST /internal/documentos-vehiculo/borrador/:id/a-la-app  { telefono } — "ya lo miro yo en la app". */
+router.post('/documentos-vehiculo/borrador/:id/a-la-app', express.json(), async (req: Request, res: Response) => {
+    try {
+        const r = await borradorALaApp(req.params.id, telefonoDe(req));
+        if (typeof r === 'string') { responderFallo(res, r); return; }
+        if ('fallo' in r) { responderFallo(res, r.fallo, { data: r.lectura }); return; }
+        res.json({ status: 'OK' });
+    } catch (err: any) {
+        console.error('[INTERNAL] Error pasando borrador a la app:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });
     }
 });

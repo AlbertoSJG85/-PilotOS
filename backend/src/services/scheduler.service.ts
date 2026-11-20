@@ -17,6 +17,7 @@ import { prisma } from '../lib/prisma';
 import { procesarMantenimientos } from './mantenimientoAlertas.service';
 import { clienteTieneFeaturePro } from '../middleware/billing-access.middleware';
 import { conCandado } from './job-lease.service';
+import { purgarBorradoresWhatsapp } from './borradorWhatsapp.service';
 
 const TIMEZONE = 'Atlantic/Canary';
 
@@ -83,6 +84,14 @@ async function purgarBorradoresAntiguos(): Promise<void> {
         console.log(`⏰ [Scheduler] ${candidatos.length} borradores eliminados.`);
     } catch (error) {
         console.error('❌ [Scheduler] Error purgando borradores:', error);
+    }
+    // Fotos de WhatsApp que nadie llegó a confirmar en 7 días (2026-11-20). Va aparte: un fallo de una
+    // purga no puede impedir la otra.
+    try {
+        const n = await purgarBorradoresWhatsapp();
+        if (n > 0) console.log(`⏰ [Scheduler] ${n} fotos de WhatsApp sin confirmar eliminadas.`);
+    } catch (error) {
+        console.error('❌ [Scheduler] Error purgando fotos de WhatsApp sin confirmar:', error);
     }
 }
 
