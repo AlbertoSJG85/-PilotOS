@@ -141,10 +141,35 @@ export function normalizarMatricula(m: string): string {
 /** Todas las matrículas de la flota que aparecen en el texto (no "una matrícula cualquiera": el OCR inventa). */
 export function matriculasDeLaFlotaEnTexto(texto: string, flota: VehiculoFlota[]): VehiculoFlota[] {
     const limpio = normalizarMatricula(texto);
+    const leidas = matriculasModernasEnTexto(texto);
     return flota.filter((v) => {
         const m = normalizarMatricula(v.matricula);
-        return m.length >= 5 && limpio.includes(m);
+        return (m.length >= 5 && limpio.includes(m)) || leidas.some((l) => casiLaMisma(l, m));
     });
+}
+
+function matriculasModernasEnTexto(texto: string): string[] {
+    const vistas = new Set<string>();
+    for (const m of texto.matchAll(/\b(\d{4})\s*-?\s*([BCDFGHJKLMNPRSTVWXYZ]{3})\b/gi)) vistas.add(`${m[1]}${m[2].toUpperCase()}`);
+    return [...vistas];
+}
+
+/**
+ * Misma matrícula con UNA letra mal leída: mismas 4 cifras y 2 de 3 letras en su sitio. Caso real (2026-11-20): la
+ * factura ponía 8053KKX y el OCR leyó 8053KXX. Se enseña igual para que la persona la verifique.
+ */
+export function casiLaMisma(leida: string, propia: string): boolean {
+    const a = normalizarMatricula(leida), b = normalizarMatricula(propia);
+    if (!/^\d{4}[A-Z]{3}$/.test(a) || !/^\d{4}[A-Z]{3}$/.test(b) || a.slice(0, 4) !== b.slice(0, 4)) return false;
+    let distintas = 0;
+    for (let i = 4; i < 7; i++) if (a[i] !== b[i]) distintas++;
+    return distintas <= 1;
+}
+
+/** Matrículas modernas (1234BCD) del texto que NO son de la flota (ni una lectura casi igual), sin repetir. */
+export function matriculasAjenasEnTexto(texto: string, flota: VehiculoFlota[]): string[] {
+    const propias = flota.map((v) => normalizarMatricula(v.matricula));
+    return matriculasModernasEnTexto(texto).filter((n) => !propias.some((p) => casiLaMisma(n, p)));
 }
 
 /** "es del 5678", "el 5678DEF", "5678 def": a qué vehículo de la flota se refiere. Exacto o por las cifras. */
@@ -212,10 +237,15 @@ export function construirLectura(e: EntradaLectura): Lectura {
     let vehiculo: Lectura['vehiculo'] = null;
     const elegido = c.matricula ? vehiculoPorTexto(c.matricula, e.flota) : null;
     const leidos = matriculasDeLaFlotaEnTexto(texto, e.flota);
+    // 2026-11-20: si el papel pone una matrícula que NO es de su flota, no se asume "tu único vehículo": se pregunta.
+    // Caso real: un DECA de un camión (3386JJH) se iba a guardar en el taxi de Alberto.
+    const ajenas = leidos.length === 0 ? matriculasAjenasEnTexto(texto, e.flota) : [];
     if (elegido) {
         vehiculo = { ...elegido, como: 'elegido' };
     } else if (leidos.length === 1) {
         vehiculo = { ...leidos[0], como: 'leido_en_documento' };
+    } else if (ajenas.length > 0) {
+        vehiculo = null;
     } else if (e.flota.length === 1) {
         vehiculo = { ...e.flota[0], como: 'unico_vehiculo' };
     } else if (e.vehiculoIdFijado) {
@@ -225,7 +255,9 @@ export function construirLectura(e: EntradaLectura): Lectura {
     if (!vehiculo) {
         dudosos.push({
             campo: 'vehiculo',
-            motivo: leidos.length > 1 ? 'Aparecen varias matrículas de tu flota.' : 'El documento no dice de qué vehículo es.',
+            motivo: leidos.length > 1 ? 'Aparecen varias matrículas de tu flota.'
+                : ajenas.length > 0 ? `El documento pone la matrícula ${ajenas.join(', ')}, que no es de tu flota.`
+                : 'El documento no dice de qué vehículo es.',
             bloquea: true,
         });
     }

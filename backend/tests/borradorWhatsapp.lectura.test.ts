@@ -131,6 +131,36 @@ describe('lectura de una foto de WhatsApp', () => {
     });
 });
 
+describe('casos reales del 2026-11-20', () => {
+    const COOP = `COOPERATIVA INDUSTRIAL DE AUTO - TAXIS\nFACTURA\nFecha: 04/11/2026\nREFERENCIA   DESCRIPCIÓN   UDS.  PRECIO  I.G.I.C.  IMPORTE\nFiltro aceite   1   20,00\n                                   SUBTOTAL           83,64\n                                   IMP. I.G.I.C.        3,21\n                                   TOTAL      €      86,85`;
+    const DECA = `Transportes y Excavaciones S.L.\nDOCUMENTO ELECTRÓNICO DE CONTROL ADMINISTRATIVO\nDATOS DEL TRANSPORTE\nFECHA DE REALIZACIÓN\n23/09/2026\nMATRÍCULA TRACTORA / RÍGIDO\n3386JJH\nDESTINO\nCarretera Gral. La Cisnera Km3\nNATURALEZA DE LA MERCANCÍA\nPiedra`;
+
+    it('el total con sangría y el € delante se lee (86,85)', () => {
+        const l = lectura(COOP);
+        expect(l.importe).toBe(86.85);
+        expect(l.dudosos.find((d) => d.campo === 'importe')).toBeUndefined();
+    });
+    it('un DECA de camión no es una factura de taller: no parece del taxi', () => {
+        const l = lectura(DECA);
+        expect(l.tipo).toBe('DOCUMENTO_VEHICULO_SIN_CLASIFICAR');
+        expect(l.es_del_vehiculo).toBe(false);
+    });
+    it('una matrícula que no es de su flota no se asigna a "tu único vehículo": se pregunta', () => {
+        const l = lectura(TALLER + '\nMatrícula: 3386JJH');
+        expect(l.vehiculo).toBeNull();
+        expect(l.dudosos).toContainEqual(expect.objectContaining({ campo: 'vehiculo', bloquea: true, motivo: expect.stringMatching(/3386JJH, que no es de tu flota/) }));
+        expect(lectura(TALLER + '\nMatrícula: 3386JJH', UNO, { matricula: '1234' }).vehiculo).toMatchObject({ id: 'v1', como: 'elegido' });
+    });
+    it('la matrícula propia con una letra mal leída (8053KXX por 8053KKX) es su vehículo, no una ajena', () => {
+        const flota = [{ id: 'k', matricula: '8053KKX' }, { id: 'o', matricula: '1234BCD' }];
+        const l = lectura(TALLER + '\nVehículo: 8053KXX', flota);
+        expect(l.vehiculo).toMatchObject({ id: 'k', como: 'leido_en_documento' });
+        expect(l.listo_para_confirmar).toBe(true);
+        // pero con dos letras distintas ya es otra matrícula
+        expect(lectura(TALLER + '\nVehículo: 8053KZZ', flota).vehiculo).toBeNull();
+    });
+});
+
 describe('qué vehículo dice la persona', () => {
     it('exacto, con espacios o por las cifras', () => {
         expect(vehiculoPorTexto('5678 fgh', DOS)?.id).toBe('v2');
