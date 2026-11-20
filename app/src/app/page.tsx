@@ -5,86 +5,23 @@ import Link from 'next/link';
 import {
   AlertTriangle,
   ArrowRight,
-  BarChart3,
-  Bot,
   CalendarCheck,
-  CheckCircle2,
   Clock3,
   FileText,
   Gauge,
-  MessageCircle,
   ReceiptText,
   ShieldCheck,
   Sparkles,
-  UsersRound,
-  Wrench,
 } from 'lucide-react';
 import { ScrollReveal } from '@/components/marketing/scroll-reveal';
 import { HeroIntro } from '@/components/marketing/hero-intro';
+import { ComoFunciona, Funciones, GloriaApoyo, Problema } from '@/components/marketing/landing-secciones';
 
 export const metadata: Metadata = {
   title: 'PilotOS | Gestion inteligente para flotas',
   description:
     'PilotOS centraliza partes diarios, ingresos, gastos, mantenimientos, alertas y reportes para gestionar flotas con control operativo de un vistazo.',
 };
-
-const painPoints = [
-  'WhatsApps sueltos',
-  'Partes manuales',
-  'Hojas desordenadas',
-  'Falta de control diario',
-  'Errores en gastos, ingresos y mantenimientos',
-];
-
-const solutionPoints = [
-  'Centraliza la informacion operativa, economica y documental',
-  'Automatiza registros y reduce tareas repetitivas',
-  'Controla ingresos, gastos, partes y mantenimientos',
-  'Muestra el estado diario de la flota de forma clara',
-];
-
-const features = [
-  {
-    title: 'Control diario',
-    text: 'Partes, kilometraje, actividad y validaciones en una vista operativa consistente.',
-    icon: CalendarCheck,
-  },
-  {
-    title: 'Conductores / asalariados',
-    text: 'Roles claros para patron, conductor y administracion NexOS sin mezclar permisos.',
-    icon: UsersRound,
-  },
-  {
-    title: 'Ingresos y gastos',
-    text: 'Registro ordenado de combustible, tickets, varios y movimientos economicos.',
-    icon: ReceiptText,
-  },
-  {
-    title: 'Mantenimientos',
-    text: 'Seguimiento de revisiones, averias, ITV, seguros y obligaciones recurrentes.',
-    icon: Wrench,
-  },
-  {
-    title: 'Alertas automaticas',
-    text: 'Avisos para vencimientos, incidencias, documentos pendientes y tareas criticas.',
-    icon: AlertTriangle,
-  },
-  {
-    title: 'Reportes mensuales',
-    text: 'Resumenes preparados para entender resultados, costes y actividad del periodo.',
-    icon: FileText,
-  },
-  {
-    title: 'WhatsApp operativo',
-    text: 'Entrada natural de informacion mediante GlorIA como identidad visible del sistema.',
-    icon: MessageCircle,
-  },
-  {
-    title: 'Dashboard de control',
-    text: 'Metricas, alertas y actividad reciente para tomar decisiones sin perder tiempo.',
-    icon: BarChart3,
-  },
-];
 
 const dashboardStats = [
   { label: 'Estado general', value: '87%', detail: 'Flota operativa' },
@@ -328,177 +265,19 @@ export default function Home() {
 
       <Costura />
 
-      {/* ── EL PROBLEMA ────────────────────────────────────── */}
-      <section className="relative px-5 py-24 sm:px-8 lg:px-12">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute right-0 top-10 h-96 w-96 rounded-full bg-[radial-gradient(circle,rgba(239,68,68,0.07),transparent_70%)] blur-2xl"
-        />
-        <div className="relative mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
-          <div data-reveal>
-            <SectionLabel>El problema</SectionLabel>
-            <h2 className="max-w-2xl text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
-              Muchas flotas siguen funcionando con informacion dispersa.
-            </h2>
-            <p className="mt-5 max-w-xl text-base leading-7 text-zinc-400">
-              Cuando cada dato vive en un canal distinto, el control diario se vuelve lento,
-              los errores se multiplican y el negocio pierde visibilidad justo cuando mas la
-              necesita.
-            </p>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            {painPoints.map((point, i) => (
-              <div
-                key={point}
-                data-reveal
-                style={delay(i * 70)}
-                className="flex min-h-24 items-center gap-4 rounded-xl border border-white/[0.08] bg-[#0B0D12] p-5 shadow-[0_20px_50px_-30px_rgba(0,0,0,1)] transition duration-200 hover:-translate-y-1 hover:border-white/[0.16]"
-              >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-500/10 text-red-300">
-                  <AlertTriangle className="h-5 w-5" />
-                </span>
-                <p className="text-sm font-semibold leading-6 text-zinc-200">{point}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <Problema />
 
       <Costura />
 
-      {/* ── LA SOLUCION ────────────────────────────────────── */}
-      <section id="como-funciona" className="relative px-5 py-24 sm:px-8 lg:px-12">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -left-20 top-1/4 h-[420px] w-[420px] rounded-full bg-[radial-gradient(circle,rgba(255,183,3,0.09),transparent_68%)] blur-2xl"
-        />
-        <div className="relative mx-auto grid max-w-7xl gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
-          <div
-            data-reveal
-            className="relative overflow-hidden rounded-2xl border border-pilotos-yellow/20 bg-pilotos-panel shadow-[0_50px_120px_-40px_rgba(0,0,0,1)]"
-          >
-            <Image
-              src="/branding/pilotos/dashboard-mockup.png"
-              alt="Dashboard operativo de PilotOS"
-              width={1800}
-              height={1100}
-              sizes="(max-width: 1024px) 100vw, 52vw"
-              className="h-auto w-full object-cover"
-            />
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/[0.06]"
-            />
-          </div>
-
-          <div data-reveal style={delay(90)}>
-            <SectionLabel>La solucion</SectionLabel>
-            <h2 className="text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
-              Un sistema operativo para controlar la flota sin perseguir datos.
-            </h2>
-            <p className="mt-5 text-base leading-7 text-zinc-400">
-              PilotOS ordena la actividad diaria y la transforma en control operativo,
-              trazabilidad y decisiones mas rapidas dentro del ecosistema NexOS.
-            </p>
-            <div className="mt-8 grid gap-4">
-              {solutionPoints.map((point) => (
-                <div
-                  key={point}
-                  className="flex gap-3 rounded-lg border border-transparent p-2 transition hover:border-white/[0.08] hover:bg-white/[0.02]"
-                >
-                  <CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-pilotos-yellow" />
-                  <p className="text-sm leading-6 text-zinc-200">{point}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
+      <ComoFunciona />
 
       <Costura />
 
-      {/* ── FUNCIONALIDADES ────────────────────────────────── */}
-      <section className="relative px-5 py-24 sm:px-8 lg:px-12">
-        <div className="mx-auto max-w-7xl">
-          <div className="max-w-3xl" data-reveal>
-            <SectionLabel>Funcionalidades</SectionLabel>
-            <h2 className="text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
-              Todo lo importante de la operacion, conectado en una misma capa.
-            </h2>
-          </div>
-
-          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {features.map(({ title, text, icon: Icon }, i) => (
-              <article
-                key={title}
-                data-reveal
-                style={delay((i % 4) * 70 + Math.floor(i / 4) * 60)}
-                className="group relative min-h-56 overflow-hidden rounded-xl border border-white/[0.08] bg-[#0B0D12] p-5 shadow-[0_24px_60px_-36px_rgba(0,0,0,1)] transition duration-200 hover:-translate-y-1.5 hover:border-pilotos-yellow/30"
-              >
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-[radial-gradient(circle,rgba(255,183,3,0.14),transparent_70%)] opacity-0 blur-xl transition-opacity duration-300 group-hover:opacity-100"
-                />
-                <div className="relative mb-5 flex h-11 w-11 items-center justify-center rounded-lg bg-pilotos-yellow text-pilotos-black shadow-[0_8px_24px_-8px_rgba(255,183,3,0.7)]">
-                  <Icon className="h-5 w-5" />
-                </div>
-                <h3 className="relative text-base font-bold text-white">{title}</h3>
-                <p className="relative mt-3 text-sm leading-6 text-zinc-400">{text}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
+      <Funciones />
 
       <Costura />
 
-      {/* ── GLORIA ─────────────────────────────────────────── */}
-      <section className="relative px-5 py-24 sm:px-8 lg:px-12">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute left-1/2 top-1/2 h-[560px] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(255,183,3,0.07),transparent_66%)] blur-3xl"
-        />
-        <div className="relative mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
-          <div data-reveal>
-            <SectionLabel>GlorIA / IA</SectionLabel>
-            <h2 className="text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl">
-              La capa conversacional que convierte mensajes en operacion.
-            </h2>
-            <p className="mt-5 text-base leading-7 text-zinc-400">
-              PilotOS puede apoyarse en GlorIA para recibir informacion, consultar datos y
-              activar automatizaciones. Hacia el cliente, GlorIA sigue siendo la identidad
-              visible; PilotOS aporta el contexto operativo de flotas.
-            </p>
-          </div>
-
-          <div className="relative grid gap-4 sm:grid-cols-3">
-            {/* Hilo que une los tres pasos. */}
-            <div
-              aria-hidden
-              className="pointer-events-none absolute left-0 right-0 top-12 hidden h-px bg-[linear-gradient(90deg,transparent,rgba(255,183,3,0.35),transparent)] sm:block"
-            />
-            {[
-              { title: 'Recibe', text: 'Partes, tickets y avisos desde el canal operativo.', icon: MessageCircle },
-              { title: 'Interpreta', text: 'Clasifica informacion y detecta tareas pendientes.', icon: Bot },
-              { title: 'Activa', text: 'Prepara registros, alertas y consultas recurrentes.', icon: Sparkles },
-            ].map(({ title, text, icon: Icon }, i) => (
-              <div
-                key={title}
-                data-reveal
-                style={delay(i * 110)}
-                className="relative rounded-xl border border-white/[0.1] bg-pilotos-panel p-5 shadow-[0_28px_70px_-40px_rgba(0,0,0,1)] transition duration-200 hover:-translate-y-1 hover:border-pilotos-yellow/30"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-pilotos-yellow/25 bg-pilotos-yellow/10">
-                  <Icon className="h-5 w-5 text-pilotos-yellow" />
-                </div>
-                <h3 className="mt-5 text-base font-bold text-white">{title}</h3>
-                <p className="mt-3 text-sm leading-6 text-zinc-400">{text}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <GloriaApoyo />
 
       <Costura />
 
