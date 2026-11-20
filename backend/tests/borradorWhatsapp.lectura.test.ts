@@ -24,7 +24,9 @@ function lectura(texto: string, flota = UNO, cambios = {}, extra: Partial<Parame
     const propuesta = analizarDocumentoVehiculo(texto, undefined, flota.length === 1 ? flota[0].matricula : undefined);
     return construirLectura({
         estadoDocumento: 'BORRADOR_WHATSAPP', estadoOcr: 'COMPLETADO', ocrTexto: texto, propuesta,
-        vehiculoIdFijado: null, cambios, flota, duplicado: null, hoy: HOY, ...extra,
+        vehiculoIdFijado: null, cambios, flota, duplicado: null, hoy: HOY,
+        // Parte del día anterior a la factura de taller (12/11): km conocidos salvo que la prueba diga otra cosa.
+        kmReferencia: { km: 250000, fecha: '11/11/2026' }, ...extra,
     });
 }
 
@@ -167,6 +169,32 @@ describe('casos reales del 2026-11-20', () => {
         expect(l.listo_para_confirmar).toBe(true);
         // pero con dos letras distintas ya es otra matrícula
         expect(lectura(TALLER + '\nVehículo: 8053KZZ', flota).vehiculo).toBeNull();
+    });
+});
+
+describe('km del día de la factura (regla de Alberto, 2026-11-20)', () => {
+    it('con un parte de hasta 3 días antes, los km son los de ese parte (no los de hoy)', () => {
+        const l = lectura(TALLER, UNO, {}, { kmReferencia: { km: 250000, fecha: '09/11/2026' } });
+        expect(l).toMatchObject({ km: 250000, km_origen: 'parte', km_parte_fecha: '09/11/2026', listo_para_confirmar: true });
+    });
+    it('con un desfase claro (último parte de agosto, factura de noviembre) se pregunta, y bloquea', () => {
+        const l = lectura(TALLER, UNO, {}, { kmReferencia: { km: 252792, fecha: '15/08/2026' } });
+        expect(l.km).toBeUndefined();
+        expect(l.dudosos).toContainEqual(expect.objectContaining({ campo: 'km', bloquea: true, motivo: expect.stringMatching(/15\/08\/2026/) }));
+        expect(l.listo_para_confirmar).toBe(false);
+    });
+    it('sin ningún parte también se pregunta; con la respuesta de la persona, listo', () => {
+        expect(lectura(TALLER, UNO, {}, { kmReferencia: null }).dudosos).toContainEqual(expect.objectContaining({ campo: 'km', bloquea: true }));
+        const l = lectura(TALLER, UNO, { km: 261500 }, { kmReferencia: null });
+        expect(l).toMatchObject({ km: 261500, km_origen: 'persona', listo_para_confirmar: true });
+    });
+    it('si la factura trae los km, mandan los de la factura', () => {
+        const l = lectura(TALLER + '\nKm: 249.800', UNO, {}, { kmReferencia: null });
+        expect(l).toMatchObject({ km: 249800, km_origen: 'documento', listo_para_confirmar: true });
+    });
+    it('sin mantenimiento que poner al día (IKEA como gasto del taxi) no se preguntan km', () => {
+        const l = lectura(IKEA, UNO, { es_del_taxi: true }, { kmReferencia: null });
+        expect(l.dudosos.find((d) => d.campo === 'km')).toBeUndefined();
     });
 });
 

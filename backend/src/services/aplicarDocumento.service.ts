@@ -110,7 +110,17 @@ export async function aplicarDocumentoConfirmado(
         // Para fechar la ejecución usamos los km del documento si los trae, y
         // si no, los oficiales. Nunca al revés: los del documento no suben al
         // vehículo (ver cabecera).
-        const kmEjecucion = datos.km_documento ?? doc.vehiculo.km_actuales;
+        // 2026-11-20 (regla de Alberto): sin km en el documento, los del DÍA DE LA FACTURA — el último parte enviado ese
+        // día o antes —, no los de hoy. Una factura del 15 subida el 20 no puede contar los km de cinco días después.
+        // Sin partes hasta esa fecha, los oficiales (comportamiento anterior).
+        const parteDelDia = datos.km_documento === undefined
+            ? await tx.parteDiario.findFirst({
+                where: { vehiculo_id: doc.vehiculo_id, estado: 'ENVIADO', fecha_trabajada: { lte: fechaDoc } },
+                orderBy: { fecha_trabajada: 'desc' },
+                select: { km_fin: true },
+            })
+            : null;
+        const kmEjecucion = datos.km_documento ?? parteDelDia?.km_fin ?? doc.vehiculo.km_actuales;
 
         const actualizados: string[] = [];
         // El vinculo documento->mantenimiento es 1:1 en el schema; si una

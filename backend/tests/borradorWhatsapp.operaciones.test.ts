@@ -37,6 +37,8 @@ const prismaMock: any = {
             : [{ id: 'vB', matricula: '0000BBB' }])),
     },
     vehiculoConductor: { findMany: vi.fn(async () => [{ vehiculo_id: 'v2' }]) },
+    // Parte del 11/11, un día antes de la factura de taller del 12/11.
+    parteDiario: { findFirst: vi.fn(async () => ({ km_fin: 250000, fecha_trabajada: new Date(Date.UTC(2026, 10, 11)) })) },
     documento: {
         findUnique: vi.fn(async ({ where }: any) => db.documentos.find((d) => d.id === where.id) ?? null),
         findFirst: vi.fn(async ({ where }: any) => db.documentos.find((d) => coincide(d, where)) ?? null),
