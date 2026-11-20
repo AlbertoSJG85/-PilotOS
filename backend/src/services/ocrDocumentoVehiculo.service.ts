@@ -200,7 +200,7 @@ export function extraerImporteFactura(texto: string): number | undefined {
 }
 
 /** La base imponible, solo para comprobar que el total leído tiene sentido. */
-function extraerBaseImponible(texto: string): number | undefined {
+export function extraerBaseImponible(texto: string): number | undefined {
     const m = normalizarNumerosOcr(texto)
         .match(/base\s*imponible\s*[:.]?\s*€?\s*(\d[\d.,\s]{0,12}[.,]\d{2})/i);
     return m?.[1] ? aEuros(m[1]) : undefined;
@@ -453,6 +453,9 @@ export function analizarDocumentoVehiculo(
         const insp = inspeccionDeFactura(texto);
         propuesta.mantenimientos_detectados = insp ? [insp] : [];
     }
+    // 2026-11-20: un papel que no es del vehículo no "resuelve" mantenimientos por una palabra suelta. Una captura del banco
+    // proponía "Seguro del vehículo" porque ponía "Seguros". Sin clasificar, el mantenimiento lo dice la persona.
+    if (tipo === 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR') propuesta.mantenimientos_detectados = [];
     if (propuesta.mantenimientos_detectados.length > 0) {
         propuesta.concepto = propuesta.mantenimientos_detectados
             .map((m) => NOMBRE_LEGIBLE[m] ?? m).join(', ');

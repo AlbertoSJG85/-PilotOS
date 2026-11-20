@@ -173,7 +173,7 @@ router.post('/:id/confirmar', requireAuth, async (req: AuthRequest, res: Respons
             where: { id: req.params.id },
             include: { vehiculo: { select: { cliente_id: true } } },
         });
-        if (!doc || !doc.vehiculo || !isSameTenant(req, doc.vehiculo.cliente_id)) {
+        if (!doc || !doc.vehiculo || !isSameTenant(req, doc.vehiculo.cliente_id) || doc.estado === 'BORRADOR_WHATSAPP') {
             res.status(404).json({ status: 'FAIL', error: 'not_found' });
             return;
         }
@@ -304,12 +304,13 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
             return;
         }
 
-        const where: any = { tipo: { in: TIPOS_VEHICULO } };
+        // Un borrador de WhatsApp no existe para la app hasta que la persona lo confirma (2026-11-20).
+        const where: any = { tipo: { in: TIPOS_VEHICULO }, estado: { not: 'BORRADOR_WHATSAPP' } };
         if (req.usuario?.role !== 'admin') {
             where.vehiculo = { cliente_id: req.usuario!.cliente_id };
         }
         if (req.query.vehiculo_id) where.vehiculo_id = String(req.query.vehiculo_id);
-        if (req.query.estado) where.estado = String(req.query.estado);
+        if (req.query.estado && String(req.query.estado) !== 'BORRADOR_WHATSAPP') where.estado = String(req.query.estado);
 
         const documentos = await prisma.documento.findMany({
             where,
