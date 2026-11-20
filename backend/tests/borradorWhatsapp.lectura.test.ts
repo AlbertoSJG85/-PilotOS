@@ -140,6 +140,15 @@ describe('casos reales del 2026-11-20', () => {
         expect(l.importe).toBe(86.85);
         expect(l.dudosos.find((d) => d.campo === 'importe')).toBeUndefined();
     });
+    it('"CASTROL 5W30" y "FILTRO ROSC. ACEITE" son un cambio de aceite y filtro (para que vuelva a avisar)', () => {
+        const texto = COOP.replace('Filtro aceite   1   20,00', 'MANO OBRA TALLER  1  11,21\nCASTROL 5W30 GTX C4  4,50  14,64  65,88\nFILTRO ROSC. ACEITE ALFA ROMEO, LANCIA,  1  6,21');
+        const p = analizarDocumentoVehiculo(texto);
+        expect(p.mantenimientos_detectados).toEqual(['Cambio de aceite y filtro']);
+        expect(lectura(texto).concepto).toBe('Cambio de aceite y filtro');
+        expect(analizarDocumentoVehiculo('FACTURA taller\nAceite 10W-40\nTOTAL 50,00 €').mantenimientos_detectados).toContain('Cambio de aceite y filtro');
+        // "filtro de aire" sigue siendo otra cosa
+        expect(analizarDocumentoVehiculo('FACTURA taller\nFiltro de aire\nTOTAL 20,00 €').mantenimientos_detectados).toEqual(['Filtro de aire']);
+    });
     it('un DECA de camión no es una factura de taller: no parece del taxi', () => {
         const l = lectura(DECA);
         expect(l.tipo).toBe('DOCUMENTO_VEHICULO_SIN_CLASIFICAR');

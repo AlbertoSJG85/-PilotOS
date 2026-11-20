@@ -351,7 +351,10 @@ const MAPA_MANTENIMIENTOS: Array<{ patron: RegExp; catalogo: string }> = [
     { patron: /pastilla[s]?\s+de\s+freno|pastillas/i, catalogo: 'Pastillas de freno' },
     { patron: /disco[s]?\s+de\s+freno/i, catalogo: 'Discos de freno' },
     { patron: /l[ií]quido\s+de\s+frenos/i, catalogo: 'Liquido de frenos' },
-    { patron: /aceite\s+(?:motor|y\s+filtro)|cambio\s+de\s+aceite|lubricante/i, catalogo: 'Cambio de aceite y filtro' },
+    // 2026-11-20: la factura real de la cooperativa ponía "CASTROL 5W30 GTX C4" y "FILTRO ROSC. ACEITE" y no se
+    // reconocía: el gasto entraba pero el cambio de aceite no se ponía al día y no volvía a avisar. Se aceptan el filtro
+    // de aceite, el grado del aceite (5W30, 10W-40) y las marcas habituales.
+    { patron: /aceite\s+(?:motor|y\s+filtro)|cambio\s+de\s+aceite|lubricante|filtro\b[^\n]{0,20}\baceite|aceite\b[^\n]{0,20}\bfiltro|\b\d{1,2}\s?w\s?-?\s?\d{2}\b|\bcastrol\b|\bmotul\b|\bmobil\s?1\b|\brepsol\s+(?:elite|leader)|\bshell\s+helix\b|\bquartz\b/i, catalogo: 'Cambio de aceite y filtro' },
     { patron: /filtro\s+de\s+aire/i, catalogo: 'Filtro de aire' },
     { patron: /filtro\s+(?:de\s+)?habit[aá]culo|filtro\s+(?:de\s+)?polen/i, catalogo: 'Filtro de habitaculo / polen' },
     // Basta con la palabra suelta, y es deliberado (C-064). La factura real
