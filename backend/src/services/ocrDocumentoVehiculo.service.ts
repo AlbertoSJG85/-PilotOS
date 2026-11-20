@@ -119,9 +119,13 @@ export function clasificarDocumento(texto: string): TipoDocumentoVehiculo {
     // 2026-11-19: una factura solo es "de taller" si habla del VEHÍCULO. Antes bastaba la palabra "factura" o "base imponible", y una
     // factura de IKEA mandada por WhatsApp quedó como FACTURA_TALLER del taxi (y al confirmarla habría sido un gasto de MANTENIMIENTO).
     // Una factura sin rastro del vehículo queda SIN_CLASIFICAR: la persona decide en la app si es del coche o un gasto general.
-    const esTaller = /\btaller\b|mano\s+de\s+obra|neum[aá]tic|reparaci[oó]n|recambio|\baceite\b|\bfiltro|pastillas\s+de\s+freno|carrocer[ií]a|chapa\s+y\s+pintura|\bembrague\b|\bbater[ií]a\b|alineaci[oó]n|\bkm\b|kil[oó]metr|veh[ií]culo|matr[ií]cula|\b\d{4}[\s-]?[bcdfghjklmnprstvwxyz]{3}\b/;
+    // 2026-11-20: hay señales FUERTES de taller (bastan solas) y DÉBILES ("km", "vehículo", "matrícula" o una matrícula
+    // suelta), que solo cuentan si además es una factura. Caso real: un DECA de transporte de un camión ("Km3",
+    // "MATRÍCULA TRACTORA", 3386JJH) salía como FACTURA_TALLER y se ofrecía guardarlo en el taxi.
+    const tallerFuerte = /\btaller\b|mano\s+de\s+obra|neum[aá]tic|reparaci[oó]n|recambio|\baceite\b|\bfiltro|pastillas\s+de\s+freno|carrocer[ií]a|chapa\s+y\s+pintura|\bembrague\b|\bbater[ií]a\b|alineaci[oó]n/;
+    const tallerDebil = /\bkm\b|kil[oó]metr|veh[ií]culo|matr[ií]cula|\b\d{4}[\s-]?[bcdfghjklmnprstvwxyz]{3}\b/;
     const esFactura = /\bfactura(s)?\b|base\s+imponible/.test(t);
-    if (esTaller.test(t)) return 'FACTURA_TALLER';
+    if (tallerFuerte.test(t) || (esFactura && tallerDebil.test(t))) return 'FACTURA_TALLER';
     if (esFactura) return 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR';
 
     return 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR';
@@ -185,7 +189,8 @@ export function extraerImporteFactura(texto: string): number | undefined {
         // "Total : 397,31€" en su propia línea, que es como lo imprime
         // cualquier factura española. Se permite algo de ruido de OCR entre
         // la palabra y la cifra, pero no otra palabra con dígitos.
-        new RegExp(String.raw`(?:^|\n)[^\n\d]{0,15}\btotal\b[^\n\d]{0,10}${CIFRA}`, 'i'),
+        // 2026-11-20: con sangría y el € delante ("        TOTAL      €      86,85"), como imprime la cooperativa del taxi.
+        new RegExp(String.raw`(?:^|\n)[ \t]*[^\n\d]{0,15}\btotal\b[^\n\d]{0,20}${CIFRA}`, 'i'),
         // "... Descuento -4,00 TOTAL 49,26 Euros": el total en medio de la
         // línea, pero solo si lo cierra la moneda. Sin ella no se arriesga.
         new RegExp(String.raw`\btotal\s*[:.]?\s*€?\s*${CIFRA}\s*(?:€|euros?\b)`, 'i'),
@@ -346,7 +351,10 @@ const MAPA_MANTENIMIENTOS: Array<{ patron: RegExp; catalogo: string }> = [
     { patron: /pastilla[s]?\s+de\s+freno|pastillas/i, catalogo: 'Pastillas de freno' },
     { patron: /disco[s]?\s+de\s+freno/i, catalogo: 'Discos de freno' },
     { patron: /l[ií]quido\s+de\s+frenos/i, catalogo: 'Liquido de frenos' },
-    { patron: /aceite\s+(?:motor|y\s+filtro)|cambio\s+de\s+aceite|lubricante/i, catalogo: 'Cambio de aceite y filtro' },
+    // 2026-11-20: la factura real de la cooperativa ponía "CASTROL 5W30 GTX C4" y "FILTRO ROSC. ACEITE" y no se
+    // reconocía: el gasto entraba pero el cambio de aceite no se ponía al día y no volvía a avisar. Se aceptan el filtro
+    // de aceite, el grado del aceite (5W30, 10W-40) y las marcas habituales.
+    { patron: /aceite\s+(?:motor|y\s+filtro)|cambio\s+de\s+aceite|lubricante|filtro\b[^\n]{0,20}\baceite|aceite\b[^\n]{0,20}\bfiltro|\b\d{1,2}\s?w\s?-?\s?\d{2}\b|\bcastrol\b|\bmotul\b|\bmobil\s?1\b|\brepsol\s+(?:elite|leader)|\bshell\s+helix\b|\bquartz\b/i, catalogo: 'Cambio de aceite y filtro' },
     { patron: /filtro\s+de\s+aire/i, catalogo: 'Filtro de aire' },
     { patron: /filtro\s+(?:de\s+)?habit[aá]culo|filtro\s+(?:de\s+)?polen/i, catalogo: 'Filtro de habitaculo / polen' },
     // Basta con la palabra suelta, y es deliberado (C-064). La factura real

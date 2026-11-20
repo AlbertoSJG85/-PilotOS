@@ -24,7 +24,9 @@ function lectura(texto: string, flota = UNO, cambios = {}, extra: Partial<Parame
     const propuesta = analizarDocumentoVehiculo(texto, undefined, flota.length === 1 ? flota[0].matricula : undefined);
     return construirLectura({
         estadoDocumento: 'BORRADOR_WHATSAPP', estadoOcr: 'COMPLETADO', ocrTexto: texto, propuesta,
-        vehiculoIdFijado: null, cambios, flota, duplicado: null, hoy: HOY, ...extra,
+        vehiculoIdFijado: null, cambios, flota, duplicado: null, hoy: HOY,
+        // Parte del día anterior a la factura de taller (12/11): km conocidos salvo que la prueba diga otra cosa.
+        kmReferencia: { km: 250000, fecha: '11/11/2026' }, ...extra,
     });
 }
 
@@ -128,6 +130,71 @@ describe('lectura de una foto de WhatsApp', () => {
         expect(lectura(TALLER, UNO, {}, { estadoDocumento: 'APLICADO' }).estado).toBe('ARCHIVADO');
         expect(lectura(TALLER, UNO, {}, { estadoDocumento: 'PENDIENTE_REVISION' }).estado).toBe('EN_REVISION');
         expect(lectura(TALLER, UNO, {}, { estadoDocumento: 'PENDIENTE_CONFIRMACION' }).estado).toBe('EN_LA_APP');
+    });
+});
+
+describe('casos reales del 2026-11-20', () => {
+    const COOP = `COOPERATIVA INDUSTRIAL DE AUTO - TAXIS\nFACTURA\nFecha: 04/11/2026\nREFERENCIA   DESCRIPCIÓN   UDS.  PRECIO  I.G.I.C.  IMPORTE\nFiltro aceite   1   20,00\n                                   SUBTOTAL           83,64\n                                   IMP. I.G.I.C.        3,21\n                                   TOTAL      €      86,85`;
+    const DECA = `Transportes y Excavaciones S.L.\nDOCUMENTO ELECTRÓNICO DE CONTROL ADMINISTRATIVO\nDATOS DEL TRANSPORTE\nFECHA DE REALIZACIÓN\n23/09/2026\nMATRÍCULA TRACTORA / RÍGIDO\n3386JJH\nDESTINO\nCarretera Gral. La Cisnera Km3\nNATURALEZA DE LA MERCANCÍA\nPiedra`;
+
+    it('el total con sangría y el € delante se lee (86,85)', () => {
+        const l = lectura(COOP);
+        expect(l.importe).toBe(86.85);
+        expect(l.dudosos.find((d) => d.campo === 'importe')).toBeUndefined();
+    });
+    it('"CASTROL 5W30" y "FILTRO ROSC. ACEITE" son un cambio de aceite y filtro (para que vuelva a avisar)', () => {
+        const texto = COOP.replace('Filtro aceite   1   20,00', 'MANO OBRA TALLER  1  11,21\nCASTROL 5W30 GTX C4  4,50  14,64  65,88\nFILTRO ROSC. ACEITE ALFA ROMEO, LANCIA,  1  6,21');
+        const p = analizarDocumentoVehiculo(texto);
+        expect(p.mantenimientos_detectados).toEqual(['Cambio de aceite y filtro']);
+        expect(lectura(texto).concepto).toBe('Cambio de aceite y filtro');
+        expect(analizarDocumentoVehiculo('FACTURA taller\nAceite 10W-40\nTOTAL 50,00 €').mantenimientos_detectados).toContain('Cambio de aceite y filtro');
+        // "filtro de aire" sigue siendo otra cosa
+        expect(analizarDocumentoVehiculo('FACTURA taller\nFiltro de aire\nTOTAL 20,00 €').mantenimientos_detectados).toEqual(['Filtro de aire']);
+    });
+    it('un DECA de camión no es una factura de taller: no parece del taxi', () => {
+        const l = lectura(DECA);
+        expect(l.tipo).toBe('DOCUMENTO_VEHICULO_SIN_CLASIFICAR');
+        expect(l.es_del_vehiculo).toBe(false);
+    });
+    it('una matrícula que no es de su flota no se asigna a "tu único vehículo": se pregunta', () => {
+        const l = lectura(TALLER + '\nMatrícula: 3386JJH');
+        expect(l.vehiculo).toBeNull();
+        expect(l.dudosos).toContainEqual(expect.objectContaining({ campo: 'vehiculo', bloquea: true, motivo: expect.stringMatching(/3386JJH, que no es de tu flota/) }));
+        expect(lectura(TALLER + '\nMatrícula: 3386JJH', UNO, { matricula: '1234' }).vehiculo).toMatchObject({ id: 'v1', como: 'elegido' });
+    });
+    it('la matrícula propia con una letra mal leída (8053KXX por 8053KKX) es su vehículo, no una ajena', () => {
+        const flota = [{ id: 'k', matricula: '8053KKX' }, { id: 'o', matricula: '1234BCD' }];
+        const l = lectura(TALLER + '\nVehículo: 8053KXX', flota);
+        expect(l.vehiculo).toMatchObject({ id: 'k', como: 'leido_en_documento' });
+        expect(l.listo_para_confirmar).toBe(true);
+        // pero con dos letras distintas ya es otra matrícula
+        expect(lectura(TALLER + '\nVehículo: 8053KZZ', flota).vehiculo).toBeNull();
+    });
+});
+
+describe('km del día de la factura (regla de Alberto, 2026-11-20)', () => {
+    it('con un parte de hasta 3 días antes, los km son los de ese parte (no los de hoy)', () => {
+        const l = lectura(TALLER, UNO, {}, { kmReferencia: { km: 250000, fecha: '09/11/2026' } });
+        expect(l).toMatchObject({ km: 250000, km_origen: 'parte', km_parte_fecha: '09/11/2026', listo_para_confirmar: true });
+    });
+    it('con un desfase claro (último parte de agosto, factura de noviembre) se pregunta, y bloquea', () => {
+        const l = lectura(TALLER, UNO, {}, { kmReferencia: { km: 252792, fecha: '15/08/2026' } });
+        expect(l.km).toBeUndefined();
+        expect(l.dudosos).toContainEqual(expect.objectContaining({ campo: 'km', bloquea: true, motivo: expect.stringMatching(/15\/08\/2026/) }));
+        expect(l.listo_para_confirmar).toBe(false);
+    });
+    it('sin ningún parte también se pregunta; con la respuesta de la persona, listo', () => {
+        expect(lectura(TALLER, UNO, {}, { kmReferencia: null }).dudosos).toContainEqual(expect.objectContaining({ campo: 'km', bloquea: true }));
+        const l = lectura(TALLER, UNO, { km: 261500 }, { kmReferencia: null });
+        expect(l).toMatchObject({ km: 261500, km_origen: 'persona', listo_para_confirmar: true });
+    });
+    it('si la factura trae los km, mandan los de la factura', () => {
+        const l = lectura(TALLER + '\nKm: 249.800', UNO, {}, { kmReferencia: null });
+        expect(l).toMatchObject({ km: 249800, km_origen: 'documento', listo_para_confirmar: true });
+    });
+    it('sin mantenimiento que poner al día (IKEA como gasto del taxi) no se preguntan km', () => {
+        const l = lectura(IKEA, UNO, { es_del_taxi: true }, { kmReferencia: null });
+        expect(l.dudosos.find((d) => d.campo === 'km')).toBeUndefined();
     });
 });
 

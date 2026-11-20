@@ -93,9 +93,16 @@ export interface CambiosBorrador {
     concepto?: string;
     matricula?: string;    // tiene que ser de su flota
     es_del_taxi?: boolean; // "sí, es un gasto del taxi" cuando el papel no lo parece
+    km?: number;           // km del coche el día de la factura, si los dice la persona
 }
 
-export type CampoDudoso = 'legible' | 'vehiculo' | 'fecha' | 'importe' | 'valida_hasta' | 'del_taxi';
+export type CampoDudoso = 'legible' | 'vehiculo' | 'fecha' | 'importe' | 'valida_hasta' | 'del_taxi' | 'km';
+
+/**
+ * Km del cambio (2026-11-20, regla de Alberto): los km son los del DÍA DE LA FACTURA, no los del día en que se manda.
+ * Se toman del último parte enviado ese día o antes; si ese parte es de más de estos días antes, se pregunta.
+ */
+export const DIAS_DESFASE_KM = 3;
 
 export interface Dudoso {
     campo: CampoDudoso;
@@ -120,6 +127,11 @@ export interface Lectura {
     dudosos: Dudoso[];
     duplicado: null | { motivo: 'misma_foto' | 'gasto_parecido'; fecha?: string; importe?: number; descripcion?: string };
     corregido: string[];
+    /** Km del coche cuando se hizo lo de la factura (para el próximo aviso del mantenimiento). */
+    km?: number;
+    km_origen?: 'documento' | 'parte' | 'persona';
+    /** Fecha del parte del que salen los km, si salen de un parte. */
+    km_parte_fecha?: string;
     listo_para_confirmar: boolean;
 }
 
@@ -141,10 +153,35 @@ export function normalizarMatricula(m: string): string {
 /** Todas las matrículas de la flota que aparecen en el texto (no "una matrícula cualquiera": el OCR inventa). */
 export function matriculasDeLaFlotaEnTexto(texto: string, flota: VehiculoFlota[]): VehiculoFlota[] {
     const limpio = normalizarMatricula(texto);
+    const leidas = matriculasModernasEnTexto(texto);
     return flota.filter((v) => {
         const m = normalizarMatricula(v.matricula);
-        return m.length >= 5 && limpio.includes(m);
+        return (m.length >= 5 && limpio.includes(m)) || leidas.some((l) => casiLaMisma(l, m));
     });
+}
+
+function matriculasModernasEnTexto(texto: string): string[] {
+    const vistas = new Set<string>();
+    for (const m of texto.matchAll(/\b(\d{4})\s*-?\s*([BCDFGHJKLMNPRSTVWXYZ]{3})\b/gi)) vistas.add(`${m[1]}${m[2].toUpperCase()}`);
+    return [...vistas];
+}
+
+/**
+ * Misma matrícula con UNA letra mal leída: mismas 4 cifras y 2 de 3 letras en su sitio. Caso real (2026-11-20): la
+ * factura ponía 8053KKX y el OCR leyó 8053KXX. Se enseña igual para que la persona la verifique.
+ */
+export function casiLaMisma(leida: string, propia: string): boolean {
+    const a = normalizarMatricula(leida), b = normalizarMatricula(propia);
+    if (!/^\d{4}[A-Z]{3}$/.test(a) || !/^\d{4}[A-Z]{3}$/.test(b) || a.slice(0, 4) !== b.slice(0, 4)) return false;
+    let distintas = 0;
+    for (let i = 4; i < 7; i++) if (a[i] !== b[i]) distintas++;
+    return distintas <= 1;
+}
+
+/** Matrículas modernas (1234BCD) del texto que NO son de la flota (ni una lectura casi igual), sin repetir. */
+export function matriculasAjenasEnTexto(texto: string, flota: VehiculoFlota[]): string[] {
+    const propias = flota.map((v) => normalizarMatricula(v.matricula));
+    return matriculasModernasEnTexto(texto).filter((n) => !propias.some((p) => casiLaMisma(n, p)));
 }
 
 /** "es del 5678", "el 5678DEF", "5678 def": a qué vehículo de la flota se refiere. Exacto o por las cifras. */
@@ -174,6 +211,8 @@ export interface EntradaLectura {
     cambios: CambiosBorrador;
     flota: VehiculoFlota[];
     duplicado: Lectura['duplicado'];
+    /** Último parte enviado del vehículo en la fecha de la factura o antes (DD/MM/YYYY). */
+    kmReferencia?: { km: number; fecha: string } | null;
     hoy?: Date;
 }
 
@@ -212,10 +251,15 @@ export function construirLectura(e: EntradaLectura): Lectura {
     let vehiculo: Lectura['vehiculo'] = null;
     const elegido = c.matricula ? vehiculoPorTexto(c.matricula, e.flota) : null;
     const leidos = matriculasDeLaFlotaEnTexto(texto, e.flota);
+    // 2026-11-20: si el papel pone una matrícula que NO es de su flota, no se asume "tu único vehículo": se pregunta.
+    // Caso real: un DECA de un camión (3386JJH) se iba a guardar en el taxi de Alberto.
+    const ajenas = leidos.length === 0 ? matriculasAjenasEnTexto(texto, e.flota) : [];
     if (elegido) {
         vehiculo = { ...elegido, como: 'elegido' };
     } else if (leidos.length === 1) {
         vehiculo = { ...leidos[0], como: 'leido_en_documento' };
+    } else if (ajenas.length > 0) {
+        vehiculo = null;
     } else if (e.flota.length === 1) {
         vehiculo = { ...e.flota[0], como: 'unico_vehiculo' };
     } else if (e.vehiculoIdFijado) {
@@ -225,7 +269,9 @@ export function construirLectura(e: EntradaLectura): Lectura {
     if (!vehiculo) {
         dudosos.push({
             campo: 'vehiculo',
-            motivo: leidos.length > 1 ? 'Aparecen varias matrículas de tu flota.' : 'El documento no dice de qué vehículo es.',
+            motivo: leidos.length > 1 ? 'Aparecen varias matrículas de tu flota.'
+                : ajenas.length > 0 ? `El documento pone la matrícula ${ajenas.join(', ')}, que no es de tu flota.`
+                : 'El documento no dice de qué vehículo es.',
             bloquea: true,
         });
     }
@@ -262,6 +308,30 @@ export function construirLectura(e: EntradaLectura): Lectura {
     const concepto = c.concepto ?? p.concepto;
     if (c.concepto && p.concepto && c.concepto !== p.concepto) corregido.push('concepto');
 
+    // Km del día de la factura: solo importan si pone al día un mantenimiento (de ellos sale el próximo aviso).
+    const mantenimientos = c.concepto ? detectarMantenimientos(c.concepto) : (p.mantenimientos_detectados ?? []);
+    let km: number | undefined;
+    let kmOrigen: Lectura['km_origen'];
+    let kmParteFecha: string | undefined;
+    if (c.km !== undefined) {
+        km = c.km; kmOrigen = 'persona';
+    } else if (p.km_documento !== undefined) {
+        km = p.km_documento; kmOrigen = 'documento';
+    } else if (mantenimientos.length > 0 && vehiculo && fecha && fechaDate) {
+        const ref = e.kmReferencia ?? null;
+        const refDate = ref ? parsearFechaEs(ref.fecha) : null;
+        const dias = refDate ? (fechaDate.getTime() - refDate.getTime()) / 86400000 : Infinity;
+        if (ref && refDate && dias >= 0 && dias <= DIAS_DESFASE_KM) {
+            km = ref.km; kmOrigen = 'parte'; kmParteFecha = ref.fecha;
+        } else {
+            dudosos.push({
+                campo: 'km',
+                motivo: ref ? `El último parte antes del ${fecha} es del ${ref.fecha}: no sé los km del coche ese día.` : `No hay partes para saber los km del coche el ${fecha}.`,
+                bloquea: true,
+            });
+        }
+    }
+
     return {
         estado: 'LISTO',
         legible: true,
@@ -278,6 +348,9 @@ export function construirLectura(e: EntradaLectura): Lectura {
         dudosos,
         duplicado: e.duplicado,
         corregido,
+        km,
+        km_origen: kmOrigen,
+        km_parte_fecha: kmParteFecha,
         listo_para_confirmar: !dudosos.some((d) => d.bloquea),
     };
 }
@@ -334,7 +407,7 @@ export async function lecturaDe(doc: Doc, quien: Remitente): Promise<Lectura> {
     const propuesta = (doc.ocr_datos_extraidos ?? null) as PropuestaDocumento | null;
     const cambios = cambiosDe(doc);
     const leyendo = doc.estado === ESTADO_BORRADOR && doc.estado_ocr === 'PENDIENTE';
-    return construirLectura({
+    const entrada = {
         estadoDocumento: doc.estado,
         estadoOcr: doc.estado_ocr,
         ocrTexto: doc.ocr_texto,
@@ -343,7 +416,24 @@ export async function lecturaDe(doc: Doc, quien: Remitente): Promise<Lectura> {
         cambios,
         flota: quien.flota,
         duplicado: leyendo ? null : await duplicadoDe(doc, quien.clienteId, propuesta, cambios),
+    };
+    // Primero se sabe de qué vehículo y de qué día es; luego se buscan los km de ese día en sus partes.
+    const previa = construirLectura(entrada);
+    const fechaDoc = parsearFechaEs(previa.fecha);
+    if (!previa.vehiculo || !fechaDoc) return previa;
+    return construirLectura({ ...entrada, kmReferencia: await kmDelDia(previa.vehiculo.id, fechaDoc) });
+}
+
+/** Último parte ENVIADO del vehículo en esa fecha o antes: sus km de cierre. */
+export async function kmDelDia(vehiculoId: string, fecha: Date): Promise<{ km: number; fecha: string } | null> {
+    const parte = await prisma.parteDiario.findFirst({
+        where: { vehiculo_id: vehiculoId, estado: 'ENVIADO', fecha_trabajada: { lte: fecha } },
+        orderBy: { fecha_trabajada: 'desc' },
+        select: { km_fin: true, fecha_trabajada: true },
     });
+    if (!parte) return null;
+    const d = parte.fecha_trabajada;
+    return { km: parte.km_fin, fecha: `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}` };
 }
 
 /** Crea el borrador al momento; la lectura (6-27 s) corre detrás. */
@@ -428,6 +518,11 @@ export async function corregirBorrador(id: string, telefono: string, entrada: Re
         nuevos.matricula = v.matricula;
     }
     if (entrada.es_del_taxi !== undefined) nuevos.es_del_taxi = entrada.es_del_taxi === true;
+    if (entrada.km !== undefined) {
+        const n = typeof entrada.km === 'number' ? entrada.km : Number(String(entrada.km).replace(/[.\s]|km/gi, ''));
+        if (!Number.isFinite(n) || n < 1000 || n > 2_000_000) return 'cambio_invalido';
+        nuevos.km = Math.round(n);
+    }
     if (Object.keys(nuevos).length === 0) return 'cambio_invalido';
 
     const cambios = { ...cambiosDe(r.doc), ...nuevos };
@@ -467,7 +562,7 @@ export async function confirmarBorrador(id: string, telefono: string): Promise<R
         valida_hasta: lectura.valida_hasta,
         importe: lectura.importe,
         matricula: lectura.vehiculo.matricula,
-        km_documento: propuesta.km_documento,
+        km_documento: lectura.km,
         mantenimientos,
         descripcion: lectura.concepto,
         ...(propuesta.tipo === 'DOCUMENTO_VEHICULO_SIN_CLASIFICAR' ? { tipo_gasto: 'OTRO' } : {}),
