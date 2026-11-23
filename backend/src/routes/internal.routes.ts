@@ -10,6 +10,7 @@ import { Router, Request, Response } from 'express';
 import express from 'express';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
+import { ingresosFiscales, leerRango } from '../services/ingresosFiscales.service';
 import { variantesTelefono } from '../lib/telefono';
 import { clienteTieneFeaturePro } from '../middleware/billing-access.middleware';
 import { procesarYGuardarImagen } from '../services/storage.service';
@@ -207,6 +208,42 @@ router.get('/resumen', async (req: Request, res: Response) => {
             error: 'server_error',
             message: isDev ? err.message : 'Error interno del servidor',
         });
+    }
+});
+
+/**
+ * GET /internal/ingresos?userId=123&desde=2026-01-01&hasta=2026-03-31
+ * Ingresos (bruto cobrado por el vehiculo) de un periodo, para la gestora en la sombra de LucIA.
+ * Solo lectura, mismo calculo que el panel del dueno. Maximo un ano por consulta.
+ */
+router.get('/ingresos', async (req: Request, res: Response) => {
+    try {
+        const userId = parseInt(req.query.userId as string, 10);
+        if (!userId || isNaN(userId)) {
+            res.status(400).json({ status: 'FAIL', error: 'missing_userId' });
+            return;
+        }
+        const rango = leerRango(req.query.desde, req.query.hasta);
+        if ('error' in rango) {
+            res.status(400).json({ status: 'FAIL', error: rango.error, message: rango.detalle });
+            return;
+        }
+
+        const conductor = await prisma.conductor.findFirst({
+            where: { usuario_id: userId, activo: true },
+            include: { cliente: true },
+        });
+        const cliente = conductor?.cliente
+            ?? await prisma.cliente.findFirst({ where: { patron_id: userId, activo: true } });
+        if (!cliente) {
+            res.json({ status: 'OK', found: false, ingresos: null });
+            return;
+        }
+
+        res.json({ status: 'OK', found: true, ingresos: await ingresosFiscales(cliente.id, rango) });
+    } catch (err: any) {
+        console.error('[INTERNAL] ingresos error:', err.message);
+        res.status(500).json({ status: 'FAIL', error: 'server_error', message: 'Error interno del servidor' });
     }
 });
 
