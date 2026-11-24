@@ -14,6 +14,7 @@ import { requireAuth, requireRol, AuthRequest } from '../middleware/auth.middlew
 import { sumarMeses } from '../lib/fechas';
 import { resolverPreferenciasAvisos } from '../services/mantenimientoAlertas.service';
 import { planPro, provisionarCliente } from '../lib/nexos-pay';
+import { limpiarCodigoAsociacion } from '../lib/codigo-asociacion';
 import { sincronizarCantidadAsalariados } from '../services/billing-sync.service';
 import { enviarBienvenidasOnboarding } from '../services/bienvenida.service';
 
@@ -77,6 +78,9 @@ router.post('/', async (req: Request, res: Response) => {
             km_actuales: rawData.km_actuales ? Number(rawData.km_actuales) : null,
             seguro_vigencia: rawData.seguro_vigencia ? new Date(rawData.seguro_vigencia) : null,
             preferencias_avisos: rawData.preferencias_avisos || null,
+            // Solo se sobrescribe si llega uno válido: guardar el borrador de un paso
+            // posterior sin código no puede borrar el que ya se había puesto.
+            ...(limpiarCodigoAsociacion(rawData.codigo_asociacion) ? { codigo_asociacion: limpiarCodigoAsociacion(rawData.codigo_asociacion) } : {}),
             completado: false,
         };
 
@@ -398,6 +402,7 @@ router.post('/:telefono/completar', async (req: Request, res: Response) => {
                 telefono: result.patronUser.telefono,
                 rolExterno: 'patron',
                 ...(result.conductoresAsalariados.length > 0 ? { plan: planPro() } : {}),
+                codigoPartner: onboarding.codigo_asociacion,
             });
             if (alta.ok) {
                 await sincronizarCantidadAsalariados(result.cliente.id, `onboarding-asalariados-${result.cliente.id}`);

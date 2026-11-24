@@ -641,6 +641,8 @@ model Onboarding {
   km_actuales         Int?
   seguro_vigencia     DateTime?
   preferencias_avisos Json?
+  /// Código de la asociación que recomendó PilotOS (PilotOS Partners). Sin descuento.
+  codigo_asociacion   String?
   created_at          DateTime  @default(now())
   updated_at          DateTime  @updatedAt
 

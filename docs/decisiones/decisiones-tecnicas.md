@@ -404,3 +404,16 @@ Registro de decisiones tecnicas importantes del proyecto.
 - Justificacion: **este patrón ya existía en RentOS** (`RentOS/nexos-api/frontend/index.html`, función `heroIntro()`) y funcionaba bien. Se replicó tal cual en vez de inventar uno nuevo — la regla de arquitectura NexOS de reutilizar antes que duplicar aplica también a un patrón de UI/animación, no solo a lógica de negocio. Si otro producto OS quiere el mismo efecto de intro en su landing, la referencia es este componente (`hero-intro.tsx`) o el de RentOS, no reinventarlo por tercera vez.
 - Impacto: Respeta `prefers-reduced-motion` (salta directo al estado final, sin logo grande) y tiene una red de seguridad por `setTimeout` de 6s por si `getBoundingClientRect` no encuentra medidas válidas (imagen que no llega a cargar, etc.) — nunca se queda la landing sin logo de cabecera ni contenido visible.
 - Riesgo aceptado: sin JavaScript, el hero se queda oculto (mismo trade-off que RentOS) — es una landing moderna que ya asume JS para el resto de interacciones, no una degradación aceptable para un sitio que necesite funcionar sin JS.
+
+---
+
+## DT-038 · Tarifa única y PilotOS Partners: PilotOS solo comunica hechos a NexOS Pay
+
+- Fecha: 2026-11-24
+- Area: Backend + Frontend / facturación (`lib/nexos-pay.ts`, `services/billing-sync.service.ts`, `routes/vehiculo.routes.ts`, `routes/onboarding.routes.ts`, onboarding de la app)
+- Decision: la tarifa (5,99 € el autónomo con un taxi, +2 € por asalariado, +3 € por vehículo adicional) y las comisiones de las asociaciones **viven en NexOS Pay** (ADR-0018 de Pay). PilotOS no calcula precios ni comisiones: solo comunica (a) el **código de asociación** del alta, (b) el número ABSOLUTO de asalariados activos y (c) el de vehículos adicionales (activos menos el primero, que va incluido).
+- Claves de componentes por plan (`clavesComponentes`): la tarifa única (`pilotos_taxi`) factura con `asalariados_adicionales` y `vehiculos_adicionales`; los planes antiguos (Control/Pro) conservan `asalariados_facturables` a 7,90 €. Las claves son distintas a propósito: Pay reescribe el precio unitario desde el catálogo en cada cambio de cantidad, y cambiar el precio de la clave antigua repreciaría a quien ya la tiene.
+- El plan lo decide Pay (`consultarEntitlement`). Si no responde, se usa la clave de siempre y Pay valida (un plan que no corresponde devuelve 409, sin cobrar nada). Los vehículos solo se sincronizan con la tarifa única.
+- Código de asociación: campo opcional en el onboarding (también con el parámetro `ref` en la URL), columna nula `onboarding.codigo_asociacion`. Solo letras, números, guion y guion bajo (máx. 64); lo demás se descarta. No cambia el precio ni la exención. Un código inválido **no bloquea el alta**: Pay avisa.
+- Activación: el cambio de tarifa para altas nuevas es de **configuración**, no de código: `NEXOS_PAY_PLAN_DEFECTO=pilotos_taxi` y `NEXOS_PAY_PLAN_PRO=pilotos_taxi`. Sin ello, el comportamiento actual no cambia.
+- Pendiente: PilotOS crea hoy a sus clientes en `fase_prueba` (sin cobro); cobrar con tarjeta tras la prueba requiere integrar la contratación de Pay (ADR-0013) y no forma parte de esta decisión.

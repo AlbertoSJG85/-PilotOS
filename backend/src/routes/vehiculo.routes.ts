@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { requireAuth, requireClienteContext, requirePatron, isSameTenant, AuthRequest } from '../middleware/auth.middleware';
+import { sincronizarCantidadVehiculos } from '../services/billing-sync.service';
 
 const router = Router();
 
@@ -48,6 +49,10 @@ router.post('/', requireAuth, requirePatron, async (req: AuthRequest, res: Respo
             data: { cliente_id: req.usuario.cliente_id, matricula, marca, modelo, fecha_matriculacion: new Date(fecha_matriculacion), tipo_combustible, tipo_transmision, km_actuales: Number(km_actuales) || 0 },
         });
         res.status(201).json({ status: 'OK', data: vehiculo });
+        // Vehículos adicionales en la cuota (tarifa única). Fuera de la respuesta y sin
+        // await, como el resto de la facturación: no puede retrasar ni deshacer el alta.
+        sincronizarCantidadVehiculos(req.usuario.cliente_id, `vehiculo-creado-${vehiculo.id}`)
+            .catch((error) => console.warn('[nexos-pay] sync vehículos fallida:', error?.message));
     } catch (err: any) {
         console.error('[VEHICULOS] Error:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });
@@ -74,6 +79,12 @@ router.patch('/:id', requireAuth, requirePatron, async (req: AuthRequest, res: R
             },
         });
         res.json({ status: 'OK', data: vehiculo });
+        if (activo !== undefined) {
+            // Alta o baja de un vehículo: cambia cuántos son adicionales. El id del
+            // evento lleva la hora para que baja y alta seguidas no se deduplicasen.
+            sincronizarCantidadVehiculos(existing.cliente_id, `vehiculo-${vehiculo.id}-${activo ? 'alta' : 'baja'}-${Date.now()}`)
+                .catch((error) => console.warn('[nexos-pay] sync vehículos fallida:', error?.message));
+        }
     } catch (err: any) {
         console.error('[VEHICULOS] Error:', err.message);
         res.status(500).json({ status: 'FAIL', error: 'server_error' });

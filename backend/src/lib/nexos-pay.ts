@@ -25,6 +25,8 @@ export interface DatosAlta {
   /** Slug del plan. Por defecto, el de la variable de entorno. */
   plan?: string;
   rolExterno?: string;
+  /** Código de la asociación que recomendó PilotOS (PilotOS Partners). No es un descuento. */
+  codigoPartner?: string | null;
 }
 
 export interface ResultadoAlta {
@@ -101,6 +103,9 @@ export async function provisionarCliente(datos: DatosAlta): Promise<ResultadoAlt
     rol_externo: datos.rolExterno || 'patron',
     plan: datos.plan || cfg.plan,
     origen: 'registro_producto',
+    // Atribución a la asociación. Pay la procesa DESPUÉS del alta y un código
+    // inválido no la bloquea: aquí solo se transporta.
+    ...(datos.codigoPartner ? { codigo_partner: datos.codigoPartner } : {}),
     cliente: {
       nombre: datos.nombre || datos.email,
       email: datos.email,
@@ -177,6 +182,20 @@ export async function consultarEntitlement(externalId: string | number): Promise
   }
 }
 
+/** Plan de la tarifa única (5,99 € + 2 € por asalariado + 3 € por vehículo adicional). */
+export const PLAN_TARIFA_UNICA = 'pilotos_taxi';
+
+/**
+ * Claves de los componentes variables según el plan del cliente. Las tarifas
+ * antiguas (Control/Pro) conservan su clave y su precio de 7,90 €: la tarifa
+ * única usa claves nuevas para que ningún cliente existente cambie de precio.
+ */
+export function clavesComponentes(plan: string | null | undefined): { asalariados: string; vehiculos: string | null } {
+  return plan === PLAN_TARIFA_UNICA
+    ? { asalariados: 'asalariados_adicionales', vehiculos: 'vehiculos_adicionales' }
+    : { asalariados: 'asalariados_facturables', vehiculos: null };
+}
+
 /**
  * Sincroniza el número ABSOLUTO de asalariados. El precio unitario no viaja:
  * NexOS Pay lo obtiene de su catálogo y deduplica por evento_id.
@@ -185,6 +204,8 @@ export async function actualizarCantidadAsalariados(datos: {
   externalId: string | number;
   cantidad: number;
   eventoId: string;
+  /** Clave del componente en el catálogo de Pay; por defecto la de las tarifas antiguas. */
+  clave?: string;
 }): Promise<{ ok: boolean; motivo?: string }> {
   const cfg = config();
   if (!cfg.activo) return { ok: false, motivo: 'desactivado' };
@@ -199,7 +220,7 @@ export async function actualizarCantidadAsalariados(datos: {
           producto: 'pilotos',
           external_system: 'pilotos',
           external_id: String(datos.externalId),
-          clave: 'asalariados_facturables',
+          clave: datos.clave ?? 'asalariados_facturables',
           cantidad: datos.cantidad,
           evento_id: datos.eventoId,
         }),
@@ -212,3 +233,6 @@ export async function actualizarCantidadAsalariados(datos: {
     return { ok: false, motivo: error instanceof Error ? error.message : 'error_red' };
   }
 }
+
+/** Mismo contrato para cualquier componente variable (asalariados, vehículos…). */
+export const actualizarCantidadComponente = actualizarCantidadAsalariados;

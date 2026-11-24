@@ -37,6 +37,8 @@ type OnboardingData = {
   email_patron: string;
   nif_cif: string;
   nombre_comercial: string;
+  /** Código de la asociación que te recomendó PilotOS. Opcional; no es un descuento. */
+  codigo_asociacion: string;
   tipo_actividad: string;
   matricula: string;
   marca_modelo: string;
@@ -53,6 +55,7 @@ const INITIAL: OnboardingData = {
   email_patron: '',
   nif_cif: '',
   nombre_comercial: '',
+  codigo_asociacion: '',
   tipo_actividad: 'TAXI',
   matricula: '',
   marca_modelo: '',
@@ -72,6 +75,13 @@ export default function OnboardingPage() {
   const [saving, setSaving] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [error, setError] = useState('');
+
+  // Enlace de una asociación (`/onboarding?ref=CODIGO`): rellena el código. Solo
+  // acepta letras, números, guion y guion bajo; lo demás se ignora.
+  useEffect(() => {
+    const ref = new URLSearchParams(window.location.search).get('ref')?.trim().toUpperCase() ?? '';
+    if (/^[A-Z0-9_-]{1,64}$/.test(ref)) setData((prev) => (prev.codigo_asociacion ? prev : { ...prev, codigo_asociacion: ref }));
+  }, []);
 
   useEffect(() => {
     if (data.telefono.length >= 9 && step === 0) {
@@ -158,6 +168,7 @@ export default function OnboardingPage() {
         email_patron: data.email_patron || undefined,
         nif_cif: data.nif_cif || undefined,
         nombre_comercial: data.nombre_comercial || undefined,
+        codigo_asociacion: data.codigo_asociacion || undefined,
         tipo_actividad: data.tipo_actividad,
         matricula: data.matricula || undefined,
         marca_modelo: data.marca_modelo || undefined,
@@ -280,6 +291,13 @@ export default function OnboardingPage() {
                   onChange={(e) => set('nombre_comercial', e.target.value)}
                 />
                 <p className="mt-1 text-xs text-zinc-500">Solo si tu taxi tiene un nombre de empresa. Si no, déjalo vacío.</p>
+                <Input
+                  label="Código de tu asociación (opcional)"
+                  placeholder="ASOC-TAXI"
+                  value={data.codigo_asociacion}
+                  onChange={(e) => set('codigo_asociacion', e.target.value.toUpperCase())}
+                />
+                <p className="mt-1 text-xs text-zinc-500">Si tu asociación o gremial te recomendó PilotOS, escribe su código. No cambia lo que pagas. Si no tienes, déjalo vacío.</p>
                 <div className="space-y-1.5">
                   <label className="block text-sm font-medium text-zinc-300">Tipo de actividad</label>
                   <select

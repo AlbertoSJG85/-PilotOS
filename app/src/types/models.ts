@@ -216,6 +216,8 @@ export interface Anomalia {
 export interface Onboarding {
   id: string;
   telefono: string;
+  /** Código de la asociación que recomendó PilotOS. Sin descuento. */
+  codigo_asociacion?: string | null;
   nombre_patron: string | null; // Mantenemos nombre interno pero UI dirá Propietario
   email_patron: string | null;
   nif_cif: string | null;
