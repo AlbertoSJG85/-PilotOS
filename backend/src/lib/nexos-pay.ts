@@ -236,3 +236,83 @@ export async function actualizarCantidadAsalariados(datos: {
 
 /** Mismo contrato para cualquier componente variable (asalariados, vehículos…). */
 export const actualizarCantidadComponente = actualizarCantidadAsalariados;
+
+// ─── Contratación con tarjeta (Pay ADR-0019) ────────────────────────────────
+//
+// PilotOS no pide datos fiscales, no enseña precios ni toca la tarjeta: pide a
+// Pay el enlace «Contratar» y manda allí al patrón. Pay le enseña el precio
+// real (tarifa + asalariados + vehículos), recoge sus datos y su «acepto» y
+// abre la página de tarjeta. Pay convierte la suscripción de prueba que ya
+// tiene: no se crea otra.
+
+export interface EstadoContratacion {
+  disponible: boolean;
+  /** sin_contratar | prueba | pendiente_metodo_pago | preparada | activa | expirada | anulada */
+  estado: string;
+  pruebaFinAt?: string | null;
+  inicioPagoAt?: string | null;
+  tarjeta?: { marca: string | null; ultimos4: string | null } | null;
+  motivo?: string;
+}
+
+function cuentaPilotOS(externalId: string | number) {
+  return { producto: 'pilotos', external_system: 'pilotos', external_id: String(externalId) };
+}
+
+/** URL de la página «Contratar» de Pay para este patrón, o null con el motivo. Nunca lanza. */
+export async function pedirEnlaceContratar(
+  externalId: string | number,
+  urlRetorno: string,
+): Promise<{ url: string | null; motivo?: string }> {
+  const cfg = config();
+  if (!cfg.activo || !cfg.baseUrl || !cfg.token) return { url: null, motivo: 'desactivado' };
+  try {
+    const res = await fetchConTimeout(
+      `${cfg.baseUrl}/internal/billing/contrataciones/enlace`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-token': cfg.token },
+        body: JSON.stringify({ ...cuentaPilotOS(externalId), url_retorno: urlRetorno }),
+      },
+      TIMEOUT_ALTA_MS,
+    );
+    const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+    if (!res.ok || !body.url) {
+      console.warn('[nexos-pay] enlace de contratar rechazado', res.status, body.error);
+      return { url: null, motivo: body.error || `http_${res.status}` };
+    }
+    return { url: body.url };
+  } catch (err) {
+    console.warn('[nexos-pay] enlace de contratar no disponible:', err instanceof Error ? err.message : String(err));
+    return { url: null, motivo: 'error_red' };
+  }
+}
+
+/** Estado de la contratación del patrón. Si Pay no responde, `disponible: false`. Nunca lanza. */
+export async function consultarContratacion(externalId: string | number): Promise<EstadoContratacion> {
+  const cfg = config();
+  if (!cfg.activo || !cfg.baseUrl || !cfg.token) return { disponible: false, estado: 'desconocido', motivo: 'desactivado' };
+  try {
+    const res = await fetchConTimeout(
+      `${cfg.baseUrl}/internal/billing/contrataciones/consulta`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-token': cfg.token },
+        body: JSON.stringify(cuentaPilotOS(externalId)),
+      },
+      TIMEOUT_ALTA_MS,
+    );
+    const body = (await res.json().catch(() => ({}))) as any;
+    if (res.status === 404 && body.error === 'sin_contratacion') return { disponible: true, estado: 'sin_contratar' };
+    if (!res.ok) return { disponible: false, estado: 'desconocido', motivo: body.error || `http_${res.status}` };
+    return {
+      disponible: true,
+      estado: body.estado,
+      pruebaFinAt: body.prueba_fin_at ?? null,
+      inicioPagoAt: body.inicio_pago_at ?? null,
+      tarjeta: body.metodo_pago ? { marca: body.metodo_pago.marca ?? null, ultimos4: body.metodo_pago.ultimos4 ?? null } : null,
+    };
+  } catch (err) {
+    return { disponible: false, estado: 'desconocido', motivo: err instanceof Error ? err.message : 'error_red' };
+  }
+}

@@ -15,3 +15,4 @@ export * from './drive';
 export * from './dashboard';
 export * from './usuarios';
 export * from './revisiones';
+export * from './suscripcion';

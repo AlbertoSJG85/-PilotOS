@@ -15,6 +15,7 @@ import { PeriodFilter } from '@/components/features/period-filter';
 import { PartesRetenidos } from '@/components/features/partes-retenidos';
 import { ViasPanel } from '@/components/features/vias-panel';
 import { RevisionesPendientes } from '@/components/features/revisiones-pendientes';
+import { TuPlan } from '@/components/features/tu-plan';
 
 function AdminDashboardContent() {
   const searchParams = useSearchParams();
@@ -133,6 +134,9 @@ function AdminDashboardContent() {
       <PageHeader title="Panel Ejecutivo" description="Resumen operativo, ingresos y alertas del periodo seleccionado.">
         <PeriodFilter />
       </PageHeader>
+
+      {/* Plan y contratación con tarjeta (NexOS Pay). Solo se ve si Pay responde. */}
+      <TuPlan />
 
       {/* KPI grid — el orden lo fijó Alberto (2026-08-12) y sigue el camino
           del dinero: lo que entra, lo que se va en combustible, lo que queda

@@ -27,6 +27,7 @@ import fotoRoutes from './routes/foto.routes';
 import documentoVehiculoRoutes from './routes/documentoVehiculo.routes';
 import notificacionRoutes from './routes/notificacion.routes';
 import driveRoutes from './routes/drive.routes';
+import suscripcionRoutes from './routes/suscripcion.routes';
 import incidenciaRoutes from './routes/incidencia.routes';
 import cierreRoutes from './routes/cierre.routes';
 import dashboardRoutes from './routes/dashboard.routes';
@@ -198,6 +199,11 @@ app.use('/uploads', async (req: express.Request, res: express.Response, next: ex
 // llevan su propio requireAuth y su propio requirePatron dentro del router,
 // más la comprobación de Pay que se les pone aquí.
 app.use('/api/drive', requireNexosPayAccess(), driveRoutes);
+
+// Plan y contratación (Pay ADR-0019). Antes del guardia de Pay a propósito: un
+// patrón con el acceso suspendido tiene que poder ver su plan y contratar.
+// Lleva su propio requireAuth + requirePatron.
+app.use('/api/suscripcion', suscripcionRoutes);
 
 // Pay gobierna el acceso del cliente PilotOS. Los routers conservan sus
 // controles RBAC propios; requireAuth es idempotente para no repetir consultas.

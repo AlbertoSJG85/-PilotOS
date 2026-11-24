@@ -417,3 +417,13 @@ Registro de decisiones tecnicas importantes del proyecto.
 - Código de asociación: campo opcional en el onboarding (también con el parámetro `ref` en la URL), columna nula `onboarding.codigo_asociacion`. Solo letras, números, guion y guion bajo (máx. 64); lo demás se descarta. No cambia el precio ni la exención. Un código inválido **no bloquea el alta**: Pay avisa.
 - Activación: el cambio de tarifa para altas nuevas es de **configuración**, no de código: `NEXOS_PAY_PLAN_DEFECTO=pilotos_taxi` y `NEXOS_PAY_PLAN_PRO=pilotos_taxi`. Sin ello, el comportamiento actual no cambia.
 - Pendiente: PilotOS crea hoy a sus clientes en `fase_prueba` (sin cobro); cobrar con tarjeta tras la prueba requiere integrar la contratación de Pay (ADR-0013) y no forma parte de esta decisión.
+
+## DT-039 · Contratación con tarjeta: PilotOS pide el enlace a NexOS Pay y no construye pantalla propia
+
+- Fecha: 2026-11-24
+- Area: Backend + Frontend / facturación (`lib/nexos-pay.ts`, `routes/suscripcion.routes.ts`, `components/features/tu-plan.tsx`, panel del patrón)
+- Decision: el paso de prueba a pago lo hace la contratación de NexOS Pay (ADR-0013 + ADR-0019 de Pay). PilotOS **no enseña precios, no pide datos fiscales y no toca la tarjeta**. El patrón pulsa «Contratar» en la tarjeta «Tu plan» del Panel. El backend pide a Pay el enlace (`POST /internal/billing/contrataciones/enlace` con la cuenta del patrón y la vuelta `APP_URL/admin?contratacion=vuelta`) y la app redirige. Pay enseña el precio real (tarifa + asalariados + vehículos), pide los datos de facturación, recoge el «acepto» y registra la tarjeta en Stripe. Pay **convierte la suscripción de prueba que ya existe**: no se crea otra, y se conservan los extras y la asociación.
+- Estado: `GET /api/suscripcion` lee `/contrataciones/consulta`. La tarjeta enseña «Activa tu plan» (con el fin de la prueba si lo hay), «Te falta añadir la tarjeta», «Estamos confirmando tu tarjeta» (al volver), «Todo listo» (primer cobro al terminar la prueba) o «Plan activo». Si Pay no responde o está apagado, no se enseña nada.
+- `/api/suscripcion` va montado **antes** del guardia de Pay: un patrón con el acceso suspendido tiene que poder ver su plan y contratar. Lleva su propio `requireAuth` + `requirePatron`; un conductor recibe 403.
+- Fin de la prueba sin tarjeta: Pay solo avisa, no corta (regla de Pay). Los patrones que ya están en prueba siguen igual: no se les cobra nada sin su «acepto» y su tarjeta.
+- Supera el «Pendiente» de DT-038.
