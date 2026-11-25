@@ -5,6 +5,8 @@ import { PageHeader } from '@/components/layout';
 import { Card, Badge, Skeleton, Button, Input } from '@/components/ui';
 import { getVehiculos, createVehiculo, updateVehiculo, getUsuarios } from '@/lib/api';
 import { ConductoresFlota } from '@/components/features/conductores-flota';
+import { notaFacturacion, useAccesoPilotOS } from '@/components/features/acceso-pilotos';
+import { CheckCircle2 } from 'lucide-react';
 import { formatKm } from '@/lib/utils';
 import type { Vehiculo, Conductor } from '@/types';
 
@@ -18,9 +20,18 @@ export default function FlotaPage() {
   const [showVehiculoForm, setShowVehiculoForm] = useState(false);
   const [formVehiculo, setFormVehiculo] = useState<Partial<Vehiculo>>({});
   const [errorVehiculo, setErrorVehiculo] = useState<string | null>(null);
+  const [avisoVehiculo, setAvisoVehiculo] = useState<string | null>(null);
+  const accesoPay = useAccesoPilotOS();
+  // El primer vehículo va incluido en la tarifa: solo los adicionales llevan suplemento.
+  const activosAntes = vehiculos.filter((v) => v.activo).length;
+  const conNota = (texto: string, cambio: 'alta' | 'baja', adicional: boolean) => {
+    const nota = adicional ? notaFacturacion(accesoPay, cambio) : null;
+    return nota ? `${texto} ${nota}` : texto;
+  };
 
   const abrirFormVehiculo = (v: Partial<Vehiculo>) => {
     setErrorVehiculo(null);
+    setAvisoVehiculo(null);
     setFormVehiculo(v);
     setShowVehiculoForm(true);
   };
@@ -62,6 +73,7 @@ export default function FlotaPage() {
           km_actuales: 0,
           ...formVehiculo,
         });
+        setAvisoVehiculo(conNota('Vehículo añadido.', 'alta', activosAntes >= 1));
       }
       setShowVehiculoForm(false);
       setFormVehiculo({});
@@ -75,6 +87,9 @@ export default function FlotaPage() {
     if (confirm(`¿Estás seguro de ${v.activo ? 'desactivar' : 'activar'} este vehículo?`)) {
       try {
         await updateVehiculo(v.id, { activo: !v.activo });
+        setAvisoVehiculo(v.activo
+          ? conNota('Vehículo desactivado.', 'baja', activosAntes - 1 >= 1)
+          : conNota('Vehículo activado.', 'alta', activosAntes >= 1));
         loadData();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : 'No se pudo cambiar el estado del vehículo.');
@@ -114,6 +129,12 @@ export default function FlotaPage() {
               Añadir vehículo
             </Button>
           </div>
+
+          {avisoVehiculo && (
+            <p role="status" className="mb-4 flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-950/20 px-3 py-2 text-sm text-emerald-300">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {avisoVehiculo}
+            </p>
+          )}
 
           {showVehiculoForm && (
             <Card className="mb-4 space-y-4 p-4 border border-blue-500/30">

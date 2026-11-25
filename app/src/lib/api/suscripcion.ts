@@ -35,6 +35,10 @@ export interface EstadoAcceso {
   contratada?: boolean;
   /** Solo para el patrón: sin_contratar | prueba | pendiente_metodo_pago | preparada | activa | expirada | anulada */
   estadoContratacion?: string | null;
+  /** Tarifa con suplemento por asalariado y por vehículo adicional. */
+  cobraExtras?: boolean;
+  /** La prueba gratuita no ha terminado (no se cobra nada todavía). */
+  enPrueba?: boolean;
 }
 
 export async function getEstadoAcceso(): Promise<ApiResponse<EstadoAcceso>> {

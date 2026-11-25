@@ -112,6 +112,25 @@ export function AccesoPilotOS({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Estado de acceso cargado por `AccesoPilotOS` (null si Pay no responde o fuera de la puerta). */
+export function useAccesoPilotOS(): EstadoAcceso | null {
+  return useContext(AccesoCtx)?.acceso ?? null;
+}
+
+/**
+ * Qué decirle al patrón sobre el cobro al dar de alta o de baja un asalariado
+ * o un vehículo adicional (decisión de Alberto, 2026-11-25): se cobra lo que
+ * haya el día del cobro; los días hasta entonces no se cobran. Sin importes:
+ * los precios son de Pay.
+ */
+export function notaFacturacion(acceso: EstadoAcceso | null, cambio: 'alta' | 'baja'): string | null {
+  if (!acceso?.disponible || !acceso.cobraExtras || !acceso.esPatron) return null;
+  if (cambio === 'baja') return acceso.enPrueba ? null : 'Deja de cobrarse a partir de tu próxima factura.';
+  return acceso.enPrueba
+    ? 'Mientras dure tu prueba gratuita no se cobra; se sumará a tu cuota cuando empieces a pagar.'
+    : 'Su suplemento irá en tu próxima factura. Los días hasta entonces no se cobran.';
+}
+
 /** Aviso de los últimos días de prueba. Se coloca arriba del contenido de cada vista. */
 export function AvisoPrueba({ className }: { className?: string }) {
   const ctx = useContext(AccesoCtx);

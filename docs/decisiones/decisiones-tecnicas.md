@@ -440,3 +440,4 @@ Registro de decisiones tecnicas importantes del proyecto.
 - Activación: Pay `CONTRATACION_OBLIGATORIA_PRODUCTOS=pilotos` + PilotOS `NEXOS_PAY_ENFORCE_ACCESS=true`. Antes, revisar los patrones con la prueba ya vencida (runbook de Pay).
 - Si Pay no responde: ni aviso ni bloqueo.
 - Se retira la tarjeta «Tu plan» del Panel (DT-039).
+- Altas y bajas de extras (Alberto, 2026-11-25): **se cobra lo que haya el día del cobro** (el día en que acabó la prueba, cada mes), sin prorrateo. Los días entre un alta y el siguiente cobro no se cobran, y una baja antes del cobro ya no se cobra. Pay ya funcionaba así (renovación con `importeMensual` del día). La app lo dice al dar de alta o de baja a un asalariado o un vehículo adicional («Su suplemento irá en tu próxima factura. Los días hasta entonces no se cobran», o en prueba «…se sumará a tu cuota cuando empieces a pagar»). El primer vehículo va incluido y no lleva aviso. Sin importes en PilotOS: los precios son de Pay.

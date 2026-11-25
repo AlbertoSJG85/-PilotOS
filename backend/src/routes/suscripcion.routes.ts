@@ -8,7 +8,7 @@
 import { Router, Response } from 'express';
 import { requireAuth, requirePatron, AuthRequest } from '../middleware/auth.middleware';
 import { patronId, refrescarEntitlement } from '../middleware/billing-access.middleware';
-import { consultarContratacion, enforceAccess, pedirEnlaceContratar } from '../lib/nexos-pay';
+import { consultarContratacion, enforceAccess, pedirEnlaceContratar, PLAN_TARIFA_UNICA } from '../lib/nexos-pay';
 import { sincronizarCantidadAsalariados, sincronizarCantidadVehiculos } from '../services/billing-sync.service';
 
 const router = Router();
@@ -73,6 +73,10 @@ router.get('/acceso', requireAuth, async (req: AuthRequest, res: Response) => {
       cuentaAtras: diasRestantes !== null && diasRestantes <= DIAS_CUENTA_ATRAS,
       contratada: vigente,
       estadoContratacion: contratacion?.disponible ? contratacion.estado : null,
+      // Tarifa con suplementos por asalariado y vehículo adicional: la app avisa
+      // al dar de alta o de baja que el cambio va en la próxima factura.
+      cobraExtras: e.plan === PLAN_TARIFA_UNICA,
+      enPrueba: restante !== null && restante > 0,
     },
   });
 });

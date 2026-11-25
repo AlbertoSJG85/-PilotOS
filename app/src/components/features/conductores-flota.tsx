@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { UserPlus, Plus, Trash2, UserMinus, RotateCcw, AlertTriangle, CheckCircle2, Pencil } from 'lucide-react';
 import { Card, Badge, Button, Input, Skeleton } from '@/components/ui';
 import { getUsuarios, createConductor, updateConductor, assignVehiculoConductor } from '@/lib/api';
+import { notaFacturacion, useAccesoPilotOS } from '@/components/features/acceso-pilotos';
 import type { ModeloReparto } from '@/lib/api';
 import { ApiError } from '@/lib/api/fetcher';
 import type { Conductor, Vehiculo } from '@/types';
@@ -116,6 +117,11 @@ export function ConductoresFlota({
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
+  const accesoPay = useAccesoPilotOS();
+  const conNota = (texto: string, cambio: 'alta' | 'baja') => {
+    const nota = notaFacturacion(accesoPay, cambio);
+    return nota ? `${texto} ${nota}` : texto;
+  };
 
   const [panelAlta, setPanelAlta] = useState(false);
   const [filas, setFilas] = useState<Fila[]>([]);
@@ -218,11 +224,12 @@ export function ConductoresFlota({
     }
     if (actuales.every((x) => x.hecho)) {
       setPanelAlta(false);
-      setAviso(
+      setAviso(conNota(
         hechos === 1
           ? 'Conductor dado de alta. Le hemos enviado un correo para que active su cuenta.'
           : `${hechos} conductores dados de alta. Cada uno recibirá un correo para activar su cuenta.`,
-      );
+        'alta',
+      ));
     }
   }
 
@@ -244,7 +251,7 @@ export function ConductoresFlota({
         });
         setAviso(`${c.usuario.nombre} ya no tiene acceso. Rellena los datos de quien le sustituye.`);
       } else {
-        setAviso(`${c.usuario.nombre} ya no tiene acceso. Sus partes anteriores se conservan.`);
+        setAviso(conNota(`${c.usuario.nombre} ya no tiene acceso. Sus partes anteriores se conservan.`, 'baja'));
       }
     } catch (err) {
       setErrorAccion(mensajeDe(err, 'No se pudo quitar al conductor.'));
@@ -258,7 +265,7 @@ export function ConductoresFlota({
     setTrabajando(true);
     try {
       await updateConductor(c.id, { activo: true });
-      setAviso(`${c.usuario.nombre} vuelve a tener acceso.`);
+      setAviso(conNota(`${c.usuario.nombre} vuelve a tener acceso.`, 'alta'));
       await cargar();
       onCambio();
     } catch (err) {

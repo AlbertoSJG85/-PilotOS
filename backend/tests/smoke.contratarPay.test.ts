@@ -145,7 +145,7 @@ const acceso = async () => (await (await fetch(`${base}/api/suscripcion/acceso`)
 describe('acceso: cuenta atrás y bloqueo', () => {
   it('a 3 días del fin: cuenta atrás con los días que quedan y el estado de la contratación', async () => {
     payFalso({ '/entitlements': entitlement(true, 2.5 * DIA), '/contrataciones/consulta': sinContratar });
-    expect(await acceso()).toMatchObject({ disponible: true, bloqueado: false, diasRestantes: 3, cuentaAtras: true, contratada: false, estadoContratacion: 'sin_contratar' });
+    expect(await acceso()).toMatchObject({ disponible: true, bloqueado: false, diasRestantes: 3, cuentaAtras: true, contratada: false, estadoContratacion: 'sin_contratar', cobraExtras: true, enPrueba: true });
   });
 
   it('a 5 días empieza la cuenta atrás; a 6 todavía no', async () => {
@@ -164,7 +164,7 @@ describe('acceso: cuenta atrás y bloqueo', () => {
   it('prueba terminada sin contratar: bloqueado, con el motivo de Pay', async () => {
     process.env.NEXOS_PAY_ENFORCE_ACCESS = 'true';
     payFalso({ '/entitlements': entitlement(false, -60_000, false, 'trial_ended_contract_required'), '/contrataciones/consulta': sinContratar });
-    expect(await acceso()).toMatchObject({ bloqueado: true, motivo: 'trial_ended_contract_required', diasRestantes: null, estadoContratacion: 'sin_contratar' });
+    expect(await acceso()).toMatchObject({ bloqueado: true, motivo: 'trial_ended_contract_required', diasRestantes: null, estadoContratacion: 'sin_contratar', enPrueba: false });
   });
 
   it('lo bloqueado se vuelve a preguntar a Pay sin caché: quien acaba de pagar entra al momento', async () => {
