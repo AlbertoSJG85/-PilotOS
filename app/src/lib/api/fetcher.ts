@@ -71,6 +71,13 @@ export async function apiFetch<T = unknown>(
     handleUnauthorized();
   }
 
+  // Pay ha cortado el acceso (fin de la prueba sin contratar, ADR-0020). La
+  // puerta de acceso de la app escucha este aviso y enseña la pantalla de
+  // reactivación en vez de dejar la página a medio cargar.
+  if (res.status === 402 && typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('pilotos:acceso-cortado'));
+  }
+
   const json = await res.json().catch(() => ({ status: 'FAIL', error: 'invalid_response' }));
 
   if (!res.ok || json.status === 'FAIL') {

@@ -43,6 +43,11 @@ export interface EntitlementPilotOS {
   estadoAcceso?: string;
   limites: Record<string, number | boolean | null>;
   motivo?: string;
+  /**
+   * Solo si Pay exige contratación en PilotOS (Pay ADR-0020). `vigente` = hay
+   * contratación preparada o activa; `pruebaFinAt` = fin de la prueba gratuita.
+   */
+  contratacion?: { vigente: boolean; pruebaFinAt: string | null };
 }
 
 export function estaActivo(): boolean {
@@ -173,6 +178,9 @@ export async function consultarEntitlement(externalId: string | number): Promise
       estadoAcceso: body.estado_acceso,
       limites: body.limites ?? {},
       motivo: body.acceso?.reason,
+      ...(body.contratacion
+        ? { contratacion: { vigente: body.contratacion.vigente === true, pruebaFinAt: body.contratacion.prueba_fin_at ?? null } }
+        : {}),
     };
   } catch (error) {
     return {

@@ -11,7 +11,8 @@ import { AuthRequest } from './auth.middleware';
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cache = new Map<number, { value: EntitlementPilotOS; expiresAt: number }>();
 
-async function patronId(req: AuthRequest): Promise<number | null> {
+/** Cuenta de Pay de quien hace la petición: el patrón, o el patrón de su empresa. */
+export async function patronId(req: AuthRequest): Promise<number | null> {
   if (req.usuario?.role === 'admin') return null;
   if (req.usuario?.es_patron) return req.usuario.id;
   if (!req.usuario?.cliente_id) return null;
@@ -34,6 +35,20 @@ async function entitlementConCache(id: number): Promise<EntitlementPilotOS> {
   // TTL acaba de vencer. Sin una decisión previa se permite paso degradado:
   // nunca se borran datos ni configuraciones por indisponibilidad externa.
   return cached?.value ?? current;
+}
+
+/**
+ * Pregunta a Pay sin caché y guarda la respuesta. Lo usa la comprobación de
+ * acceso de la app: quien acaba de pagar no puede esperar 5 minutos a que
+ * caduque un «no» guardado.
+ */
+export async function refrescarEntitlement(id: number): Promise<EntitlementPilotOS> {
+  const current = await consultarEntitlement(id);
+  if (current.disponible) {
+    cache.set(id, { value: current, expiresAt: Date.now() + CACHE_TTL_MS });
+    return current;
+  }
+  return cache.get(id)?.value ?? current;
 }
 
 export function requireNexosPayAccess(feature?: string) {

@@ -16,7 +16,14 @@ vi.mock('../src/middleware/auth.middleware', () => ({
   },
 }));
 
+const sync = vi.hoisted(() => ({ orden: [] as string[] }));
+vi.mock('../src/services/billing-sync.service', () => ({
+  sincronizarCantidadAsalariados: async (clienteId: string) => { sync.orden.push(`asalariados:${clienteId}`); },
+  sincronizarCantidadVehiculos: async (clienteId: string) => { sync.orden.push(`vehiculos:${clienteId}`); },
+}));
+
 import { consultarContratacion, pedirEnlaceContratar } from '../src/lib/nexos-pay';
+import { __clearBillingCacheForTests } from '../src/middleware/billing-access.middleware';
 import suscripcionRoutes from '../src/routes/suscripcion.routes';
 
 const fetchReal = globalThis.fetch;
@@ -29,7 +36,8 @@ function payFalso(respuestas: Record<string, { status: number; body: unknown }>)
     const u = String(url);
     if (!u.startsWith('https://pay.test')) return fetchReal(url, opts); // las llamadas de la prueba a la app
     llamadas.push({ url: u, body: opts?.body ? JSON.parse(String(opts.body)) : null });
-    const clave = Object.keys(respuestas).find((k) => u.endsWith(k))!;
+    if (u.includes('/contrataciones/enlace')) sync.orden.push('enlace');
+    const clave = Object.keys(respuestas).find((k) => u.includes(k))!;
     return new Response(JSON.stringify(respuestas[clave].body), { status: respuestas[clave].status });
   }));
 }
@@ -53,6 +61,9 @@ beforeEach(() => {
   process.env.NEXOS_PAY_INTERNAL_TOKEN = 'test-token';
   process.env.APP_URL = 'https://pilotos.nexostudios.digital';
   usuario.actual = { id: 42, es_patron: true, role: 'patron' };
+  delete process.env.NEXOS_PAY_ENFORCE_ACCESS;
+  sync.orden = [];
+  __clearBillingCacheForTests();
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -112,5 +123,81 @@ describe('estado de la contratación', () => {
   it('Pay caído: disponible false (la app no enseña nada), nunca un error', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED'); }));
     expect(await consultarContratacion(42)).toMatchObject({ disponible: false });
+  });
+});
+
+// ─── Pay ADR-0020: cuenta atrás de 5 días y corte al terminar la prueba ─────
+
+const DIA = 24 * 60 * 60 * 1000;
+function entitlement(allowed: boolean, finEnMs: number | null, vigente = false, reason = 'subscription_active') {
+  return {
+    status: 200,
+    body: {
+      status: 'OK', plan: 'pilotos_taxi', limites: {},
+      acceso: { allowed, reason },
+      contratacion: { obligatoria: true, vigente, prueba_fin_at: finEnMs === null ? null : new Date(Date.now() + finEnMs).toISOString() },
+    },
+  };
+}
+const sinContratar = { status: 404, body: { status: 'ERROR', error: 'sin_contratacion' } };
+const acceso = async () => (await (await fetch(`${base}/api/suscripcion/acceso`)).json()).data;
+
+describe('acceso: cuenta atrás y bloqueo', () => {
+  it('a 3 días del fin: cuenta atrás con los días que quedan y el estado de la contratación', async () => {
+    payFalso({ '/entitlements': entitlement(true, 2.5 * DIA), '/contrataciones/consulta': sinContratar });
+    expect(await acceso()).toMatchObject({ disponible: true, bloqueado: false, diasRestantes: 3, cuentaAtras: true, contratada: false, estadoContratacion: 'sin_contratar' });
+  });
+
+  it('a 5 días empieza la cuenta atrás; a 6 todavía no', async () => {
+    payFalso({ '/entitlements': entitlement(true, 4.5 * DIA), '/contrataciones/consulta': sinContratar });
+    expect((await acceso()).cuentaAtras).toBe(true);
+    __clearBillingCacheForTests();
+    payFalso({ '/entitlements': entitlement(true, 5.5 * DIA), '/contrataciones/consulta': sinContratar });
+    expect(await acceso()).toMatchObject({ diasRestantes: 6, cuentaAtras: false });
+  });
+
+  it('con la tarjeta ya puesta no hay cuenta atrás', async () => {
+    payFalso({ '/entitlements': entitlement(true, 2 * DIA, true) });
+    expect(await acceso()).toMatchObject({ contratada: true, diasRestantes: null, cuentaAtras: false });
+  });
+
+  it('prueba terminada sin contratar: bloqueado, con el motivo de Pay', async () => {
+    process.env.NEXOS_PAY_ENFORCE_ACCESS = 'true';
+    payFalso({ '/entitlements': entitlement(false, -60_000, false, 'trial_ended_contract_required'), '/contrataciones/consulta': sinContratar });
+    expect(await acceso()).toMatchObject({ bloqueado: true, motivo: 'trial_ended_contract_required', diasRestantes: null, estadoContratacion: 'sin_contratar' });
+  });
+
+  it('lo bloqueado se vuelve a preguntar a Pay sin caché: quien acaba de pagar entra al momento', async () => {
+    process.env.NEXOS_PAY_ENFORCE_ACCESS = 'true';
+    payFalso({ '/entitlements': entitlement(false, -60_000, false, 'trial_ended_contract_required'), '/contrataciones/consulta': sinContratar });
+    expect((await acceso()).bloqueado).toBe(true);
+    payFalso({ '/entitlements': entitlement(true, -60_000, true) });
+    expect((await acceso()).bloqueado).toBe(false);
+  });
+
+  it('Pay caído: no se bloquea a nadie', async () => {
+    process.env.NEXOS_PAY_ENFORCE_ACCESS = 'true';
+    vi.stubGlobal('fetch', vi.fn(async (url: string, opts?: RequestInit) => {
+      if (String(url).startsWith('https://pay.test')) throw new Error('ECONNREFUSED');
+      return fetchReal(url, opts);
+    }));
+    expect(await acceso()).toEqual({ disponible: false });
+  });
+
+  it('el patrón bloqueado recibe el estado de su contratación (para «Añadir tarjeta» o «confirmando»)', async () => {
+    process.env.NEXOS_PAY_ENFORCE_ACCESS = 'true';
+    payFalso({ '/entitlements': entitlement(false, -60_000, false, 'trial_ended_contract_required'), '/contrataciones/consulta': sinContratar });
+    const d = await acceso();
+    expect(d.esPatron).toBe(true);
+    expect(llamadas.some((l) => l.url.includes('/contrataciones/consulta'))).toBe(true);
+  });
+});
+
+describe('contratar con lo último activo', () => {
+  it('antes de pedir el enlace manda a Pay los asalariados y vehículos de hoy', async () => {
+    usuario.actual = { id: 42, es_patron: true, role: 'patron', cliente_id: 'cli-1' };
+    payFalso({ '/contrataciones/enlace': { status: 200, body: { url: 'https://pay.test/contratar/x' } } });
+    expect((await fetch(`${base}/api/suscripcion/contratar`, { method: 'POST' })).status).toBe(200);
+    expect(sync.orden).toEqual(['asalariados:cli-1', 'vehiculos:cli-1', 'enlace']);
   });
 });

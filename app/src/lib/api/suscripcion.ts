@@ -20,3 +20,23 @@ export async function getEstadoSuscripcion(): Promise<ApiResponse<EstadoSuscripc
 export async function contratarSuscripcion(): Promise<{ status: string; url?: string; message?: string }> {
   return apiFetch('/api/suscripcion/contratar', { method: 'POST', body: {} });
 }
+
+/** Acceso a PilotOS según NexOS Pay (ADR-0020): cuenta atrás de la prueba y bloqueo. */
+export interface EstadoAcceso {
+  /** false = Pay no responde o no exige contratación: la app no enseña nada. */
+  disponible: boolean;
+  esPatron?: boolean;
+  bloqueado?: boolean;
+  motivo?: string | null;
+  pruebaFinAt?: string | null;
+  diasRestantes?: number | null;
+  /** Quedan 5 días o menos y no ha contratado. */
+  cuentaAtras?: boolean;
+  contratada?: boolean;
+  /** Solo para el patrón: sin_contratar | prueba | pendiente_metodo_pago | preparada | activa | expirada | anulada */
+  estadoContratacion?: string | null;
+}
+
+export async function getEstadoAcceso(): Promise<ApiResponse<EstadoAcceso>> {
+  return apiFetch('/api/suscripcion/acceso');
+}

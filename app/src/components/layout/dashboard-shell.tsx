@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Image from 'next/image';
 import { Menu } from 'lucide-react';
 import { Sidebar } from './sidebar';
+import { AvisoPrueba } from '@/components/features/acceso-pilotos';
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -42,6 +43,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          <AvisoPrueba className="mb-6" />
           {children}
         </main>
       </div>

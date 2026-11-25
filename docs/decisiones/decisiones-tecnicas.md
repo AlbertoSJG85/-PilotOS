@@ -427,3 +427,16 @@ Registro de decisiones tecnicas importantes del proyecto.
 - `/api/suscripcion` va montado **antes** del guardia de Pay: un patrón con el acceso suspendido tiene que poder ver su plan y contratar. Lleva su propio `requireAuth` + `requirePatron`; un conductor recibe 403.
 - Fin de la prueba sin tarjeta: Pay solo avisa, no corta (regla de Pay). Los patrones que ya están en prueba siguen igual: no se les cobra nada sin su «acepto» y su tarjeta.
 - Supera el «Pendiente» de DT-038.
+
+## DT-040 · Fin de la prueba: cuenta atrás de 5 días y corte sin margen (Pay ADR-0020)
+
+- Fecha: 2026-11-25
+- Area: Backend + Frontend / acceso (`routes/suscripcion.routes.ts`, `middleware/billing-access.middleware.ts`, `components/features/acceso-pilotos.tsx`, layouts del panel y del conductor)
+- Decision (Alberto, 2026-11-25): el paso a pago no está en el panel; ocurre al **terminar la prueba**.
+  - Los **últimos 5 días**, si no ha contratado, se ve en toda la app (panel y vista del conductor, también en el móvil) «Te quedan N días de prueba gratuita» con «Activar PilotOS». El aviso del conductor no tiene botón: solo el patrón contrata.
+  - Terminada la prueba sin contratar, **se corta sin margen**. Se entra, pero todo está bloqueado: pantalla «Tu prueba gratuita ha terminado» con «Reactivar PilotOS» (o «PilotOS está en pausa» para el conductor). Los datos se conservan.
+  - Se contrata **lo que hay activo en ese momento**. Antes de pedir el enlace a Pay, `POST /api/suscripcion/contratar` reenvía la foto actual de asalariados y vehículos. Pay calcula el primer cobro con los componentes del día en que se activa.
+- Quién decide: Pay (`acceso.allowed=false`, `reason: trial_ended_contract_required`). PilotOS solo lo aplica, con el guardia de siempre (402) y `GET /api/suscripcion/acceso`, que pregunta a Pay sin caché para que quien acaba de pagar entre al momento.
+- Activación: Pay `CONTRATACION_OBLIGATORIA_PRODUCTOS=pilotos` + PilotOS `NEXOS_PAY_ENFORCE_ACCESS=true`. Antes, revisar los patrones con la prueba ya vencida (runbook de Pay).
+- Si Pay no responde: ni aviso ni bloqueo.
+- Se retira la tarjeta «Tu plan» del Panel (DT-039).
