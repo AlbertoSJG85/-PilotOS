@@ -9,6 +9,7 @@ import rateLimit from 'express-rate-limit';
 import { prisma } from '../lib/prisma';
 import { hashPassword, validarFortalezaPassword, verificarPassword } from '../lib/password';
 import { origenAjeno } from '../lib/sesion-cookie';
+import { claveDeIntento } from '../lib/limite-intentos';
 import { consultarResumenPartner } from '../lib/nexos-pay';
 import {
     borrarSesionPartner,
@@ -26,6 +27,8 @@ const limitador = rateLimit({
     limit: 10,
     standardHeaders: true,
     legacyHeaders: false,
+    // Por IP y cuenta (usuario o enlace): ver lib/limite-intentos.ts.
+    keyGenerator: claveDeIntento,
     message: { status: 'FAIL', error: 'too_many_requests', message: 'Demasiados intentos. Espera unos minutos y vuelve a probar.' },
 });
 

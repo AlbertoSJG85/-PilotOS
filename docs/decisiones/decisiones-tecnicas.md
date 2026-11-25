@@ -454,3 +454,9 @@ Registro de decisiones tecnicas importantes del proyecto.
 - Panel `/partners/panel`: comisión estimada del mes, progreso hacia el siguiente tramo, socios dados de alta, cuántos pagan, pendiente de liquidar, historial de 12 meses, liquidaciones, código y enlace para compartir (copiar / WhatsApp). Solo números: ningún dato de socios.
 - Correo: sale con el SMTP de PilotOS (`SMTP_URL`, info@), el mismo de las bienvenidas.
 - Pruebas: `tests/smoke.partners.test.ts` (21).
+
+## DT-042 · Límite de intentos por IP y cuenta (2026-11-25)
+
+- Medido en producción: la app llama al backend saliendo por `api.pilotos…` y Traefik pone la IP del propio servidor, así que **todas** las peticiones por la app compartían un único contador (10 intentos / 15 min para todos los taxistas juntos). La suplantación de IP que avisaba `ERR_ERL_PERMISSIVE_TRUST_PROXY` no era explotable (Traefik descarta el `X-Forwarded-For` del cliente).
+- Arreglo: `lib/limite-intentos.ts`. Contador por IP + cuenta (teléfono normalizado, usuario de partner o huella del enlace) en `/api/auth/*` y `/api/partners/*`; `trust proxy` = solo redes internas (`loopback, linklocal, uniquelocal`) en vez de `true`.
+- Pruebas: `tests/limite-intentos.test.ts`.

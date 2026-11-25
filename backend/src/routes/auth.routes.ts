@@ -12,6 +12,7 @@ import { esPlaceholder, hashPassword, validarFortalezaPassword, verificarPasswor
 import { enviarAvisoGloria } from '../services/notificacion.service';
 import { enviarEmail, esEmailEntregable, cuerpoCodigoRecuperacion, cuerpoCodigoActivacion } from '../services/email.service';
 import { emitirCookieSesion, borrarCookieSesion } from '../lib/sesion-cookie';
+import { claveDeIntento } from '../lib/limite-intentos';
 
 const router = Router();
 
@@ -22,6 +23,8 @@ const authLimiter = rateLimit({
     limit: 10,
     standardHeaders: true,
     legacyHeaders: false,
+    // Por IP y teléfono: por la app todos llegan con la misma IP (lib/limite-intentos.ts).
+    keyGenerator: claveDeIntento,
     message: { status: 'FAIL', error: 'too_many_requests', message: 'Demasiados intentos. Intentalo mas tarde.' },
 });
 

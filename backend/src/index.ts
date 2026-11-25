@@ -15,6 +15,7 @@ import { tokenDeLaPeticion } from './lib/sesion-cookie';
 import authRoutes from './routes/auth.routes';
 import onboardingRoutes from './routes/onboarding.routes';
 import partnersRoutes from './routes/partners.routes';
+import { PROXIES_DE_CONFIANZA } from './lib/limite-intentos';
 import uploadRoutes from './routes/upload.routes';
 
 // Routes — Protected API
@@ -69,8 +70,9 @@ app.use(helmet({
 }));
 
 // Trust HTTPS reverse proxy (Coolify/nginx) so req.protocol returns 'https'
-// and URLs stored in DB use the correct scheme.
-app.set('trust proxy', true);
+// and URLs stored in DB use the correct scheme. Solo los proxies de la red
+// interna, no cualquiera (ver lib/limite-intentos.ts).
+app.set('trust proxy', PROXIES_DE_CONFIANZA);
 
 // Middleware
 const allowedOrigins = process.env.ALLOWED_ORIGINS
