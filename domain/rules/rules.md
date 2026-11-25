@@ -1,5 +1,7 @@
 # PilotOS – Reglas del Sistema
 
+> **Aviso (2026-11-25):** especificación de la primera etapa, anterior al código actual. Puede no coincidir: contrastar siempre con el código (`backend/src`) y con `docs/decisiones/decisiones-tecnicas.md` antes de usarla.
+
 Este documento contiene las REGLAS inmutables del sistema PilotOS.
 Fuente: Documentación canónica.
 

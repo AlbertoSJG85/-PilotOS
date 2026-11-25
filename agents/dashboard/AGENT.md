@@ -1,5 +1,7 @@
 # Dashboard – Panel de Lectura
 
+> **Aviso (2026-11-25):** especificación de la primera etapa, anterior al código actual. Puede no coincidir: contrastar siempre con el código (`backend/src`) y con `docs/decisiones/decisiones-tecnicas.md` antes de usarla.
+
 ## Identidad
 
 El dashboard es una interfaz web de **SOLO LECTURA** para visualizar

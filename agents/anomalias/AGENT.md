@@ -1,5 +1,7 @@
 # Anomalías – Sistema de Anomalías Acumulativas
 
+> **Aviso (2026-11-25):** especificación de la primera etapa, anterior al código actual. Puede no coincidir: contrastar siempre con el código (`backend/src`) y con `docs/decisiones/decisiones-tecnicas.md` antes de usarla.
+
 ## Identidad
 
 Las anomalías son desviaciones del comportamiento esperado que el sistema

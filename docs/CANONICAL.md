@@ -1,5 +1,7 @@
 # PilotOS – Documento Canónico
 
+> **Aviso (2026-11-25):** documento de dominio de la primera etapa (febrero de 2026), **no** una norma que prevalezca sobre el código o las decisiones técnicas. Lo vigente: el código y `docs/decisiones/decisiones-tecnicas.md`.
+
 Este documento constituye la FUENTE ÚNICA DE VERDAD del sistema PilotOS.
 
 Todo comportamiento del sistema, agente, automatización o interfaz:

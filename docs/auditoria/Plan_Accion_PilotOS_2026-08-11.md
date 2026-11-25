@@ -1,5 +1,7 @@
 # Plan de acción PilotOS — verificación de la auditoría y hoja de ruta de corrección
 
+> **Aviso (2026-11-25):** plan de agosto, **no** es el estado actual: muchas tareas sin marcar ya están hechas (sesión en cookie, PIL-01 a PIL-04, etc.). Se conserva como entrada del plan de adaptación de noviembre (paso «reconciliar agosto»).
+
 ## Context
 
 Alberto aportó una auditoría de PilotOS fechada el 10 de agosto de 2026, con 31 hallazgos, y pidió **verificarla sin dar nada por válido** y después producir un documento de acción ejecutable por un modelo inferior.

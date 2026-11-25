@@ -1,5 +1,7 @@
 # Fotos – Gestión de Fotos, Reemplazos y Bloqueos
 
+> **Aviso (2026-11-25):** especificación de la primera etapa, anterior al código actual. Puede no coincidir: contrastar siempre con el código (`backend/src`) y con `docs/decisiones/decisiones-tecnicas.md` antes de usarla.
+
 ## Identidad
 
 El sistema de fotos gestiona la validación de imágenes adjuntas al Parte Diario

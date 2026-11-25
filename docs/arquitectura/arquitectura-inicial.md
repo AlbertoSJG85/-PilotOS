@@ -1,7 +1,6 @@
 # PilotOS — Arquitectura Inicial
 
-Fecha: 2026-03-09
-Estado: Primera capa funcional implementada
+Fecha: 2026-03-09 · revisado 2026-11-25 (retirados el «estado actual» y la clasificación del código heredado de marzo, ya superados). Para lo vigente manda el código; las decisiones están en `docs/decisiones/decisiones-tecnicas.md`.
 
 ---
 
@@ -224,53 +223,3 @@ El `cliente_id` es el tenant key de PilotOS. Todo query de datos operativos filt
 | P-08 Secrets en env | Sin fallbacks hardcodeados |
 | P-09 IAs no improvisan | LucIA opera solo sobre lo documentado |
 
----
-
-## 8. Clasificacion del codigo heredado
-
-### Se reutiliza (alineado con arquitectura objetivo)
-- `domain/rules/`, `domain/states/`, `domain/events/` — especificacion canonica, bien estructurada
-- `agents/*/AGENT.md` — especificaciones de agentes, completas y utiles
-- `services/ocr.service.ts` — logica de OCR funcional, se mantiene
-- `prisma/seed.ts` — catalogo de mantenimientos correcto
-- Logica de negocio en routes (validaciones R-PD-*, R-FT-*, etc.)
-
-### Se refactoriza (buena base, necesita ajustes)
-- `schema.prisma` — migrar de SQLite a PostgreSQL, añadir entidades faltantes, schema pilotos
-- `routes/*.ts` — añadir PrismaClient singleton, transacciones, auth consistente
-- `middleware/auth.ts` — eliminar JWT_SECRET hardcodeado, integrar con minos
-- `services/storage.service.ts` — preparar para cloud storage futuro
-- ~~`services/scheduler.service.ts` — migrar a n8n progresivamente~~ — **obsoleto (2026-08-11): se queda en node-cron, ver sección 5.1. No crear workflows n8n nuevos en PilotOS.**
-
-### Se marca como legacy (no encaja, se sustituye)
-- `services/whatsapp.service.ts` — PilotOS no envia WhatsApp directamente (decision confirmada)
-- `services/gloria.router.ts` — duplica el router de GlorIA (ya existe en GlorIA/src/services/router.ts)
-- `handlers/pilotos.handler.ts` — handler conversacional que deberia vivir en GlorIA, no en PilotOS
-- `routes/webhook.routes.ts` — webhook de WhatsApp debe vivir en GlorIA
-- `ConversacionContexto` (modelo Prisma) — el contexto conversacional vive en GlorIA
-
-### Justificacion de cada eliminacion
-
-**whatsapp.service.ts**: Decision confirmada — PilotOS no envia WhatsApp. Las notificaciones pasan por GlorIA + n8n. Mantener este servicio crearia un canal paralelo no alineado.
-
-**gloria.router.ts**: El router multi-planeta ya existe en `GlorIA/src/services/router.ts` con la misma logica. Mantener una copia en PilotOS viola el principio de no duplicacion.
-
-**pilotos.handler.ts**: Contiene logica conversacional (respuestas a intents, descarga de imagenes WhatsApp) que es responsabilidad de GlorIA/LucIA, no del backend de PilotOS. PilotOS expone endpoints API; GlorIA los consume.
-
-**webhook.routes.ts**: El webhook de Meta debe ser un unico punto de entrada en GlorIA. PilotOS no debe recibir webhooks de WhatsApp directamente.
-
-**ConversacionContexto**: El estado de conversacion es dominio de GlorIA. PilotOS no necesita esta tabla.
-
----
-
-## 9. Estado Actual y Siguiente Fase (Marzo 2026)
-
-**Estado actual:**
-1. **Backend PilotOS**: Base de API y BD estructurada robustamente. Endpoints `/internal/` operativos.
-2. **GlorIA (Frente 1 Finalizado)**: Integración de PilotOS/LucIA dinamizada correctamente sin fisuras en GlorIA. Emplea autenticación interna y fetch de contexo activo.
-3. **Frontend PilotOS (Frente 2 Inicializado)**: El prototipo descartado y auditado (`app/src/app`). Propuesta formal de Arquitectura v2 (App Router, Shadcn, Dark Mode) generada en `frontend-v2-propuesta.md`.
-
-**Siguiente Fase recomendada para Claude Code:**
-1. Implementar formulario nuevo gasto (Phase 3 actual).
-2. Crear detalle individual de parte y acciones reales de mantenimiento.
-3. Mejorar experiencia móvil en Conductor y consolidar UX global.

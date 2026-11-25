@@ -1,5 +1,7 @@
 # Parte Diario – Agente Núcleo de PilotOS
 
+> **Aviso (2026-11-25):** especificación de la primera etapa, anterior al código actual. Puede no coincidir: contrastar siempre con el código (`backend/src`) y con `docs/decisiones/decisiones-tecnicas.md` antes de usarla.
+
 ## Identidad
 
 El Parte Diario es el **NÚCLEO ABSOLUTO** del sistema PilotOS.

@@ -1,5 +1,7 @@
 # Incidencias – Sistema de Documentación de Errores
 
+> **Aviso (2026-11-25):** especificación de la primera etapa, anterior al código actual. Puede no coincidir: contrastar siempre con el código (`backend/src`) y con `docs/decisiones/decisiones-tecnicas.md` antes de usarla.
+
 ## Identidad
 
 Las incidencias documentan errores humanos graves y las decisiones
