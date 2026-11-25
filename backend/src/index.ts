@@ -14,6 +14,7 @@ import { tokenDeLaPeticion } from './lib/sesion-cookie';
 // Routes — Public API
 import authRoutes from './routes/auth.routes';
 import onboardingRoutes from './routes/onboarding.routes';
+import partnersRoutes from './routes/partners.routes';
 import uploadRoutes from './routes/upload.routes';
 
 // Routes — Protected API
@@ -136,6 +137,8 @@ app.use('/internal', requireInternalToken, internalRoutes);
 // ============================================
 app.use('/api/auth', authRoutes);
 app.use('/api/onboarding', onboardingRoutes);
+// Panel de las asociaciones (DT-041): sesión propia, no la de un taxista.
+app.use('/api/partners', partnersRoutes);
 
 // Uploads
 app.use('/api/upload', uploadRoutes);

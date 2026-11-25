@@ -189,3 +189,107 @@ export function plantillaBienvenidaAsalariado(datos: {
         html,
     };
 }
+
+// ─── PilotOS Partners (DT-041) ───────────────────────────────────────────────
+// Se escribe a la persona que lleva la asociación, de tú, como el resto de
+// correos de PilotOS. Una sola cuenta por asociación.
+
+function codigoDestacado(codigo: string): string {
+    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px;"><tr>
+<td align="center" style="padding:18px 12px;border:1px dashed ${AMARILLO};border-radius:12px;background:${NEGRO};">
+<div style="font-family:${FUENTE};font-size:12px;letter-spacing:1px;text-transform:uppercase;color:${GRIS};">Código de la asociación</div>
+<div style="margin-top:6px;font-family:${FUENTE};font-size:26px;font-weight:700;letter-spacing:2px;color:${AMARILLO};">${escaparHtml(codigo)}</div>
+</td></tr></table>`;
+}
+
+/** Bienvenida a una asociación recién dada de alta como partner, con el enlace para crear su acceso. */
+export function plantillaInvitacionPartner(datos: {
+    nombre: string;
+    codigo: string;
+    enlaceAcceso: string;
+    diasValidez: number;
+}): CorreoPlantilla {
+    const url = urlApp();
+    const enlaceSocios = `${url}/onboarding?ref=${encodeURIComponent(datos.codigo)}`;
+    const nombre = datos.nombre.trim();
+    const html = marco(
+        `${escaparHtml(nombre)} ya es partner de PilotOS`,
+        parrafo('Tu asociación ya está dada de alta en <strong style="color:#FFFFFF;">PilotOS Partners</strong>. Desde hoy, cada socio que empiece a usar PilotOS con el código de la asociación queda vinculado a ella, y la asociación cobra una comisión por cada mes que ese socio paga.')
+        + codigoDestacado(datos.codigo)
+        + parrafo('Compártelo con tus socios. Lo más cómodo es mandarles este enlace, que ya lleva el código puesto:')
+        + parrafo(`<a href="${enlaceSocios}" style="color:${AMARILLO};word-break:break-all;">${escaparHtml(enlaceSocios)}</a>`)
+        + parrafo('Usar el código no cambia lo que paga el socio.')
+        + `<div style="height:1px;background:${LINEA};margin:8px 0 24px;"></div>`
+        + parrafo('<strong style="color:#FFFFFF;">El panel de la asociación</strong><br>La asociación tiene un panel propio dentro de PilotOS para seguirlo de cerca: socios dados de alta, cuántos pagan cada mes, el tramo de comisión en el que está y sus liquidaciones.')
+        + parrafo('Para entrar, crea primero el usuario y la contraseña de la asociación:')
+        + boton('Crear usuario y contraseña', datos.enlaceAcceso)
+        + pasos([
+            'Pulsa el botón y elige un usuario y una contraseña.',
+            `Después entrarás siempre desde <a href="${url}/partners" style="color:${AMARILLO};">${escaparHtml(url.replace(/^https?:\/\//, ''))}/partners</a>.`,
+            'Es una sola cuenta para toda la asociación: compártela con quien lleve las cuentas.',
+        ])
+        + parrafo(`<span style="color:${GRIS};font-size:13px;">El enlace para crear el acceso caduca en ${datos.diasValidez} días. Si caduca, pide uno nuevo en la página de entrada con «He olvidado mi contraseña».</span>`),
+        `Has recibido este correo porque NexOS ha dado de alta a ${escaparHtml(nombre)} como partner de PilotOS.`,
+    );
+    return {
+        asunto: `${nombre} ya es partner de PilotOS`,
+        cuerpo: [
+            `${nombre} ya es partner de PilotOS.`,
+            '',
+            'Tu asociación ya está dada de alta en PilotOS Partners. Cada socio que empiece a usar PilotOS con el código de la asociación queda vinculado a ella, y la asociación cobra una comisión por cada mes que ese socio paga.',
+            '',
+            `Código de la asociación: ${datos.codigo}`,
+            '',
+            'Compártelo con tus socios. Lo más cómodo es mandarles este enlace, que ya lleva el código puesto:',
+            enlaceSocios,
+            'Usar el código no cambia lo que paga el socio.',
+            '',
+            'EL PANEL DE LA ASOCIACIÓN',
+            'La asociación tiene un panel propio dentro de PilotOS: socios dados de alta, cuántos pagan cada mes, el tramo de comisión y sus liquidaciones.',
+            '',
+            'Crea el usuario y la contraseña de la asociación aquí:',
+            datos.enlaceAcceso,
+            '',
+            `Después entrarás siempre desde ${url}/partners`,
+            'Es una sola cuenta para toda la asociación: compártela con quien lleve las cuentas.',
+            `El enlace caduca en ${datos.diasValidez} días. Si caduca, pide uno nuevo con «He olvidado mi contraseña».`,
+            '',
+            '— PilotOS',
+        ].join('\n'),
+        html,
+    };
+}
+
+/** Enlace para poner una contraseña nueva a la cuenta de una asociación. */
+export function plantillaRecuperacionPartner(datos: {
+    nombre: string;
+    usuario: string;
+    enlace: string;
+    minutos: number;
+}): CorreoPlantilla {
+    const nombre = datos.nombre.trim();
+    const html = marco(
+        'Nueva contraseña de PilotOS Partners',
+        parrafo(`Se ha pedido una contraseña nueva para la cuenta de <strong style="color:#FFFFFF;">${escaparHtml(nombre)}</strong>. El usuario de la asociación es <strong style="color:#FFFFFF;">${escaparHtml(datos.usuario)}</strong>.`)
+        + boton('Poner contraseña nueva', datos.enlace)
+        + parrafo(`<span style="color:${GRIS};font-size:13px;">El enlace caduca en ${datos.minutos} minutos y solo sirve una vez. Al cambiarla se cierra la sesión en todos los dispositivos.</span>`)
+        + parrafo(`<span style="color:${GRIS};font-size:13px;">Si nadie de la asociación lo ha pedido, ignora este correo: la contraseña no cambia.</span>`),
+        'Has recibido este correo porque alguien ha pedido cambiar la contraseña de esta cuenta de PilotOS Partners.',
+    );
+    return {
+        asunto: 'Nueva contraseña de PilotOS Partners',
+        cuerpo: [
+            `Se ha pedido una contraseña nueva para la cuenta de ${nombre}.`,
+            `Usuario de la asociación: ${datos.usuario}`,
+            '',
+            'Pon la contraseña nueva aquí:',
+            datos.enlace,
+            '',
+            `El enlace caduca en ${datos.minutos} minutos y solo sirve una vez.`,
+            'Si nadie de la asociación lo ha pedido, ignora este correo: la contraseña no cambia.',
+            '',
+            '— PilotOS',
+        ].join('\n'),
+        html,
+    };
+}

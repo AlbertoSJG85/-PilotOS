@@ -464,6 +464,14 @@ export default function LoginPage() {
             </Link>
           </p>
           <p>Si eres conductor, tu patron te da de alta y recibiras un correo.</p>
+          <p className="pt-3">
+            <Link
+              href="/partners"
+              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 px-3 py-1.5 font-medium text-zinc-400 transition-colors hover:border-pilotos-yellow/40 hover:text-pilotos-yellow"
+            >
+              Partners · acceso para asociaciones
+            </Link>
+          </p>
         </div>
       </div>
     </div>

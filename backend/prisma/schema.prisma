@@ -650,6 +650,37 @@ model Onboarding {
   @@schema("pilotos")
 }
 
+/// Cuenta de una asociación partner (PilotOS Partners, DT-041). UNA por asociación:
+/// la comparte quien lleve sus cuentas. El partner y sus números son de NexOS Pay;
+/// aquí solo se guarda cómo entra (usuario, contraseña, enlace de alta).
+model PartnerCuenta {
+  id                     String    @id @default(uuid())
+  /// Código del partner en Pay (el mismo que usan sus socios al darse de alta).
+  codigo                 String    @unique
+  nombre                 String
+  email                  String
+  /// Lo elige la asociación al crear su acceso. Nulo hasta entonces.
+  usuario                String?   @unique
+  password_hash          String?
+  /// Falso cuando Pay deja de tenerla como partner de PilotOS: no puede entrar.
+  activo                 Boolean   @default(true)
+  /// Enlace de un solo uso (alta o recuperación). Solo se guarda su huella SHA-256.
+  token_hash             String?   @unique
+  /// invitacion | recuperacion
+  token_tipo             String?
+  token_expira           DateTime?
+  invitacion_enviada_at  DateTime?
+  invitacion_error       String?
+  /// Cambiar la contraseña cierra todas las sesiones abiertas antes.
+  sesiones_validas_desde DateTime  @default(now())
+  ultimo_acceso          DateTime?
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @updatedAt
+
+  @@map("partner_cuentas")
+  @@schema("pilotos")
+}
+
 model LegalAcceptances {
   id                      Int        @id @default(autoincrement())
   user_id                 Int?

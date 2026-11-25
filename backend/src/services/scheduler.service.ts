@@ -18,6 +18,7 @@ import { procesarMantenimientos } from './mantenimientoAlertas.service';
 import { clienteTieneFeaturePro } from '../middleware/billing-access.middleware';
 import { conCandado } from './job-lease.service';
 import { purgarBorradoresWhatsapp } from './borradorWhatsapp.service';
+import { sincronizarPartners } from './partners.service';
 
 const TIMEZONE = 'Atlantic/Canary';
 
@@ -138,6 +139,17 @@ export function iniciarScheduler(): SchedulerHandle {
     }, { timezone: TIMEZONE });
     console.log(`  ✅ Purga de borradores antiguos: diario a las 03:00 (${TIMEZONE})`);
 
+    // Cada 10 minutos — asociaciones partner nuevas en Pay: cuenta y correo de bienvenida (DT-041)
+    const tareaPartners = cron.schedule('*/10 * * * *', () => {
+        conCandado(prisma, 'partners-sincronizar', TTL_CANDADO_SEGUNDOS, async () => { await sincronizarPartners(); });
+    }, { timezone: TIMEZONE });
+    console.log('  ✅ Asociaciones partner (bienvenida y acceso): cada 10 minutos');
+    // Y una vez al arrancar: tras un despliegue no hay que esperar a la siguiente vuelta.
+    const arranquePartners = setTimeout(() => {
+        conCandado(prisma, 'partners-sincronizar', TTL_CANDADO_SEGUNDOS, async () => { await sincronizarPartners(); });
+    }, 30_000);
+    arranquePartners.unref?.();
+
     // Run immediately on startup in development
     if (process.env.NODE_ENV === 'development') {
         console.log('  🔄 [DEV] Ejecutando verificación inicial...');
@@ -148,6 +160,8 @@ export function iniciarScheduler(): SchedulerHandle {
         detener: () => {
             tareaMantenimientos.stop();
             tareaPurga.stop();
+            tareaPartners.stop();
+            clearTimeout(arranquePartners);
             console.log('⏰ [Scheduler] Tareas programadas detenidas.');
         },
     };

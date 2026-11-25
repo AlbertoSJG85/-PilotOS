@@ -442,3 +442,15 @@ Registro de decisiones tecnicas importantes del proyecto.
 - Se retira la tarjeta «Tu plan» del Panel (DT-039).
 - Altas y bajas de extras (Alberto, 2026-11-25): **se cobra lo que haya el día del cobro** (el día en que acabó la prueba, cada mes), sin prorrateo. Los días entre un alta y el siguiente cobro no se cobran, y una baja antes del cobro ya no se cobra. Pay ya funcionaba así (renovación con `importeMensual` del día). La app lo dice al dar de alta o de baja a un asalariado o un vehículo adicional («Su suplemento irá en tu próxima factura. Los días hasta entonces no se cobran», o en prueba «…se sumará a tu cuota cuando empieces a pagar»). El primer vehículo va incluido y no lleva aviso. Sin importes en PilotOS: los precios son de Pay.
 - Cortesía con fecha (Pay ADR-0021, 2026-11-25): si en ONE se da cortesía por un periodo o hasta una fecha, PilotOS usa la misma cuenta atrás y el mismo bloqueo, con el texto «periodo gratuito» (`gratisPor: 'cortesia'`). La cortesía para siempre no tiene aviso ni corte.
+
+## DT-041 · PilotOS Partners: panel de las asociaciones (2026-11-25)
+
+- Decisión (Alberto): al dar de alta una asociación en ONE, PilotOS le manda un correo de bienvenida con su código y un enlace para crear usuario y contraseña. **Una cuenta por asociación.** El panel está en PilotOS: botón «Partners · acceso para asociaciones» en `/login` → `/partners`.
+- El código NO abre el panel (lo tienen todos los socios); entra con usuario (o el correo) y contraseña.
+- Tabla `pilotos.partner_cuentas` (migración `20261125200000_partner_cuentas`, aditiva). Solo cómo entra la asociación; el partner y sus números son de Pay (ADR-0022).
+- Sincronización `sincronizarPartners` (scheduler cada 10 min con candado, y 30 s tras arrancar): lee de Pay las asociaciones con acuerdo de PilotOS; a la nueva con correo le crea la cuenta y le manda la bienvenida; reintenta si el correo no salió; reenvía si cambia el correo antes de crear el acceso; desactiva la que deja de ser partner. Si Pay no responde, no toca nada.
+- Enlaces de un solo uso: bienvenida 14 días, recuperación 60 min; en la base solo la huella SHA-256. «He olvidado mi contraseña» reenvía la bienvenida si aún no hay acceso.
+- Sesión propia: cookie `pilotos_partner` (HttpOnly, 12 h) firmada con una clave derivada de `JWT_SECRET`, así que no abre ninguna ruta de taxistas. Cambiar la contraseña cierra las sesiones anteriores. Límite de intentos y comprobación de `Origin` en lo que escribe.
+- Panel `/partners/panel`: comisión estimada del mes, progreso hacia el siguiente tramo, socios dados de alta, cuántos pagan, pendiente de liquidar, historial de 12 meses, liquidaciones, código y enlace para compartir (copiar / WhatsApp). Solo números: ningún dato de socios.
+- Correo: sale con el SMTP de PilotOS (`SMTP_URL`, info@), el mismo de las bienvenidas.
+- Pruebas: `tests/smoke.partners.test.ts` (21).

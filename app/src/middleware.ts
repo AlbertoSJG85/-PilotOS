@@ -36,6 +36,13 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // ── PilotOS Partners (DT-041): panel de las asociaciones ───────────────────
+  // Tiene su propia sesión (cookie `pilotos_partner`), que comprueba el backend.
+  // La sesión de un taxista no cuenta aquí ni le redirige a ningún sitio.
+  if (pathname === '/partners' || pathname.startsWith('/partners/')) {
+    return NextResponse.next();
+  }
+
   // ── Rutas públicas: login y onboarding ────────────────────────────────────
   if (pathname === '/login' || pathname === '/onboarding') {
     if (token) {

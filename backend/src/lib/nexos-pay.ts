@@ -327,3 +327,61 @@ export async function consultarContratacion(externalId: string | number): Promis
     return { disponible: false, estado: 'desconocido', motivo: err instanceof Error ? err.message : 'error_red' };
   }
 }
+
+// ─── PilotOS Partners: acceso de las asociaciones (DT-041, Pay ADR-0022) ─────
+
+export interface PartnerPortal {
+  codigo: string;
+  nombre: string;
+  email: string | null;
+  activo: boolean;
+}
+
+/**
+ * Asociaciones con acuerdo de PilotOS en Pay. `null` si no se ha podido leer:
+ * quien llama NO debe interpretar eso como «no hay ninguna» (cerraría el acceso
+ * de todas por un corte de red).
+ */
+export async function listarPartnersPortal(): Promise<PartnerPortal[] | null> {
+  const cfg = config();
+  if (!cfg.activo || !cfg.baseUrl || !cfg.token) return null;
+  try {
+    const res = await fetchConTimeout(
+      `${cfg.baseUrl}/internal/billing/partners-portal?producto=pilotos`,
+      { headers: { 'x-internal-token': cfg.token } },
+      TIMEOUT_ALTA_MS,
+    );
+    if (!res.ok) {
+      console.warn('[nexos-pay] partners: lectura rechazada', res.status);
+      return null;
+    }
+    const body = (await res.json()) as { partners?: PartnerPortal[] };
+    return Array.isArray(body.partners) ? body.partners : null;
+  } catch (err) {
+    console.warn('[nexos-pay] partners: no se han podido leer:', err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+export type ResumenPartner =
+  | { ok: true; datos: Record<string, unknown> }
+  | { ok: false; motivo: 'no_encontrado' | 'no_disponible' };
+
+/** Números de una asociación para su panel. Solo números: Pay no manda clientes. */
+export async function consultarResumenPartner(codigo: string): Promise<ResumenPartner> {
+  const cfg = config();
+  if (!cfg.activo || !cfg.baseUrl || !cfg.token) return { ok: false, motivo: 'no_disponible' };
+  try {
+    const res = await fetchConTimeout(
+      `${cfg.baseUrl}/internal/billing/partners-portal/${encodeURIComponent(codigo)}/resumen?producto=pilotos`,
+      { headers: { 'x-internal-token': cfg.token } },
+      TIMEOUT_ALTA_MS,
+    );
+    if (res.status === 404) return { ok: false, motivo: 'no_encontrado' };
+    if (!res.ok) return { ok: false, motivo: 'no_disponible' };
+    const { status: _s, ...datos } = (await res.json()) as Record<string, unknown>;
+    return { ok: true, datos };
+  } catch {
+    return { ok: false, motivo: 'no_disponible' };
+  }
+}
