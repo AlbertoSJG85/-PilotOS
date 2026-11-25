@@ -39,6 +39,8 @@ export interface EstadoAcceso {
   cobraExtras?: boolean;
   /** La prueba gratuita no ha terminado (no se cobra nada todavía). */
   enPrueba?: boolean;
+  /** Por qué es gratis ahora: prueba gratuita o cortesía con fecha. */
+  gratisPor?: 'prueba' | 'cortesia';
 }
 
 export async function getEstadoAcceso(): Promise<ApiResponse<EstadoAcceso>> {

@@ -77,6 +77,8 @@ router.get('/acceso', requireAuth, async (req: AuthRequest, res: Response) => {
       // al dar de alta o de baja que el cambio va en la próxima factura.
       cobraExtras: e.plan === PLAN_TARIFA_UNICA,
       enPrueba: restante !== null && restante > 0,
+      // Cortesía con fecha (Pay ADR-0021): mismos avisos, pero «periodo gratuito».
+      gratisPor: e.tipoExencion === 'cortesia_temporal' ? 'cortesia' : 'prueba',
     },
   });
 });

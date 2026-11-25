@@ -48,6 +48,8 @@ export interface EntitlementPilotOS {
    * contratación preparada o activa; `pruebaFinAt` = fin de la prueba gratuita.
    */
   contratacion?: { vigente: boolean; pruebaFinAt: string | null };
+  /** Exención de la suscripción en Pay (fase_prueba, cortesia_temporal…). */
+  tipoExencion?: string | null;
 }
 
 export function estaActivo(): boolean {
@@ -178,6 +180,7 @@ export async function consultarEntitlement(externalId: string | number): Promise
       estadoAcceso: body.estado_acceso,
       limites: body.limites ?? {},
       motivo: body.acceso?.reason,
+      tipoExencion: body.suscripcion?.tipo_exencion ?? null,
       ...(body.contratacion
         ? { contratacion: { vigente: body.contratacion.vigente === true, pruebaFinAt: body.contratacion.prueba_fin_at ?? null } }
         : {}),

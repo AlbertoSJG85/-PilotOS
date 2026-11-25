@@ -161,6 +161,13 @@ describe('acceso: cuenta atrás y bloqueo', () => {
     expect(await acceso()).toMatchObject({ contratada: true, diasRestantes: null, cuentaAtras: false });
   });
 
+  it('una cortesía con fecha usa la misma cuenta atrás, como «periodo gratuito»', async () => {
+    const e = entitlement(true, 2.5 * DIA);
+    (e.body as any).suscripcion = { tipo_exencion: 'cortesia_temporal' };
+    payFalso({ '/entitlements': e, '/contrataciones/consulta': sinContratar });
+    expect(await acceso()).toMatchObject({ cuentaAtras: true, diasRestantes: 3, gratisPor: 'cortesia' });
+  });
+
   it('prueba terminada sin contratar: bloqueado, con el motivo de Pay', async () => {
     process.env.NEXOS_PAY_ENFORCE_ACCESS = 'true';
     payFalso({ '/entitlements': entitlement(false, -60_000, false, 'trial_ended_contract_required'), '/contrataciones/consulta': sinContratar });

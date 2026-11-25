@@ -159,14 +159,15 @@ export function AvisoPrueba({ className }: { className?: string }) {
   const dias = acceso.diasRestantes;
   const ultimo = dias <= 1;
   const urgente = dias <= 2;
-  const titulo = ultimo ? 'Último día de prueba gratuita' : `Te quedan ${dias} días de prueba gratuita`;
+  const periodo = acceso.gratisPor === 'cortesia' ? 'periodo gratuito' : 'prueba gratuita';
+  const titulo = ultimo ? `Último día de ${periodo}` : `Te quedan ${dias} días de ${periodo}`;
   const confirmando = acceso.estadoContratacion && CONFIRMANDO.has(acceso.estadoContratacion);
   const faltaTarjeta = acceso.estadoContratacion === 'pendiente_metodo_pago';
 
   const texto = acceso.esPatron
     ? faltaTarjeta
       ? 'Ya aceptaste el plan: solo falta tu tarjeta para seguir sin cortes.'
-      : `Si quieres seguir disfrutando de PilotOS, actívalo antes del ${fechaHora(acceso.pruebaFinAt)}. No se cobra nada hasta que termine la prueba.`
+      : `Si quieres seguir disfrutando de PilotOS, actívalo antes del ${fechaHora(acceso.pruebaFinAt)}. No se cobra nada hasta que termine.`
     : 'Tu patrón tiene que activar PilotOS para que podáis seguir usándolo.';
 
   return (
@@ -201,6 +202,7 @@ function PantallaReactivar({
   acceso, vuelta, trabajando, error, contratar,
 }: { acceso: EstadoAcceso; vuelta: boolean; trabajando: boolean; error: string | null; contratar: () => void }) {
   const finPrueba = acceso.motivo === 'trial_ended_contract_required';
+  const periodo = acceso.gratisPor === 'cortesia' ? 'Tu periodo gratuito' : 'Tu prueba gratuita';
   const confirmando = vuelta && acceso.estadoContratacion && CONFIRMANDO.has(acceso.estadoContratacion);
   const faltaTarjeta = acceso.estadoContratacion === 'pendiente_metodo_pago';
 
@@ -214,7 +216,7 @@ function PantallaReactivar({
     titulo = 'Estamos confirmando tu tarjeta';
     texto = 'Tarda unos segundos. En cuanto esté, PilotOS se abre solo.';
   } else if (finPrueba) {
-    titulo = 'Tu prueba gratuita ha terminado';
+    titulo = `${periodo} ha terminado`;
     texto = faltaTarjeta
       ? 'Ya aceptaste el plan: añade tu tarjeta para volver a usar PilotOS. Tus datos están guardados.'
       : 'Tus partes, vehículos y conductores están guardados. Para volver a usar PilotOS, reactívalo: verás el precio exacto antes de aceptar.';
