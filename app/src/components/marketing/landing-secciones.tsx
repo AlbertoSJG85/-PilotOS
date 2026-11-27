@@ -377,6 +377,133 @@ export function Funciones() {
   );
 }
 
+/* ── Precios: la tarifa única de Pay (pilotos_taxi), sin letra pequeña ── */
+
+// Cifras del catálogo de NexOS Pay (pilotos_taxi). Pay es la fuente de verdad:
+// si cambia la tarifa allí, hay que cambiarla aquí en el mismo cambio.
+const BASE = 5.99;
+const POR_ASALARIADO = 2;
+const POR_VEHICULO_EXTRA = 3;
+
+const euros = (n: number) => `${n.toFixed(2).replace('.', ',')} €`;
+
+const incluido = [
+  'Partes diarios desde la app, comparados con el ticket',
+  'Mantenimientos, ITV y seguro con aviso antes de vencer',
+  'Gastos y documentos con una foto, también por WhatsApp',
+  'GlorIA por WhatsApp y correo',
+  'Cierre de mes y reparto calculados',
+];
+
+const ejemplos = [
+  { quien: 'Autónomo con su taxi', taxis: 1, asalariados: 0 },
+  { quien: 'Un taxi y un asalariado', taxis: 1, asalariados: 1 },
+  { quien: 'Dos taxis y dos asalariados', taxis: 2, asalariados: 2 },
+  { quien: 'Tres taxis y cuatro asalariados', taxis: 3, asalariados: 4 },
+].map((e) => ({
+  ...e,
+  total: BASE + e.asalariados * POR_ASALARIADO + (e.taxis - 1) * POR_VEHICULO_EXTRA,
+}));
+
+export function Precios() {
+  return (
+    <section id="precios" className="relative scroll-mt-24 px-5 py-24 sm:px-8 lg:px-12">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute right-0 top-1/3 h-[460px] w-[460px] rounded-full bg-[radial-gradient(circle,rgba(255,183,3,0.08),transparent_68%)] blur-3xl"
+      />
+      <div className="relative mx-auto max-w-7xl">
+        <div className="mx-auto max-w-3xl text-center" data-reveal>
+          <Etiqueta>Precios</Etiqueta>
+          <h2 className="text-3xl font-black leading-tight tracking-tight text-white sm:text-5xl">
+            Un precio. Pagas solo lo que tienes.
+          </h2>
+          <p className="mx-auto mt-5 max-w-xl text-base leading-7 text-zinc-400">
+            Sin planes que comparar. Empiezas con 30 días de prueba y decides al final.
+          </p>
+        </div>
+
+        <div className="mx-auto mt-14 grid max-w-5xl gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+          {/* La tarifa. */}
+          <article
+            data-reveal
+            className="relative overflow-hidden rounded-2xl border border-pilotos-yellow/30 bg-[#0B0D12] p-7 shadow-[0_40px_100px_-50px_rgba(255,183,3,0.35)] sm:p-9"
+          >
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,183,3,0.7),transparent)]"
+            />
+            <p className="text-sm font-semibold text-zinc-300">PilotOS para tu taxi</p>
+            <p className="mt-3 flex items-baseline gap-2">
+              <span className="text-6xl font-black tracking-tight text-white">5,99 €</span>
+              <span className="text-base font-semibold text-zinc-400">/ mes</span>
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">Impuestos aparte · incluye tu primer vehículo</p>
+
+            <div className="mt-7 grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                <p className="text-2xl font-black text-pilotos-yellow">+ {POR_ASALARIADO} €</p>
+                <p className="mt-1 text-sm text-zinc-300">por cada asalariado</p>
+              </div>
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                <p className="text-2xl font-black text-pilotos-yellow">+ {POR_VEHICULO_EXTRA} €</p>
+                <p className="mt-1 text-sm text-zinc-300">por cada vehículo más</p>
+              </div>
+            </div>
+
+            <ul className="mt-7 space-y-3">
+              {incluido.map((linea) => (
+                <li key={linea} className="flex items-start gap-3 text-sm leading-6 text-zinc-300">
+                  <Check className="mt-1 h-4 w-4 shrink-0 text-pilotos-yellow" strokeWidth={3} />
+                  {linea}
+                </li>
+              ))}
+            </ul>
+
+            <Link
+              href="/onboarding"
+              className="group mt-8 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-pilotos-yellow px-5 text-sm font-bold text-pilotos-black shadow-[0_10px_34px_-10px_rgba(255,183,3,0.65)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#ffc533]"
+            >
+              Empezar 30 días de prueba
+              <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+            </Link>
+            <p className="mt-3 text-center text-xs text-zinc-500">
+              Antes de que acabe la prueba te avisamos y contratas con tarjeta si quieres seguir.
+            </p>
+          </article>
+
+          {/* Cuánto pagarías tú. */}
+          <aside data-reveal style={delay(120)} className="flex flex-col rounded-2xl border border-white/[0.08] bg-[#0B0D12]/60 p-7 sm:p-9">
+            <p className="text-sm font-semibold text-zinc-300">¿Cuánto pagarías tú?</p>
+            <ul className="mt-5 flex-1 divide-y divide-white/[0.08]">
+              {ejemplos.map((e) => (
+                <li key={e.quien} className="flex items-center justify-between gap-4 py-4">
+                  <div>
+                    <p className="text-sm font-bold text-white">{e.quien}</p>
+                    <p className="mt-0.5 text-xs text-zinc-500">
+                      {euros(BASE)}
+                      {e.asalariados > 0 && ` + ${e.asalariados} × ${POR_ASALARIADO} €`}
+                      {e.taxis > 1 && ` + ${e.taxis - 1} × ${POR_VEHICULO_EXTRA} €`}
+                    </p>
+                  </div>
+                  <p className="shrink-0 text-xl font-black text-white">
+                    {euros(e.total)}
+                    <span className="ml-1 text-xs font-semibold text-zinc-500">/mes</span>
+                  </p>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-4 rounded-lg bg-white/[0.04] px-4 py-3 text-xs leading-5 text-zinc-400">
+              Se cobra lo que tengas dado de alta el día del cobro. Si das de baja un asalariado o un
+              vehículo, el mes siguiente ya no lo pagas.
+            </p>
+          </aside>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ── GlorIA: el apoyo por WhatsApp ───────────────────────────────────── */
 
 const apoyos = [

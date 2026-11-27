@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { ScrollReveal } from '@/components/marketing/scroll-reveal';
 import { HeroIntro } from '@/components/marketing/hero-intro';
-import { ComoFunciona, Funciones, GloriaApoyo, Problema } from '@/components/marketing/landing-secciones';
+import { ComoFunciona, Funciones, GloriaApoyo, Precios, Problema } from '@/components/marketing/landing-secciones';
 
 export const metadata: Metadata = {
   title: 'PilotOS | Gestion inteligente para flotas',
@@ -113,6 +113,12 @@ export default function Home() {
             priority
           />
           <nav className="flex items-center gap-2 sm:gap-3">
+            <a
+              href="#precios"
+              className="hidden px-2 py-2 text-sm font-semibold text-zinc-300 transition hover:text-white sm:inline"
+            >
+              Precios
+            </a>
             <Link
               href="/login"
               className="rounded-lg border border-white/[0.14] px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:border-pilotos-yellow/40 hover:text-white"
@@ -369,6 +375,13 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <Costura />
+
+      {/* ── PRECIOS ────────────────────────────────────────────
+          Despues de ver todo lo que hace y justo antes del cierre: quien
+          llega aqui ya sabe que le resuelve y solo le falta saber cuanto. */}
+      <Precios />
 
       <Costura />
 

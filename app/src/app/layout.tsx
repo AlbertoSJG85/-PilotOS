@@ -47,7 +47,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" className="dark">
+    // La portada añade la clase `pilotos-intro` al <html> antes de hidratar
+    // (intro del logo); sin esto React avisa de que la clase no coincide.
+    <html lang="es" className="dark" suppressHydrationWarning>
       <body className={`${montserrat.variable} antialiased`}>
         <ServiceWorkerRegistration />
         <InstallPrompt />
