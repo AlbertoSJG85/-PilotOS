@@ -1,5 +1,6 @@
 'use client';
 
+import { etiquetaEstadoParte } from '@/lib/utils/estados';
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -37,7 +38,7 @@ function DriverDashboardContent() {
       .finally(() => setLoading(false));
   }, [user?.conductor_id, desde, hasta]);
 
-  const totalBruto = partes.reduce((sum, p) => sum + p.ingreso_bruto, 0);
+  const totalBruto = partes.reduce((sum, p) => sum + Number(p.ingreso_bruto || 0), 0);
   const recentPartes = partes.slice(0, 5);
 
   if (loading) {
@@ -92,7 +93,7 @@ function DriverDashboardContent() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-zinc-100">{formatCurrency(p.ingreso_bruto)}</span>
-                    <Badge variant={p.estado === 'ENVIADO' ? 'info' : 'success'}>{p.estado}</Badge>
+                    <Badge variant={p.estado === 'ENVIADO' ? 'info' : 'success'}>{etiquetaEstadoParte(p.estado)}</Badge>
                   </div>
                 </Card>
               </Link>

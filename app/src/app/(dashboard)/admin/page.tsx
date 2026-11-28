@@ -1,5 +1,6 @@
 'use client';
 
+import { etiquetaEstadoParte } from '@/lib/utils/estados';
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -283,7 +284,7 @@ function AdminDashboardContent() {
                           <p className="font-semibold text-zinc-100">{formatCurrency(p.ingreso_bruto)}</p>
                           <p className="text-xs text-zinc-500 mt-0.5">{formatDate(p.fecha_trabajada)}</p>
                         </div>
-                        <Badge variant={p.estado === 'VALIDADO' ? 'success' : 'warning'}>{p.estado}</Badge>
+                        <Badge variant={p.estado === 'VALIDADO' ? 'success' : 'warning'}>{etiquetaEstadoParte(p.estado)}</Badge>
                       </div>
                       <div className="text-xs text-zinc-500 border-t border-zinc-800 pt-2 flex justify-between">
                         <span className="text-zinc-400">{p.conductor?.usuario?.nombre || 'Desconocido'}</span>

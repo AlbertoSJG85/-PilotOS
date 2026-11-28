@@ -1,5 +1,6 @@
 'use client';
 
+import { etiquetaEstadoParte } from '@/lib/utils/estados';
 import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/layout';
@@ -33,6 +34,8 @@ const ESTADO_OCR_LABEL: Record<string, { label: string; color: string }> = {
     PROCESADO: { label: 'Procesado', color: 'text-zinc-300' },
     ERROR:     { label: 'Error OCR', color: 'text-rose-400' },
     MANUAL:    { label: 'Manual', color: 'text-blue-400' },
+    COMPLETADO: { label: 'Leído', color: 'text-emerald-400' },
+    ILEGIBLE:  { label: 'No se pudo leer', color: 'text-amber-400' },
 };
 
 export default function DetallePartePage({ params }: { params: Promise<{ id: string }> }) {
@@ -161,7 +164,7 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                 description={parte.conductor?.usuario?.nombre || (tieneAsalariados ? 'Conductor desconocido' : '')}
             >
                 <Badge variant={ESTADO_BADGE[parte.estado] || 'default'} className="text-sm px-3 py-1">
-                    {parte.estado}
+                    {etiquetaEstadoParte(parte.estado)}
                 </Badge>
             </PageHeader>
 
@@ -208,9 +211,9 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                             </span>
                         </div>
                         <div className="flex justify-between pb-2">
-                            <span className="text-zinc-400">Varios ({parte.concepto_varios || ''})</span>
+                            <span className="text-zinc-400">Varios{parte.concepto_varios ? ` (${parte.concepto_varios})` : ''}</span>
                             <span className="text-rose-400">
-                                {parte.varios ? `-${formatCurrency(parte.varios)}` : '0.00 €'}
+                                {Number(parte.varios) > 0 ? `-${formatCurrency(Number(parte.varios))}` : formatCurrency(0)}
                             </span>
                         </div>
                     </div>
@@ -330,7 +333,7 @@ export default function DetallePartePage({ params }: { params: Promise<{ id: str
                                 const isRetrying = retryingId === doc.id;
                                 const isDeleting = deletingId === doc.id;
                                 const hasImgError = imgErrors.has(doc.id);
-                                const estadoOcr = ESTADO_OCR_LABEL[doc.estado_ocr || 'PENDIENTE'];
+                                const estadoOcr = ESTADO_OCR_LABEL[doc.estado_ocr || 'PENDIENTE'] ?? { label: doc.estado_ocr || 'Pendiente', color: 'text-zinc-400' };
                                 const datos = doc.ocr_datos_extraidos as any;
                                 const pTotal = datos?.parc_total ?? datos?.importe;
                                 const pDist = datos?.parc_dist_total;

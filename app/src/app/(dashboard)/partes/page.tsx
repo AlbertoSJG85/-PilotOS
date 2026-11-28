@@ -1,5 +1,6 @@
 'use client';
 
+import { etiquetaEstadoParte } from '@/lib/utils/estados';
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -72,7 +73,7 @@ function PartesPageContent() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-zinc-100">{formatDate(p.fecha_trabajada)}</span>
-                    <Badge variant={ESTADO_BADGE[p.estado] || 'default'}>{p.estado}</Badge>
+                    <Badge variant={ESTADO_BADGE[p.estado] || 'default'}>{etiquetaEstadoParte(p.estado)}</Badge>
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-sm text-zinc-400">
                     {p.vehiculo && <span>{p.vehiculo.matricula}</span>}

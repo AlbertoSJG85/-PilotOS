@@ -63,18 +63,18 @@ function InformesContent() {
             </div>
 
             <div className={`grid gap-4 grid-cols-2 ${tieneAsalariados ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
-                <StatCard title="Ingreso Bruto" value={formatCurrency(resumen.bruto)} subtitle={`${resumen.partes_count} partes procesados`} icon={DollarSign} />
+                <StatCard className="flex-col gap-2 sm:flex-row sm:gap-4" title="Ingreso Bruto" value={formatCurrency(resumen.bruto)} subtitle={`${resumen.partes_count} partes procesados`} icon={DollarSign} />
                 {tieneAsalariados && (
-                    <StatCard title="A Conductor" value={formatCurrency(resumen.parte_conductor)} subtitle="Liquidación asalariado" variant="warning" icon={Users} />
+                    <StatCard className="flex-col gap-2 sm:flex-row sm:gap-4" title="A Conductor" value={formatCurrency(resumen.parte_conductor)} subtitle="Liquidación asalariado" variant="warning" icon={Users} />
                 )}
-                <StatCard
+                <StatCard className="flex-col gap-2 sm:flex-row sm:gap-4"
                     title={tieneAsalariados ? 'A Propietario (Bruto)' : 'Para el Propietario'}
                     value={formatCurrency(resumen.parte_patron)}
                     subtitle="Antes de gastos"
                     variant="success"
                     icon={Wallet}
                 />
-                <StatCard title="Combustible" value={formatCurrency(resumen.combustible)} subtitle="Descontado en partes" variant="danger" icon={Fuel} />
+                <StatCard className="flex-col gap-2 sm:flex-row sm:gap-4" title="Combustible" value={formatCurrency(resumen.combustible)} subtitle="Descontado en partes" variant="danger" icon={Fuel} />
             </div>
 
             <div className="grid gap-6 md:grid-cols-2">

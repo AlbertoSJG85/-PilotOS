@@ -38,7 +38,7 @@ export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = 
       <div className="min-w-0">
         <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium">{title}</p>
         <p className={cn(
-          'text-2xl font-bold text-zinc-100 mt-0.5',
+          'text-xl sm:text-2xl font-bold text-zinc-100 mt-0.5 break-words',
           trend === 'up'   && 'text-emerald-400',
           trend === 'down' && 'text-red-400',
         )}>
