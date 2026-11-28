@@ -1,5 +1,6 @@
 'use client';
 
+import { etiquetaTipoMantenimiento } from '@/lib/utils/estados';
 import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/layout';
 import { Card, Badge, Skeleton, Button, Input } from '@/components/ui';
@@ -322,7 +323,7 @@ export default function MantenimientosPage() {
                           {!m.activo && <Badge variant="danger">INACTIVO</Badge>}
                         </div>
                         <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-zinc-500">
-                          <span>{m.catalogo.tipo}</span>
+                          <span>{etiquetaTipoMantenimiento(m.catalogo.tipo)}</span>
                           {m.proximo_km != null && <span>Próximo: {formatKm(m.proximo_km)}</span>}
                           {m.proxima_fecha && <span>Fecha: {formatDate(m.proxima_fecha)}</span>}
                           {/* Cuándo se hizo la última vez. Sin esto, uno hecho

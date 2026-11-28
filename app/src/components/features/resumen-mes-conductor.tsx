@@ -181,11 +181,14 @@ export function ResumenMesConductor({ partes, loading }: Props) {
           </div>
           <div className="flex h-24 items-end gap-1">
             {porDia.map((d, i) => (
-              <div key={i} className="flex flex-1 flex-col items-center gap-1" title={`Día ${d.dia}: ${formatCurrency(d.neto)}`}>
-                <div
-                  className="w-full rounded-t bg-pilot-lime/70 transition-all"
-                  style={{ height: `${netoMaximo > 0 ? Math.max(4, (d.neto / netoMaximo) * 100) : 4}%` }}
-                />
+              <div key={i} className="flex h-full flex-1 flex-col items-center gap-1" title={`Día ${d.dia}: ${formatCurrency(d.neto)}`}>
+                {/* La barra mide un % de este hueco: sin él la columna no tiene altura y el gráfico sale vacío. */}
+                <div className="flex w-full flex-1 items-end">
+                  <div
+                    className="w-full rounded-t bg-pilot-lime/70 transition-all"
+                    style={{ height: `${netoMaximo > 0 ? Math.max(4, (d.neto / netoMaximo) * 100) : 4}%` }}
+                  />
+                </div>
                 <span className="text-[9px] text-zinc-600">{d.dia}</span>
               </div>
             ))}

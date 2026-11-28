@@ -12,3 +12,13 @@ const ESTADO_PARTE: Record<string, string> = {
 export function etiquetaEstadoParte(estado: string): string {
   return ESTADO_PARTE[estado] ?? estado.replace(/_/g, ' ').toLowerCase();
 }
+
+const TIPO_MANTENIMIENTO: Record<string, string> = {
+  POR_FECHA: 'Por fecha',
+  POR_KILOMETRAJE: 'Por kilometraje',
+  SEGUN_USO: 'Según uso',
+};
+
+export function etiquetaTipoMantenimiento(tipo: string): string {
+  return TIPO_MANTENIMIENTO[tipo] ?? tipo.replace(/_/g, ' ').toLowerCase();
+}
